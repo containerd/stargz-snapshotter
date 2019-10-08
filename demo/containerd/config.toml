@@ -1,0 +1,6 @@
+plugin_dir = "/opt/containerd/plugins"
+[plugins]
+  [plugins.linux]
+    runtime_root = "/runtime_root"
+    plugin_dir = "/var/lib/containerd/plugins"
+    snapshotter = "overlayfs"
