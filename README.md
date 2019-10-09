@@ -1,5 +1,10 @@
 # Remote Snapshotter (with [stargz format introduced by CRFS](https://github.com/google/crfs))
 
+Related discussion of the snapshotter:
+- [Support remote snapshotter to speed up image pulling#3731@containerd](https://github.com/containerd/containerd/issues/3731)
+- [Support `Prepare` for existing snapshots in Snapshotter interface#2968@containerd](https://github.com/containerd/containerd/issues/2968)
+- [remote filesystem snapshotter#2943@containerd](https://github.com/containerd/containerd/issues/2943)
+
 This is an example implementation of a *remote snapshotter* which can be plugged into [patched version of containerd](https://github.com/ktock/containerd/tree/remote-snapshotter).
 By using this snapshotter, any converted but docker-compatible image can be pulled in several seconds even if the images are huge.
 ```
