@@ -82,8 +82,14 @@ $ docker exec -it containerd /bin/bash
 # ctr c rm test
 ```
 
-### TODO
+# TODO
 
-- [ ] containerd's remote snapshotter support
-- [ ] HTTPS and authentication support
-- [ ] READ optimization.
+## General issues:
+- [ ] Completing necessary patches on the containerd.
+- [ ] Contributing CRFS to make it more stable.
+
+## Snapshotter specific issues:
+- [ ] Resiliency: Ensure all mounts are available on every Prepare() and report erros when unavailable.
+- [ ] Auth: Implement auth-related things and the credential management(under the discussion on [#3731@containerd](https://github.com/containerd/containerd/issues/3731))
+- [ ] Performance: READ performance improvement
+- [ ] Availability: Especially on NW disconnection
