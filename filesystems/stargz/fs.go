@@ -38,6 +38,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,29 +60,43 @@ const (
 	stargzHardlinkType string = "hardlink" // ad-hoc
 )
 
+type Config struct {
+	Insecure []string `toml:"insecure"`
+}
+
 func init() {
 	plugin.Register(&plugin.Registration{
-		Type: fsplugin.RemoteFileSystemPlugin,
-		ID:   "stargz",
+		Type:   fsplugin.RemoteFileSystemPlugin,
+		Config: &Config{},
+		ID:     "stargz",
 		InitFn: func(ic *plugin.InitContext) (interface{}, error) {
-			return &filesystem{}, nil
+			config, ok := ic.Config.(*Config)
+			if !ok {
+				return nil, fmt.Errorf("invalid stargz configuration")
+			}
+
+			return &filesystem{config.Insecure}, nil
 		},
 	})
 }
 
-type filesystem struct{}
+type filesystem struct {
+	insecure []string
+}
 
 func (fs *filesystem) Mounter() fsplugin.Mounter {
-	return &mounter{}
+	return &mounter{
+		fs: fs,
+	}
 }
 
 type mounter struct {
 	root nodefs.Node
+	fs   *filesystem
 }
 
 // TODO: schema, auth config with config files.
 func (m *mounter) Prepare(ref, digest string) error {
-	schema := "http" // TODO
 
 	// Parse host, owner and imagetag.
 	refs := strings.Split(ref, "/")
@@ -94,7 +109,7 @@ func (m *mounter) Prepare(ref, digest string) error {
 		return fmt.Errorf("image tag hasn't been specified.")
 	}
 	image := imagetag[0]
-	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", schema, host, image, digest)
+	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", m.scheme(host), host, image, digest)
 
 	// See if the layer is served with a redirect(GCR specific).
 	//
@@ -179,6 +194,16 @@ func (m *mounter) Mount(target string) error {
 		return err
 	}
 	return nil
+}
+
+func (m *mounter) scheme(host string) string {
+	for _, i := range m.fs.insecure {
+		if ok, _ := regexp.Match(i, []byte(host)); ok {
+			return "http"
+		}
+	}
+
+	return "https"
 }
 
 // TODO: cache, prefetch
