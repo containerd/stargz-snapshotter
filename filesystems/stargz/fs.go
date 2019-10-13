@@ -62,7 +62,7 @@ const (
 func init() {
 	plugin.Register(&plugin.Registration{
 		Type: fsplugin.RemoteFileSystemPlugin,
-		ID:   "stargz-mounter",
+		ID:   "stargz",
 		InitFn: func(ic *plugin.InitContext) (interface{}, error) {
 			return &filesystem{}, nil
 		},
