@@ -66,7 +66,7 @@ import (
 func init() {
 	plugin.Register(&plugin.Registration{
 		Type: plugin.SnapshotPlugin,
-		ID:   "remote-snapshotter",
+		ID:   "remote",
 
 		// ==REMOTE SNAPSHOTTER SPECIFIC==
 		//

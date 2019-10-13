@@ -24,7 +24,7 @@ import (
 
 // We use RemoteFileSystemPlugin to mount unpacked remote layers as remote
 // snapshots.
-const RemoteFileSystemPlugin plugin.Type = "io.containerd.snapshotter.v1.remotefs"
+const RemoteFileSystemPlugin plugin.Type = "io.containerd.snapshotter.v1.remote"
 
 // FileSystem is a backing filesystem abstraction.
 //
