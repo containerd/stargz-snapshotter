@@ -4,3 +4,5 @@ plugin_dir = "/opt/containerd/plugins"
     runtime_root = "/runtime_root"
     plugin_dir = "/var/lib/containerd/plugins"
     snapshotter = "overlayfs"
+  [plugins.stargz]
+    insecure = ["127.0.0.1", "localhost", "registry2"]
