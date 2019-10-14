@@ -27,7 +27,6 @@ To achive that we are using [stargz format introduced by CRFS](https://github.co
 
 __NOTICE:__
 
-- Currently, this remote snapshotter supports only HTTP-reachable registry(not HTTPS). Supporting auth or HTTPS-related things are future works.
 - Put this repo on your GOPATH(${GOPATH}/src/github.com/ktock/remote-snapshotter).
 
 ### Build and run environment
@@ -45,7 +44,7 @@ $ docker exec -it containerd /bin/bash
 # (When run with cleanup) ls -1d /var/lib/containerd/io.containerd.snapshotter.v1.remote/snapshots/* | xargs -I{} echo "{}/fs" | xargs -I{} umount {} ; rm -rf /var/lib/containerd/* ; containerd --config=/etc/containerd/config.toml
 ```
 
-### Prepare stargz-formatted image on __HTTP-reachable__ registry(not HTTPS)
+### Prepare stargz-formatted image on a registry
 
 Use patched-version of [stargzify](https://github.com/google/crfs/tree/master/stargz/stargzify) command to convert the image.
 When it fails with DIGEST_INVALID error, retry it.
