@@ -19,13 +19,13 @@ RUN go get -u "github.com/containerd/continuity/fs" && \
     go get -u "github.com/pkg/errors" && \
     go get -u "golang.org/x/sys/unix"
 
-# patched version of stargzify(forcing stargzify to use HTTP for pushing).
+# get stargzify command to convert images to stargz format
 RUN mkdir -p $GOPATH/src/github.com/google && \
     cd $GOPATH/src/github.com/google && \
     git clone https://github.com/google/crfs.git && \
-    cd crfs/stargz/stargzify && \
-    sed -i -e "s/name.ParseReference(dst)/name.ParseReference(dst, name.Insecure)/g" \
-           stargzify.go && \
+    cd crfs && \
+    git checkout aea36382db7e217770fad450b6073b1fa16e0eaf && \
+    cd stargz/stargzify && \
     GO111MODULE=on go install
 
 # patched version of containerd(with remote-snapshotter support).
@@ -33,7 +33,8 @@ RUN mkdir -p $GOPATH/src/github.com/containerd && \
     cd $GOPATH/src/github.com/containerd && \
     git clone https://github.com/ktock/containerd && \
     cd containerd && \
-    git checkout remote-snapshotter
+    git checkout remote-snapshotter && \
+    git checkout 53110e516e5b4c0cd5b81f61c01fd5e33a25edef
 
 # helper for building and entrypoint
 COPY ./build.sh ./entrypoint.sh /
