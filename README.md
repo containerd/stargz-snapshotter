@@ -46,13 +46,11 @@ $ docker exec -it containerd /bin/bash
 
 ### Prepare stargz-formatted image on a registry
 
-Use patched-version of [stargzify](https://github.com/google/crfs/tree/master/stargz/stargzify) command to convert the image.
-When it fails with DIGEST_INVALID error, retry it.
-
+Use [stargzify](https://github.com/google/crfs/tree/master/stargz/stargzify) command to convert the image.
 On another terminal:
 ```
 $ docker exec -it containerd /bin/bash
-# stargzify ubuntu:18.04 registry2:5000/ubuntu:18.04
+# stargzify -insecure ubuntu:18.04 http://registry2:5000/ubuntu:18.04
 ```
 The converted image is still __compatible with a normal docker image__ so you can still pull and run it with a normal tools like docker.
 
