@@ -57,7 +57,6 @@ import (
 
 const (
 	blockSize          uint32 = 512
-	stargzHardlinkType string = "hardlink" // ad-hoc
 )
 
 type Config struct {
@@ -264,26 +263,11 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 	if !ok {
 		return nil, fuse.ENOENT
 	}
-	ce, ok = n.traverseLink(ce)
-	if !ok {
-		return nil, fuse.EIO
-	}
 	return n.Inode().NewChild(name, ce.Stat().IsDir(), &node{
 		Node: nodefs.NewDefaultNode(),
 		r:    n.r,
 		e:    ce,
 	}), entryToAttr(ce, out)
-}
-
-func (n *node) traverseLink(e *stargz.TOCEntry) (*stargz.TOCEntry, bool) {
-	if e.Type != stargzHardlinkType {
-		return e, true
-	}
-	ce, ok := n.r.Lookup(e.LinkName)
-	if !ok {
-		return nil, false
-	}
-	return n.traverseLink(ce)
 }
 
 func (n *node) Deletable() bool {
@@ -396,14 +380,7 @@ func (f *file) Read(buf []byte, off int64) (fuse.ReadResult, fuse.Status) {
 				return nil, fuse.EIO
 			}
 		}
-		if ce.ChunkOffset < off && off < ce.ChunkOffset+ce.ChunkSize {
-			roff := off - ce.ChunkOffset + int64(nr)
-			if roff > int64(len(data)) {
-				roff = int64(len(data))
-			}
-			data = data[off:]
-		}
-		n := copy(buf[nr:], data)
+		n := copy(buf[nr:], data[off+int64(nr)-ce.ChunkOffset:])
 		nr += n
 	}
 	buf = buf[:nr]
@@ -433,7 +410,10 @@ func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) (code fuse.Status) {
 	out.Mode = fileModeToSystemMode(fi.Mode())
 	out.Owner = fuse.Owner{Uid: uint32(e.Uid), Gid: uint32(e.Gid)}
 	out.Rdev = uint32(unix.Mkdev(uint32(e.DevMajor), uint32(e.DevMinor)))
-	out.Nlink = 1   // TODO
+	out.Nlink = uint32(e.NumLink)
+	if out.Nlink == 0 {
+		out.Nlink = 1 // zero "NumLink" means one.
+	}
 	out.Padding = 0 // TODO
 
 	return fuse.OK
