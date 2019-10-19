@@ -5,9 +5,19 @@ CONTAINERD_ROOT=/var/lib/containerd
 PLUGINS_DIR=/opt/containerd/plugins
 SNAPSHOT_NAME=remote
 
+function check {
+    if [ $? -ne 0 ] ; then
+        (>&2 echo "Failed: ${1}")
+        exit 1
+    fi
+}
+
 function prepare_plugin {
-    go build -buildmode=plugin -o "${PLUGINS_DIR}/remotesn-linux-amd64.so" "${GOPATH}/src/github.com/ktock/remote-snapshotter" || (echo "failed to prepare remote snapshotter plugin" && exit 1)
-    go build -buildmode=plugin -o "${PLUGINS_DIR}/stargzfs-linux-amd64.so" "${GOPATH}/src/github.com/ktock/remote-snapshotter/filesystems/stargz" || (echo "failed to prepare stargz filesystem plugin" && exit 1)
+    go build -buildmode=plugin -o "${PLUGINS_DIR}/remotesn-linux-amd64.so" "${GOPATH}/src/github.com/ktock/remote-snapshotter"
+    check "prepare remote snapshotter plugin"
+
+    go build -buildmode=plugin -o "${PLUGINS_DIR}/stargzfs-linux-amd64.so" "${GOPATH}/src/github.com/ktock/remote-snapshotter/filesystems/stargz"
+    check "prepare stargz filesystem plugin"
 }
 
 function kill_all_containerd {
