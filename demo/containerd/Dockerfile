@@ -15,32 +15,29 @@ ENV PATH=${GOPATH}/bin:${GOROOT}/bin:$PATH
 # remote snapshotter related packages.
 RUN go get -u "github.com/containerd/continuity/fs" && \
     go get -u "github.com/hanwen/go-fuse/fuse" && \
-    go get -u "github.com/opencontainers/runc" && \
     go get -u "github.com/pkg/errors" && \
     go get -u "golang.org/x/sys/unix"
 
 # get stargzify command to convert images to stargz format
-RUN mkdir -p $GOPATH/src/github.com/google && \
-    cd $GOPATH/src/github.com/google && \
-    git clone https://github.com/google/crfs.git && \
-    cd crfs && \
+RUN git clone https://github.com/google/crfs.git $GOPATH/src/github.com/google/crfs && \
+    cd $GOPATH/src/github.com/google/crfs && \
     git checkout aea36382db7e217770fad450b6073b1fa16e0eaf && \
-    cd stargz/stargzify && \
-    GO111MODULE=on go install
+    cd stargz/stargzify && GO111MODULE=on go install
 
 # patched version of containerd(with remote-snapshotter support).
-RUN mkdir -p $GOPATH/src/github.com/containerd && \
-    cd $GOPATH/src/github.com/containerd && \
-    git clone https://github.com/ktock/containerd && \
-    cd containerd && \
+RUN git clone https://github.com/opencontainers/runc $GOPATH/src/github.com/opencontainers/runc && \
+    cd $GOPATH/src/github.com/opencontainers/runc && \
+    git checkout d736ef14f0288d6993a1845745d6756cfc9ddd5a && \
+    make BUILDTAGS='seccomp apparmor' && make install && \
+    git clone https://github.com/ktock/containerd $GOPATH/src/github.com/containerd/containerd && \
+    cd $GOPATH/src/github.com/containerd/containerd && \
     git checkout remote-snapshotter && \
-    git checkout 53110e516e5b4c0cd5b81f61c01fd5e33a25edef
+    git checkout 53110e516e5b4c0cd5b81f61c01fd5e33a25edef && \
+    make && make install
 
 # helper for building and entrypoint
-COPY ./build.sh ./entrypoint.sh /
-RUN chmod 755 /build.sh && \
-    chmod 755 /entrypoint.sh && \
-    mkdir /etc/containerd
+COPY ./run.sh /
+RUN chmod 755 /run.sh &&  mkdir /etc/containerd
 COPY ./config.toml /etc/containerd/config.toml
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash"]

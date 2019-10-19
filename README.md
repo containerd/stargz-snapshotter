@@ -29,7 +29,7 @@ __NOTICE:__
 
 - Put this repo on your GOPATH(${GOPATH}/src/github.com/ktock/remote-snapshotter).
 
-### Build and run environment
+### Build and run the environment
 ```
 $ cd ${GOPATH}/src/github.com/ktock/remote-snapshotter/demo
 $ docker-compose build --build-arg HTTP_PROXY=$HTTP_PROXY \
@@ -39,17 +39,13 @@ $ docker-compose build --build-arg HTTP_PROXY=$HTTP_PROXY \
                        containerd
 $ docker-compose up -d
 $ docker exec -it containerd /bin/bash
-# /build.sh
-# containerd --config=/etc/containerd/config.toml
-# (When run with cleanup) ls -1d /var/lib/containerd/io.containerd.snapshotter.v1.remote/snapshots/* | xargs -I{} echo "{}/fs" | xargs -I{} umount {} ; rm -rf /var/lib/containerd/* ; containerd --config=/etc/containerd/config.toml
+(inside container) # /run.sh
 ```
 
 ### Prepare stargz-formatted image on a registry
 
 Use [stargzify](https://github.com/google/crfs/tree/master/stargz/stargzify) command to convert the image.
-On another terminal:
 ```
-$ docker exec -it containerd /bin/bash
 # stargzify -insecure ubuntu:18.04 http://registry2:5000/ubuntu:18.04
 ```
 The converted image is still __compatible with a normal docker image__ so you can still pull and run it with a normal tools like docker.
@@ -72,9 +68,7 @@ etc
 ```
 
 ### Cleanup
-On other terminal:
 ```
-$ docker exec -it containerd /bin/bash
 # ctr t kill -s 9 test
 # ctr c rm test
 ```
