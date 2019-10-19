@@ -25,8 +25,8 @@ function kill_all_containerd {
 }
 
 function cleanup_root {
-    ls -1d "${CONTAINERD_ROOT}/io.containerd.snapshotter.v1.${SNAPSHOT_NAME}/snapshots/*" | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
-    rm -rf "${CONTAINERD_ROOT}/*"
+    ls -1d "${CONTAINERD_ROOT}/io.containerd.snapshotter.v1.${SNAPSHOT_NAME}/snapshots/"* | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
+    rm -rf "${CONTAINERD_ROOT}/"*
 }
 
 echo "cleaning up the environment..."
