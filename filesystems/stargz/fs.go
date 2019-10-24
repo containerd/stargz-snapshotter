@@ -152,7 +152,12 @@ func (m *mounter) Prepare(ref, digest string) error {
 
 func (m *mounter) Mount(target string) error {
 	root := m.root
-	conn := nodefs.NewFileSystemConnector(root, nil)
+	conn := nodefs.NewFileSystemConnector(root, &nodefs.Options{
+		NegativeTimeout: 0,
+		AttrTimeout:     time.Second,
+		EntryTimeout:    time.Second,
+		Owner:           nil, // preserve owners.
+	})
 	server, err := fuse.NewServer(conn.RawFS(), target, &fuse.MountOptions{})
 	// server.SetDebug(true)
 	if err != nil {
