@@ -397,16 +397,10 @@ func (f *file) String() string {
 func (f *file) Read(buf []byte, off int64) (fuse.ReadResult, fuse.Status) {
 	n := f.n
 
-	// Read file-relative fixed-size chunks from the tar file,
-	// then return required part of the chunks.
-	remain := int64(n.e.Stat().Size()) - off
-	if remain < 0 {
-		remain = 0
-	}
 	nr := 0
 	for nr < len(buf) {
 		ce, ok := n.r.ChunkEntryForOffset(n.e.Name, off+int64(nr))
-		if !ok || !(ce.ChunkOffset <= off && off < ce.ChunkOffset+ce.ChunkSize) {
+		if !ok {
 			break
 		}
 		// TODO: cache
