@@ -73,6 +73,21 @@ etc
 # ctr c rm test
 ```
 
+## Authentication
+
+Remote-snapshotter supports private repository authentication powerd by [go-containerregistry](https://github.com/google/go-containerregistry) which supports `~/.docker/config.json`-based credential management.
+You can authenticate yourself with normal operations (i.e. `docker login` command) using `~/.docker/config.json`.
+
+In the example showed above, you can pull images from your private repository on the DockerHub:
+```
+# docker login
+(Enter username and password)
+# ctr image pull --user <username>:<password> --remote-snapshot --snapshotter remote index.docker.io/<your-repository>/ubuntu:18.04
+```
+The `--user` option is just for containerd's side which doesn't recognize `~/.docker/config.json`.
+Remote-snapshotter doesn't use credentials specified by this option but uses `~/.docker/config.json` instead.
+If you have no right to access the repository with credentials stored in `~/.docker/config.json`, this pull optration fallbacks to the normal one(i.e. overlayfs).
+
 # TODO
 
 ## General issues:
@@ -82,5 +97,7 @@ etc
 ## Snapshotter specific issues:
 - [ ] Resiliency: Ensure all mounts are available on every Prepare() and report erros when unavailable.
 - [ ] Auth: Implement auth-related things and the credential management(under the discussion on [#3731@containerd](https://github.com/containerd/containerd/issues/3731))
+  - [x] Implement private repository authentication using `~/.docker/config.json`.
+  - [ ] Deal with autentication failure at runtime(after mounted).
 - [ ] Performance: READ performance improvement
 - [ ] Availability: Especially on NW disconnection

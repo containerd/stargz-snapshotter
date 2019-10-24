@@ -48,15 +48,17 @@ import (
 
 	"github.com/containerd/containerd/plugin"
 	"github.com/google/crfs/stargz"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
-	"golang.org/x/sys/unix"
-
 	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
+	"golang.org/x/sys/unix"
 )
 
 const (
-	blockSize          uint32 = 512
+	blockSize = 512
 )
 
 type Config struct {
@@ -94,54 +96,23 @@ type mounter struct {
 	fs   *filesystem
 }
 
-// TODO: schema, auth config with config files.
 func (m *mounter) Prepare(ref, digest string) error {
 
-	// Parse host, owner and imagetag.
-	refs := strings.Split(ref, "/")
-	if len(refs) < 2 {
-		return fmt.Errorf("invalid reference format %s", ref)
+	// Resolve the reference and authenticate using ~/.docker/config.json.
+	url, tr, err := m.resolve(ref, digest)
+	if err != nil {
+		return fmt.Errorf("failed to resolve the reference")
 	}
-	host, path := refs[0], strings.Join(refs[1:], "/")
-	imagetag := strings.Split(path, ":")
-	if len(imagetag) <= 0 {
-		return fmt.Errorf("image tag hasn't been specified.")
-	}
-	image := imagetag[0]
-	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", m.scheme(host), host, image, digest)
 
-	// See if the layer is served with a redirect(GCR specific).
-	//
-	// GCR serves layer blobs with a redirect only on GET. So we get the
-	// destination Location of the layer using GET with Range to avoid fetching
-	// whole blob data.
+	// Get size information.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
 		return err
 	}
 	req.WithContext(ctx)
-	req.Header.Set("Range", "bytes=0-1")
-	res, err := http.DefaultTransport.RoundTrip(req) // NOT DefaultClient; don't want redirects
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode >= 400 {
-		return fmt.Errorf("invalid status code from the registry: %v", res.StatusCode)
-	}
-	if redir := res.Header.Get("Location"); redir != "" && res.StatusCode/100 == 3 {
-		url = redir
-	}
-
-	// Get size information
-	req, err = http.NewRequest("HEAD", url, nil)
-	if err != nil {
-		return err
-	}
-	req.WithContext(ctx)
-	res, err = http.DefaultTransport.RoundTrip(req) // NOT DefaultClient; don't want redirects
+	res, err := tr.RoundTrip(req)
 	if err != nil {
 		return err
 	}
@@ -161,7 +132,7 @@ func (m *mounter) Prepare(ref, digest string) error {
 	// Try to get stargz reader.
 	sr := io.NewSectionReader(&urlReaderAt{
 		url: url,
-		t:   http.DefaultTransport,
+		t:   tr,
 	}, 0, layerSize)
 	r, err := stargz.Open(sr)
 	if err != nil {
@@ -195,14 +166,74 @@ func (m *mounter) Mount(target string) error {
 	return nil
 }
 
-func (m *mounter) scheme(host string) string {
+func (m *mounter) isInsecure(host string) bool {
 	for _, i := range m.fs.insecure {
 		if ok, _ := regexp.Match(i, []byte(host)); ok {
-			return "http"
+			return true
 		}
 	}
 
-	return "https"
+	return false
+}
+
+func (m *mounter) resolve(ref, digest string) (url string, tr http.RoundTripper, err error) {
+
+	// Parse the reference and make an URL of the blob.
+	refs := strings.Split(ref, "/")
+	if len(refs) < 2 {
+		return "", nil, fmt.Errorf("invalid reference format %q", ref)
+	}
+	host, path := refs[0], strings.Join(refs[1:], "/")
+	imagetag := strings.Split(path, ":")
+	if len(imagetag) <= 0 {
+		return "", nil, fmt.Errorf("image tag hasn't been specified.")
+	}
+	image := imagetag[0]
+	scheme := "https"
+	if m.isInsecure(host) {
+		scheme = "http"
+	}
+	url = fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, image, digest)
+
+	// Authenticate.
+	var opts []name.Option
+	if m.isInsecure(host) {
+		opts = append(opts, name.Insecure)
+	}
+	nameref, err := name.ParseReference(ref, opts...)
+	if err != nil {
+		return "", nil, err
+	}
+	auth, err := authn.DefaultKeychain.Resolve(nameref.Context()) // Authn against the repository.
+	if err != nil {
+		return "", nil, err
+	}
+	tr, err = transport.New(nameref.Context().Registry, auth, http.DefaultTransport, []string{nameref.Scope(transport.PullScope)})
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Redirect if necessary(GCR specific).
+	//
+	// GCR serves layer blobs with a redirect only on GET. So we get the
+	// destination Location of the layer using GET with Range to avoid fetching
+	// whole blob data.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	req.WithContext(ctx)
+	req.Header.Set("Range", "bytes=0-1")
+	if res, err := tr.RoundTrip(req); err == nil && res.StatusCode < 400 {
+		defer res.Body.Close()
+		if redir := res.Header.Get("Location"); redir != "" && res.StatusCode/100 == 3 {
+			url = redir
+		}
+	}
+
+	return url, tr, nil
 }
 
 // TODO: cache, prefetch
