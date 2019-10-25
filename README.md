@@ -95,9 +95,8 @@ If you have no right to access the repository with credentials stored in `~/.doc
 - [ ] Contributing CRFS to make it more stable.
 
 ## Snapshotter specific issues:
-- [ ] Resiliency: Ensure all mounts are available on every Prepare() and report erros when unavailable.
-- [ ] Auth: Implement auth-related things and the credential management(under the discussion on [#3731@containerd](https://github.com/containerd/containerd/issues/3731))
-  - [x] Implement private repository authentication using `~/.docker/config.json`.
-  - [ ] Deal with autentication failure at runtime(after mounted).
+- [ ] Resiliency:
+  - [ ] Ensure all mounts are available on every Prepare() and report erros when unavailable.
+  - [ ] Deal with runtime problems(NW disconnection, authn failure and so on).
+- [x] Authn: Implement fundamental private repository authentication using `~/.docker/config.json`.
 - [ ] Performance: READ performance improvement
-- [ ] Availability: Especially on NW disconnection
