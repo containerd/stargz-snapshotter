@@ -316,6 +316,10 @@ func (n *node) OnForget() {
 }
 
 func (n *node) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
+	if mode == 0 { // Requires nothing.
+		return fuse.OK
+	}
+
 	var shift uint32
 	if uint32(n.e.Uid) == context.Owner.Uid {
 		shift = 0
