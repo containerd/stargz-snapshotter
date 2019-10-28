@@ -43,7 +43,7 @@ RUN go get -u "github.com/containerd/continuity/fs" && \
 # get stargzify command to convert images to stargz format
 RUN git clone https://github.com/google/crfs.git $GOPATH/src/github.com/google/crfs && \
     cd $GOPATH/src/github.com/google/crfs && \
-    git checkout fc80cddf5fb0b11a79af5d8a7e37920bd008e2ec && \
+    git checkout 578f64047964a8de782dcaeb21da935aaeed7a02 && \
     cd stargz/stargzify && GO111MODULE=on go install
 
 # patched version of containerd(with remote-snapshotter support).
