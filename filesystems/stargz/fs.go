@@ -322,11 +322,11 @@ func (n *node) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
 
 	var shift uint32
 	if uint32(n.e.Uid) == context.Owner.Uid {
-		shift = 0
+		shift = 6
 	} else if uint32(n.e.Gid) == context.Owner.Gid {
 		shift = 3
 	} else {
-		shift = 6
+		shift = 0
 	}
 	if mode<<shift&fileModeToSystemMode(n.e.Stat().Mode()) != 0 {
 		return fuse.OK
