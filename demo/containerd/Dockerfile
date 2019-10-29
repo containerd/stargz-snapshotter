@@ -58,8 +58,8 @@ RUN git clone https://github.com/opencontainers/runc $GOPATH/src/github.com/open
     make && make install
 
 # helper for building and entrypoint
-COPY ./run.sh /
-RUN chmod 755 /run.sh &&  mkdir /etc/containerd
+COPY ./run.sh ./config.sh /
+RUN chmod 755 /run.sh /config.sh && mkdir /etc/containerd
 COPY ./config.toml /etc/containerd/config.toml
 
 ENTRYPOINT ["/bin/bash"]
