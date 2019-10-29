@@ -6,3 +6,7 @@ plugin_dir = "/opt/containerd/plugins"
     snapshotter = "overlayfs"
   [plugins.stargz]
     insecure = ["127.0.0.1", "localhost", "registry2"]
+    cache_chunk_size = 50000
+    prefetch_size = 5000000
+    http_cache_type = "memory"
+    filesystem_cache_type = "memory"

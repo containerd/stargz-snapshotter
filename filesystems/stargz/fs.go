@@ -38,6 +38,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -53,16 +54,25 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
+	"github.com/ktock/remote-snapshotter/cache"
 	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
 	"golang.org/x/sys/unix"
 )
 
 const (
-	blockSize = 512
+	blockSize             = 512
+	defaultCacheChunkSize = 50000
+	defaultPrefetchSize   = 5000000
+	directoryCacheType    = "directory"
+	memoryCacheType       = "memory"
 )
 
 type Config struct {
-	Insecure []string `toml:"insecure"`
+	Insecure       []string `toml:"insecure"`
+	CacheChunkSize int64    `toml:"cache_chunk_size"`
+	PrefetchSize   int64    `toml:"prefetch_size"`
+	HTTPCacheType  string   `toml:"http_cache_type"`
+	FSCacheType    string   `toml:"filesystem_cache_type"`
 }
 
 func init() {
@@ -75,14 +85,43 @@ func init() {
 			if !ok {
 				return nil, fmt.Errorf("invalid stargz configuration")
 			}
+			ic.Meta.Exports["root"] = ic.Root
 
-			return &filesystem{config.Insecure}, nil
+			return NewFilesystem(ic.Root, config)
 		},
 	})
 }
 
+func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
+	fs = &filesystem{
+		insecure:       config.Insecure,
+		cacheChunkSize: config.CacheChunkSize,
+		prefetchSize:   config.PrefetchSize,
+	}
+	if fs.cacheChunkSize == 0 {
+		fs.cacheChunkSize = defaultCacheChunkSize
+	}
+	if fs.prefetchSize == 0 {
+		fs.prefetchSize = defaultPrefetchSize
+	}
+	fs.httpCache, err = getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"))
+	if err != nil {
+		return nil, err
+	}
+	fs.fsCache, err = getCache(config.FSCacheType, filepath.Join(root, "fscache"))
+	if err != nil {
+		return nil, err
+	}
+
+	return
+}
+
 type filesystem struct {
-	insecure []string
+	insecure       []string
+	cacheChunkSize int64
+	prefetchSize   int64
+	httpCache      cache.BlobCache
+	fsCache        cache.BlobCache
 }
 
 func (fs *filesystem) Mounter() fsplugin.Mounter {
@@ -131,8 +170,11 @@ func (m *mounter) Prepare(ref, digest string) error {
 
 	// Try to get stargz reader.
 	sr := io.NewSectionReader(&urlReaderAt{
-		url: url,
-		t:   tr,
+		url:       url,
+		t:         tr,
+		size:      layerSize,
+		chunkSize: m.fs.cacheChunkSize,
+		cache:     m.fs.httpCache,
 	}, 0, layerSize)
 	r, err := stargz.Open(sr)
 	if err != nil {
@@ -142,9 +184,17 @@ func (m *mounter) Prepare(ref, digest string) error {
 	if !ok {
 		return fmt.Errorf("failed to get a TOCEntry of the root node")
 	}
+	gr := &stargzReader{
+		digest: digest,
+		r:      r,
+		cache:  m.fs.fsCache,
+	}
+	if err := gr.prefetch(sr, m.fs.prefetchSize); err != nil {
+		return err
+	}
 	m.root = &node{
 		Node: nodefs.NewDefaultNode(),
-		r:    r,
+		gr:   gr,
 		e:    root,
 	}
 	return nil
@@ -241,40 +291,11 @@ func (m *mounter) resolve(ref, digest string) (url string, tr http.RoundTripper,
 	return url, tr, nil
 }
 
-// TODO: cache, prefetch
-type urlReaderAt struct {
-	url string
-	t   http.RoundTripper
-}
-
-func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequest("GET", r.url, nil)
-	if err != nil {
-		return 0, err
-	}
-	req = req.WithContext(ctx)
-	rangeHeader := fmt.Sprintf("bytes=%d-%d", offset, offset+int64(len(p))-1)
-	req.Header.Add("Range", rangeHeader)
-	req.Header.Add("Accept-Encoding", "identity")
-	req.Close = false
-	res, err := r.t.RoundTrip(req) // NOT DefaultClient; don't want redirects
-	if err != nil {
-		return 0, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		return 0, fmt.Errorf("unexpected status code on %s: %v", r.url, res.Status)
-	}
-	return io.ReadFull(res.Body, p)
-}
-
 // filesystem nodes
 type node struct {
 	nodefs.Node
-	r *stargz.Reader
-	e *stargz.TOCEntry
+	gr *stargzReader
+	e  *stargz.TOCEntry
 }
 
 func (n *node) OnMount(conn *nodefs.FileSystemConnector) {
@@ -301,7 +322,7 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 	}
 	return n.Inode().NewChild(name, ce.Stat().IsDir(), &node{
 		Node: nodefs.NewDefaultNode(),
-		r:    n.r,
+		gr:   n.gr,
 		e:    ce,
 	}), entryToAttr(ce, out)
 }
@@ -343,7 +364,7 @@ func (n *node) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
 }
 
 func (n *node) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Status) {
-	sr, err := n.r.OpenFile(n.e.Name)
+	ra, err := n.gr.openFile(n.e.Name)
 	if err != nil {
 		return nil, fuse.EIO
 	}
@@ -351,7 +372,7 @@ func (n *node) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Stat
 		File: nodefs.NewDefaultFile(),
 		n:    n,
 		e:    n.e,
-		sr:   sr,
+		ra:   ra,
 	}, fuse.OK
 }
 
@@ -394,7 +415,7 @@ type file struct {
 	nodefs.File
 	n  *node
 	e  *stargz.TOCEntry
-	sr *io.SectionReader
+	ra io.ReaderAt
 }
 
 func (f *file) String() string {
@@ -402,26 +423,9 @@ func (f *file) String() string {
 }
 
 func (f *file) Read(buf []byte, off int64) (fuse.ReadResult, fuse.Status) {
-	n := f.n
-
-	nr := 0
-	for nr < len(buf) {
-		ce, ok := n.r.ChunkEntryForOffset(n.e.Name, off+int64(nr))
-		if !ok {
-			break
-		}
-		// TODO: cache
-		data := make([]byte, int(ce.ChunkSize))
-		if _, err := f.sr.ReadAt(data, ce.ChunkOffset); err != nil {
-			if err != io.EOF {
-				return nil, fuse.EIO
-			}
-		}
-		n := copy(buf[nr:], data[off+int64(nr)-ce.ChunkOffset:])
-		nr += n
+	if _, err := f.ra.ReadAt(buf, off); err != nil {
+		return nil, fuse.EIO
 	}
-	buf = buf[:nr]
-
 	return fuse.ReadResultData(buf), fuse.OK
 }
 
@@ -487,4 +491,15 @@ func fileModeToSystemMode(m os.FileMode) uint32 {
 	}
 
 	return sm
+}
+
+func getCache(ctype, dir string) (cache.BlobCache, error) {
+	switch ctype {
+	case directoryCacheType:
+		return cache.NewDirectoryCache(dir)
+	case memoryCacheType:
+		return cache.NewMemoryCache(), nil
+	default:
+		return cache.NewNopCache(), nil
+	}
 }
