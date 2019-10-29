@@ -316,6 +316,9 @@ func (n *node) OnForget() {
 }
 
 func (n *node) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
+	if context.Owner.Uid == 0 { // root can do anything.
+		return fuse.OK
+	}
 	if mode == 0 { // Requires nothing.
 		return fuse.OK
 	}
