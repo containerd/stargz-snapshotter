@@ -65,6 +65,8 @@ const (
 	defaultPrefetchSize   = 5000000
 	directoryCacheType    = "directory"
 	memoryCacheType       = "memory"
+	whiteoutPrefix        = ".wh."
+	whiteoutOpaqueDir     = whiteoutPrefix + whiteoutPrefix + ".opq"
 )
 
 type Config struct {
@@ -294,8 +296,9 @@ func (m *mounter) resolve(ref, digest string) (url string, tr http.RoundTripper,
 // filesystem nodes
 type node struct {
 	nodefs.Node
-	gr *stargzReader
-	e  *stargz.TOCEntry
+	gr       *stargzReader
+	e        *stargz.TOCEntry
+	addXattr map[string][]byte
 }
 
 func (n *node) OnMount(conn *nodefs.FileSystemConnector) {
@@ -316,14 +319,38 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 		return c, fuse.OK
 	}
 
-	ce, ok := n.e.LookupChild(name)
-	if !ok {
+	// We reserve an opaque whiteout name and don't want to show it.
+	if name == whiteoutOpaqueDir {
 		return nil, fuse.ENOENT
 	}
+
+	// If this entry exists as both of a whiteout file and a normal entry,
+	// we simply override(=delete+create) it by prioritizing the normal entry.
+	ce, ok := n.e.LookupChild(name)
+	if !ok {
+		if wh, ok := n.e.LookupChild(fmt.Sprintf("%s%s", whiteoutPrefix, name)); ok {
+
+			// This entry is a whiteout file.
+			return n.Inode().NewChild(name, false, &whiteout{
+				Node: nodefs.NewDefaultNode(),
+				oe:   wh,
+			}), entryToWhAttr(wh, out)
+		}
+		return nil, fuse.ENOENT
+	}
+	var addXattr map[string][]byte
+	if _, ok := ce.LookupChild(whiteoutOpaqueDir); ok {
+
+		// This entry is an opaque directory so make it recognizable for overlayfs.
+		addXattr = map[string][]byte{
+			"trusted.overlay.opaque": []byte("y"),
+		}
+	}
 	return n.Inode().NewChild(name, ce.Stat().IsDir(), &node{
-		Node: nodefs.NewDefaultNode(),
-		gr:   n.gr,
-		e:    ce,
+		Node:     nodefs.NewDefaultNode(),
+		gr:       n.gr,
+		e:        ce,
+		addXattr: addXattr,
 	}), entryToAttr(ce, out)
 }
 
@@ -378,7 +405,26 @@ func (n *node) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Stat
 
 func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	var ents []fuse.DirEntry
+	normal := map[string]struct{}{}
 	n.e.ForeachChild(func(baseName string, ent *stargz.TOCEntry) bool {
+
+		// We reserve an opaque whiteout name and don't want to show it.
+		if baseName == whiteoutOpaqueDir {
+			return true
+		}
+		if strings.HasPrefix(baseName, whiteoutPrefix) {
+
+			// This entry is a whiteout file.
+			ents = append(ents, fuse.DirEntry{
+				Mode: syscall.S_IFCHR,
+				Name: baseName,
+				Ino:  inodeOfEnt(ent),
+			})
+			return true
+		}
+
+		// This is a normal entry.
+		normal[baseName] = struct{}{}
 		ents = append(ents, fuse.DirEntry{
 			Mode: fileModeToSystemMode(ent.Stat().Mode()),
 			Name: baseName,
@@ -386,6 +432,26 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		})
 		return true
 	})
+
+	// Reorganize the the entry considering whiteout info.
+	ne := 0
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name, whiteoutPrefix) {
+			if _, ok := normal[e.Name[len(whiteoutPrefix):]]; ok {
+
+				// This entry exists as both of a whiteout file and a normal entry
+				// so we simply override(=delete+create) the entry by prioritizing
+				// the normal entry.
+				continue
+			}
+
+			// Remove the prefix to make it overlayfs-compliant.
+			e.Name = e.Name[len(whiteoutPrefix):]
+		}
+		ents[ne] = e
+		ne++
+	}
+	ents = ents[:ne]
 	sort.Slice(ents, func(i, j int) bool { return ents[i].Name < ents[j].Name })
 	return ents, fuse.OK
 }
@@ -395,15 +461,20 @@ func (n *node) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) 
 }
 
 func (n *node) GetXAttr(attribute string, context *fuse.Context) (data []byte, code fuse.Status) {
-	v, ok := n.e.Xattrs[attribute]
-	if !ok {
-		return nil, fuse.ENOATTR
+	if v, ok := n.e.Xattrs[attribute]; ok {
+		return v, fuse.OK
 	}
-	return v, fuse.OK
+	if v, ok := n.addXattr[attribute]; ok {
+		return v, fuse.OK
+	}
+	return nil, fuse.ENOATTR
 }
 
 func (n *node) ListXAttr(ctx *fuse.Context) (attrs []string, code fuse.Status) {
 	for k, _ := range n.e.Xattrs {
+		attrs = append(attrs, k)
+	}
+	for k, _ := range n.addXattr {
 		attrs = append(attrs, k)
 	}
 	return attrs, fuse.OK
@@ -446,6 +517,32 @@ func (f *file) Read(buf []byte, off int64) (fuse.ReadResult, fuse.Status) {
 
 func (f *file) GetAttr(out *fuse.Attr) fuse.Status {
 	return entryToAttr(f.e, out)
+}
+
+type whiteout struct {
+	nodefs.Node
+	oe *stargz.TOCEntry
+}
+
+func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) (code fuse.Status) {
+	return entryToWhAttr(w.oe, out)
+}
+
+func entryToWhAttr(e *stargz.TOCEntry, out *fuse.Attr) (code fuse.Status) {
+	fi := e.Stat()
+	out.Ino = inodeOfEnt(e)
+	out.Size = 0
+	out.Blksize = blockSize
+	out.Blocks = 0
+	out.Mtime = uint64(fi.ModTime().Unix())
+	out.Mtimensec = uint32(fi.ModTime().UnixNano())
+	out.Mode = syscall.S_IFCHR
+	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
+	out.Rdev = uint32(unix.Mkdev(0, 0))
+	out.Nlink = 1
+	out.Padding = 0 // TODO
+
+	return fuse.OK
 }
 
 func inodeOfEnt(e *stargz.TOCEntry) uint64 {
