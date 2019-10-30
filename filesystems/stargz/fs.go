@@ -394,6 +394,21 @@ func (n *node) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) 
 	return entryToAttr(n.e, out)
 }
 
+func (n *node) GetXAttr(attribute string, context *fuse.Context) (data []byte, code fuse.Status) {
+	v, ok := n.e.Xattrs[attribute]
+	if !ok {
+		return nil, fuse.ENOATTR
+	}
+	return v, fuse.OK
+}
+
+func (n *node) ListXAttr(ctx *fuse.Context) (attrs []string, code fuse.Status) {
+	for k, _ := range n.e.Xattrs {
+		attrs = append(attrs, k)
+	}
+	return attrs, fuse.OK
+}
+
 func (n *node) StatFs() *fuse.StatfsOut {
 
 	// http://man7.org/linux/man-pages/man2/statfs.2.html
