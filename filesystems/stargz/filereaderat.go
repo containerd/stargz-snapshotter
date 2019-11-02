@@ -37,9 +37,9 @@ type fileReaderAt struct {
 	sr   *io.SectionReader
 }
 
+// ReadAt reads chunks from the stargz file with trying to fetch as many chunks
+// as possible from the cache.
 func (fr *fileReaderAt) ReadAt(p []byte, offset int64) (int, error) {
-	// Read file-relative fixed-size chunks from the tar file,
-	// then return required part of the chunks.
 	nr := 0
 	for nr < len(p) {
 		ce, ok := fr.gr.r.ChunkEntryForOffset(fr.name, offset+int64(nr))
@@ -47,7 +47,7 @@ func (fr *fileReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 			break
 		}
 		data := make([]byte, int(ce.ChunkSize))
-		id := fr.gr.genID(fr.name, ce.ChunkOffset, ce.ChunkSize)
+		id := fr.gr.genID(ce)
 		if n, err := fr.gr.cache.Fetch(id, data); err != nil || n != int(ce.ChunkSize) {
 			if _, err := fr.sr.ReadAt(data, ce.ChunkOffset); err != nil {
 				if err != io.EOF {
@@ -112,26 +112,24 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) error {
 		payload, err := ioutil.ReadAll(tr)
 		if err == io.ErrUnexpectedEOF {
 			break
-		}
-		if err != nil {
+		} else if err != nil {
 			return fmt.Errorf("failed to read tar payload %v", err)
 		}
-		nr := int64(0)
+		var nr int64
 		for nr < h.Size {
 			ce, ok := gr.r.ChunkEntryForOffset(h.Name, nr)
 			if !ok {
 				break
 			}
-			id := gr.genID(h.Name, ce.ChunkOffset, ce.ChunkSize)
-			gr.cache.Add(id, payload[ce.ChunkOffset:ce.ChunkOffset+ce.ChunkSize])
+			gr.cache.Add(gr.genID(ce), payload[ce.ChunkOffset:ce.ChunkOffset+ce.ChunkSize])
 			nr += ce.ChunkSize
 		}
 	}
 	return nil
 }
 
-func (gr *stargzReader) genID(name string, offset, size int64) string {
+func (gr *stargzReader) genID(ce *stargz.TOCEntry) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%s-%d-%d",
-		gr.digest, name, offset, size)))
+		gr.digest, ce.Name, ce.ChunkOffset, ce.ChunkSize)))
 	return fmt.Sprintf("%x", sum)
 }

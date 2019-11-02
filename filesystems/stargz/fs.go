@@ -67,6 +67,8 @@ const (
 	memoryCacheType       = "memory"
 	whiteoutPrefix        = ".wh."
 	whiteoutOpaqueDir     = whiteoutPrefix + whiteoutPrefix + ".opq"
+	opaqueXattr           = "trusted.overlay.opaque"
+	opaqueXattrValue      = "y"
 )
 
 type Config struct {
@@ -92,6 +94,18 @@ func init() {
 			return NewFilesystem(ic.Root, config)
 		},
 	})
+}
+
+// getCache gets a cache corresponding to specified type.
+func getCache(ctype, dir string) (cache.BlobCache, error) {
+	switch ctype {
+	case directoryCacheType:
+		return cache.NewDirectoryCache(dir)
+	case memoryCacheType:
+		return cache.NewMemoryCache(), nil
+	default:
+		return cache.NewNopCache(), nil
+	}
 }
 
 func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
@@ -138,53 +152,38 @@ type mounter struct {
 }
 
 func (m *mounter) Prepare(ref, digest string) error {
-
-	// Resolve the reference and authenticate using ~/.docker/config.json.
-	url, tr, err := m.resolve(ref, digest)
+	host, url, err := m.parseReference(ref, digest)
 	if err != nil {
-		return fmt.Errorf("failed to resolve the reference")
+		return fmt.Errorf("failed to parse the reference %q: %v", ref, err)
+	}
+
+	// authenticate to the registry using ~/.docker/config.json.
+	url, tr, err := m.resolve(host, url, ref)
+	if err != nil {
+		return fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
 	}
 
 	// Get size information.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequest("HEAD", url, nil)
+	size, err := m.getSize(tr, url)
 	if err != nil {
-		return err
-	}
-	req.WithContext(ctx)
-	res, err := tr.RoundTrip(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to request size using HEAD")
-	}
-	sizeRaw := res.Header.Get("Content-Length")
-	if sizeRaw == "" {
-		return fmt.Errorf("failed to get size information through Content-Length")
-	}
-	layerSize, err := strconv.ParseInt(sizeRaw, 10, 64)
-	if err != nil {
-		return fmt.Errorf("failed to parse size")
+		return fmt.Errorf("failed to get layer size information from %q: %v", url, err)
 	}
 
-	// Try to get stargz reader.
+	// Construct filesystem from the remote stargz layer.
 	sr := io.NewSectionReader(&urlReaderAt{
 		url:       url,
 		t:         tr,
-		size:      layerSize,
+		size:      size,
 		chunkSize: m.fs.cacheChunkSize,
 		cache:     m.fs.httpCache,
-	}, 0, layerSize)
+	}, 0, size)
 	r, err := stargz.Open(sr)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse stargz at %q: %v", url, err)
 	}
 	root, ok := r.Lookup("")
 	if !ok {
-		return fmt.Errorf("failed to get a TOCEntry of the root node")
+		return fmt.Errorf("failed to get a TOCEntry of the root node of layer %q", url)
 	}
 	gr := &stargzReader{
 		digest: digest,
@@ -211,18 +210,33 @@ func (m *mounter) Mount(target string) error {
 		Owner:           nil, // preserve owners.
 	})
 	server, err := fuse.NewServer(conn.RawFS(), target, &fuse.MountOptions{})
-	// server.SetDebug(true)
 	if err != nil {
-		return fmt.Errorf("Mount failed: %v\n", err)
+		return fmt.Errorf("failed to make server: %v", err)
 	}
+	// server.SetDebug(true) // TODO: make configurable with /etc/containerd/config.toml
 	go server.Serve()
-	err = server.WaitMount()
-	if err != nil {
-		return err
-	}
-	return nil
+	return server.WaitMount()
 }
 
+// parseReference parses reference and digest then makes an URL of the blob.
+// "ref" must be formatted in <host>/<image>[:<tag>] (<tag> is optional).
+// "diegest" is an OCI's sha256 digest and must be prefixed by "sha256:".
+func (m *mounter) parseReference(ref, digest string) (host string, url string, err error) {
+	refs := strings.Split(ref, "/")
+	if len(refs) < 2 {
+		err = fmt.Errorf("reference must contain names of host and image but got %q", ref)
+		return
+	}
+	scheme, host, image := "https", refs[0], strings.Split(strings.Join(refs[1:], "/"), ":")[0]
+	if m.isInsecure(host) {
+		scheme = "http"
+	}
+	return host, fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, image, digest), nil
+}
+
+// isInsecure checks if the specified host is registerd as "insecure" registry
+// in this filesystem. If so, this filesystem treat the host in a proper way
+// e.g. using HTTP instead of HTTPS.
 func (m *mounter) isInsecure(host string) bool {
 	for _, i := range m.fs.insecure {
 		if ok, _ := regexp.Match(i, []byte(host)); ok {
@@ -233,53 +247,36 @@ func (m *mounter) isInsecure(host string) bool {
 	return false
 }
 
-func (m *mounter) resolve(ref, digest string) (url string, tr http.RoundTripper, err error) {
-
-	// Parse the reference and make an URL of the blob.
-	refs := strings.Split(ref, "/")
-	if len(refs) < 2 {
-		return "", nil, fmt.Errorf("invalid reference format %q", ref)
-	}
-	host, path := refs[0], strings.Join(refs[1:], "/")
-	imagetag := strings.Split(path, ":")
-	if len(imagetag) <= 0 {
-		return "", nil, fmt.Errorf("image tag hasn't been specified.")
-	}
-	image := imagetag[0]
-	scheme := "https"
-	if m.isInsecure(host) {
-		scheme = "http"
-	}
-	url = fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, image, digest)
-
-	// Authenticate.
+// resolve resolves specified url and ref by authenticating and dealing with
+// redirection in a proper way. We use `~/.docker/config.json` for authn.
+func (m *mounter) resolve(host, url, ref string) (string, http.RoundTripper, error) {
 	var opts []name.Option
 	if m.isInsecure(host) {
 		opts = append(opts, name.Insecure)
 	}
 	nameref, err := name.ParseReference(ref, opts...)
 	if err != nil {
-		return "", nil, err
-	}
-	auth, err := authn.DefaultKeychain.Resolve(nameref.Context()) // Authn against the repository.
-	if err != nil {
-		return "", nil, err
-	}
-	tr, err = transport.New(nameref.Context().Registry, auth, http.DefaultTransport, []string{nameref.Scope(transport.PullScope)})
-	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("failed to parse reference %q: %v", ref, err)
 	}
 
-	// Redirect if necessary(GCR specific).
-	//
-	// GCR serves layer blobs with a redirect only on GET. So we get the
-	// destination Location of the layer using GET with Range to avoid fetching
-	// whole blob data.
+	// Authn against the repository using `~/.docker/config.json`
+	auth, err := authn.DefaultKeychain.Resolve(nameref.Context())
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
+	}
+	tr, err := transport.New(nameref.Context().Registry, auth, http.DefaultTransport, []string{nameref.Scope(transport.PullScope)})
+	if err != nil {
+		return "", nil, fmt.Errorf("faild to get transport of %q: %v", ref, err)
+	}
+
+	// Redirect if necessary(GCR specific). GCR serves layer blobs with a redirect
+	// only on GET. So we get the destination Location of the layer using GET with
+	// Range to avoid fetching whole blob data.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("failed to request to the registry of %q: %v", url, err)
 	}
 	req.WithContext(ctx)
 	req.Header.Set("Range", "bytes=0-1")
@@ -293,20 +290,73 @@ func (m *mounter) resolve(ref, digest string) (url string, tr http.RoundTripper,
 	return url, tr, nil
 }
 
-// filesystem nodes
+// getSize fetches the size info of the specified layer by requesting HEAD.
+func (m *mounter) getSize(tr http.RoundTripper, url string) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequest("HEAD", url, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.WithContext(ctx)
+	res, err := tr.RoundTrip(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("failed HEAD request with code %v", res.StatusCode)
+	}
+	return strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
+}
+
+// node is a filesystem inode abstruction which implements node in go-fuse.
 type node struct {
 	nodefs.Node
-	gr       *stargzReader
-	e        *stargz.TOCEntry
-	addXattr map[string][]byte
+	gr     *stargzReader
+	e      *stargz.TOCEntry
+	opaque bool // true if this node is an overlayfs opaque directory
 }
 
-func (n *node) OnMount(conn *nodefs.FileSystemConnector) {
-	// Do nothing.
-}
+func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
+	var ents []fuse.DirEntry
+	whiteouts := map[string]*stargz.TOCEntry{}
+	normalEnts := map[string]bool{}
+	n.e.ForeachChild(func(baseName string, ent *stargz.TOCEntry) bool {
 
-func (n *node) OnUnmount() {
-	// Do nothing.
+		// We don't want to show whiteouts.
+		if strings.HasPrefix(baseName, whiteoutPrefix) {
+			if baseName == whiteoutOpaqueDir {
+				return true
+			}
+			// Add the overlayfs-compiant whiteout later.
+			whiteouts[baseName] = ent
+			return true
+		}
+
+		// This is a normal entry.
+		normalEnts[baseName] = true
+		ents = append(ents, fuse.DirEntry{
+			Mode: fileModeToSystemMode(ent.Stat().Mode()),
+			Name: baseName,
+			Ino:  inodeOfEnt(ent),
+		})
+		return true
+	})
+
+	// Append whiteouts if no entry replaces the target entry in the lower layer.
+	for w, ent := range whiteouts {
+		if ok := normalEnts[w[len(whiteoutPrefix):]]; !ok {
+			ents = append(ents, fuse.DirEntry{
+				Mode: syscall.S_IFCHR,
+				Name: w[len(whiteoutPrefix):],
+				Ino:  inodeOfEnt(ent),
+			})
+
+		}
+	}
+	sort.Slice(ents, func(i, j int) bool { return ents[i].Name < ents[j].Name })
+	return ents, fuse.OK
 }
 
 func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*nodefs.Inode, fuse.Status) {
@@ -319,18 +369,15 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 		return c, fuse.OK
 	}
 
-	// We reserve an opaque whiteout name and don't want to show it.
-	if name == whiteoutOpaqueDir {
+	// We don't want to show whiteouts.
+	if strings.HasPrefix(name, whiteoutPrefix) {
 		return nil, fuse.ENOENT
 	}
 
-	// If this entry exists as both of a whiteout file and a normal entry,
-	// we simply override(=delete+create) it by prioritizing the normal entry.
 	ce, ok := n.e.LookupChild(name)
 	if !ok {
+		// If the entry exists as a whiteout, show an overlayfs-styled whiteout node.
 		if wh, ok := n.e.LookupChild(fmt.Sprintf("%s%s", whiteoutPrefix, name)); ok {
-
-			// This entry is a whiteout file.
 			return n.Inode().NewChild(name, false, &whiteout{
 				Node: nodefs.NewDefaultNode(),
 				oe:   wh,
@@ -338,36 +385,26 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 		}
 		return nil, fuse.ENOENT
 	}
-	var addXattr map[string][]byte
+	var opaque bool
 	if _, ok := ce.LookupChild(whiteoutOpaqueDir); ok {
-
 		// This entry is an opaque directory so make it recognizable for overlayfs.
-		addXattr = map[string][]byte{
-			"trusted.overlay.opaque": []byte("y"),
-		}
+		opaque = true
 	}
 	return n.Inode().NewChild(name, ce.Stat().IsDir(), &node{
-		Node:     nodefs.NewDefaultNode(),
-		gr:       n.gr,
-		e:        ce,
-		addXattr: addXattr,
+		Node:   nodefs.NewDefaultNode(),
+		gr:     n.gr,
+		e:      ce,
+		opaque: opaque,
 	}), entryToAttr(ce, out)
 }
 
-func (n *node) Deletable() bool {
-	// read-only filesystem
-	return false
-}
-
-func (n *node) OnForget() {
-	// Do nothing.
-}
-
-func (n *node) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
-	if context.Owner.Uid == 0 { // root can do anything.
+func (n *node) Access(mode uint32, context *fuse.Context) fuse.Status {
+	if context.Owner.Uid == 0 {
+		// root can do anything.
 		return fuse.OK
 	}
-	if mode == 0 { // Requires nothing.
+	if mode == 0 {
+		// Requires nothing.
 		return fuse.OK
 	}
 
@@ -386,10 +423,6 @@ func (n *node) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
 	return fuse.EPERM
 }
 
-func (n *node) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
-	return []byte(n.e.LinkName), fuse.OK
-}
-
 func (n *node) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Status) {
 	ra, err := n.gr.openFile(n.e.Name)
 	if err != nil {
@@ -403,81 +436,38 @@ func (n *node) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Stat
 	}, fuse.OK
 }
 
-func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
-	var ents []fuse.DirEntry
-	normal := map[string]struct{}{}
-	n.e.ForeachChild(func(baseName string, ent *stargz.TOCEntry) bool {
-
-		// We reserve an opaque whiteout name and don't want to show it.
-		if baseName == whiteoutOpaqueDir {
-			return true
-		}
-		if strings.HasPrefix(baseName, whiteoutPrefix) {
-
-			// This entry is a whiteout file.
-			ents = append(ents, fuse.DirEntry{
-				Mode: syscall.S_IFCHR,
-				Name: baseName,
-				Ino:  inodeOfEnt(ent),
-			})
-			return true
-		}
-
-		// This is a normal entry.
-		normal[baseName] = struct{}{}
-		ents = append(ents, fuse.DirEntry{
-			Mode: fileModeToSystemMode(ent.Stat().Mode()),
-			Name: baseName,
-			Ino:  inodeOfEnt(ent),
-		})
-		return true
-	})
-
-	// Reorganize the the entry considering whiteout info.
-	ne := 0
-	for _, e := range ents {
-		if strings.HasPrefix(e.Name, whiteoutPrefix) {
-			if _, ok := normal[e.Name[len(whiteoutPrefix):]]; ok {
-
-				// This entry exists as both of a whiteout file and a normal entry
-				// so we simply override(=delete+create) the entry by prioritizing
-				// the normal entry.
-				continue
-			}
-
-			// Remove the prefix to make it overlayfs-compliant.
-			e.Name = e.Name[len(whiteoutPrefix):]
-		}
-		ents[ne] = e
-		ne++
-	}
-	ents = ents[:ne]
-	sort.Slice(ents, func(i, j int) bool { return ents[i].Name < ents[j].Name })
-	return ents, fuse.OK
-}
-
-func (n *node) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) (code fuse.Status) {
+func (n *node) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) fuse.Status {
 	return entryToAttr(n.e, out)
 }
 
-func (n *node) GetXAttr(attribute string, context *fuse.Context) (data []byte, code fuse.Status) {
-	if v, ok := n.e.Xattrs[attribute]; ok {
-		return v, fuse.OK
+func (n *node) GetXAttr(attribute string, context *fuse.Context) ([]byte, fuse.Status) {
+	if attribute == opaqueXattr && n.opaque {
+		// This node is an opaque directory so give overlayfs-compliant indicator.
+		return []byte(opaqueXattrValue), fuse.OK
 	}
-	if v, ok := n.addXattr[attribute]; ok {
+	if v, ok := n.e.Xattrs[attribute]; ok {
 		return v, fuse.OK
 	}
 	return nil, fuse.ENOATTR
 }
 
 func (n *node) ListXAttr(ctx *fuse.Context) (attrs []string, code fuse.Status) {
+	if n.opaque {
+		// This node is an opaque directory so add overlayfs-compliant indicator.
+		attrs = append(attrs, opaqueXattr)
+	}
 	for k, _ := range n.e.Xattrs {
 		attrs = append(attrs, k)
 	}
-	for k, _ := range n.addXattr {
-		attrs = append(attrs, k)
-	}
 	return attrs, fuse.OK
+}
+
+func (n *node) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
+	return []byte(n.e.LinkName), fuse.OK
+}
+func (n *node) Deletable() bool {
+	// read-only filesystem
+	return false
 }
 
 func (n *node) StatFs() *fuse.StatfsOut {
@@ -497,6 +487,7 @@ func (n *node) StatFs() *fuse.StatfsOut {
 	}
 }
 
+// file is a file abstruction which implements file in go-fuse.
 type file struct {
 	nodefs.File
 	n  *node
@@ -519,37 +510,25 @@ func (f *file) GetAttr(out *fuse.Attr) fuse.Status {
 	return entryToAttr(f.e, out)
 }
 
+// whiteout is a whiteout abstruction compliant to overlayfs. This implements
+// node in go-fuse.
 type whiteout struct {
 	nodefs.Node
 	oe *stargz.TOCEntry
 }
 
-func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) (code fuse.Status) {
+func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) fuse.Status {
 	return entryToWhAttr(w.oe, out)
 }
 
-func entryToWhAttr(e *stargz.TOCEntry, out *fuse.Attr) (code fuse.Status) {
-	fi := e.Stat()
-	out.Ino = inodeOfEnt(e)
-	out.Size = 0
-	out.Blksize = blockSize
-	out.Blocks = 0
-	out.Mtime = uint64(fi.ModTime().Unix())
-	out.Mtimensec = uint32(fi.ModTime().UnixNano())
-	out.Mode = syscall.S_IFCHR
-	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
-	out.Rdev = uint32(unix.Mkdev(0, 0))
-	out.Nlink = 1
-	out.Padding = 0 // TODO
-
-	return fuse.OK
-}
-
+// inodeOfEnt calculates the inode number which is one-to-one conresspondence
+// with the TOCEntry insntance.
 func inodeOfEnt(e *stargz.TOCEntry) uint64 {
 	return uint64(uintptr(unsafe.Pointer(e)))
 }
 
-func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) (code fuse.Status) {
+// entryToAttr converts stargz's TOCEntry to go-fuse's Attr.
+func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) fuse.Status {
 	fi := e.Stat()
 	out.Ino = inodeOfEnt(e)
 	out.Size = uint64(fi.Size())
@@ -572,9 +551,26 @@ func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) (code fuse.Status) {
 	return fuse.OK
 }
 
-func fileModeToSystemMode(m os.FileMode) uint32 {
+// entryToWhAttr converts stargz's TOCEntry to go-fuse's Attr of whiteouts.
+func entryToWhAttr(e *stargz.TOCEntry, out *fuse.Attr) fuse.Status {
+	fi := e.Stat()
+	out.Ino = inodeOfEnt(e)
+	out.Size = 0
+	out.Blksize = blockSize
+	out.Blocks = 0
+	out.Mtime = uint64(fi.ModTime().Unix())
+	out.Mtimensec = uint32(fi.ModTime().UnixNano())
+	out.Mode = syscall.S_IFCHR
+	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
+	out.Rdev = uint32(unix.Mkdev(0, 0))
+	out.Nlink = 1
+	out.Padding = 0 // TODO
 
-	// Convert os.FileMode to system's native bitmap.
+	return fuse.OK
+}
+
+// fileModeToSystemMode converts os.FileMode to system's native bitmap.
+func fileModeToSystemMode(m os.FileMode) uint32 {
 	sm := uint32(m & 0777)
 	switch m & os.ModeType {
 	case os.ModeDevice:
@@ -603,15 +599,4 @@ func fileModeToSystemMode(m os.FileMode) uint32 {
 	}
 
 	return sm
-}
-
-func getCache(ctype, dir string) (cache.BlobCache, error) {
-	switch ctype {
-	case directoryCacheType:
-		return cache.NewDirectoryCache(dir)
-	case memoryCacheType:
-		return cache.NewMemoryCache(), nil
-	default:
-		return cache.NewNopCache(), nil
-	}
 }

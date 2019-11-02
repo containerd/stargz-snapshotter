@@ -30,7 +30,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ktock/remote-snapshotter/cache"
@@ -46,64 +45,85 @@ type urlReaderAt struct {
 	cache     cache.BlobCache
 }
 
-type chunk struct {
-	size   int64
-	buffer []byte
+// region is HTTP-range-request-compliant range.
+// "b" is beginning byte of the range and "e" is the end.
+// "e" is must be inclusive along with HTTP's range expression.
+type region struct{ b, e int64 }
+
+func (c region) size() int64 {
+	return c.e - c.b + 1
 }
 
+type walkFunc func(reg region) error
+
+// walkChunks walks chunks from begin to end in order in the specified region.
+func (r *urlReaderAt) walkChunks(allRegion region, walkFn walkFunc) error {
+	for b := allRegion.b; b <= allRegion.e && b < r.size; b += r.chunkSize {
+		reg := region{b, b + r.chunkSize - 1}
+		if reg.e >= r.size {
+			reg.e = r.size - 1
+		}
+		if err := walkFn(reg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ReadAt reads remote chunks from specified offset for the buffer size.
+// It tries to fetch as many chunks as possible from local cache.
 func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
 
-	// Align offset and size with chunkSize (call it "region") and make chunks list to
-	// get from the remote store. At the same time, fetch as many chunks of them as
-	// possible from the cache.
-	regionOffset := floor(offset, r.chunkSize)
-	regionSize := ceil(offset+int64(len(p))-1, r.chunkSize) - regionOffset
-	region := make([]byte, regionSize)
-	chunks := map[int64](*chunk){}
-	for o := regionOffset; o < regionOffset+regionSize; o += r.chunkSize {
-		size := r.chunkSize
-		if remain := r.size - o; remain < size {
-			size = remain
+	// Determine which chunk needs to be fetched.
+	allRegion := region{floor(offset, r.chunkSize), ceil(offset+int64(len(p))-1, r.chunkSize) - 1}
+	allData := map[region][]byte{}
+	requests := map[region]bool{}
+	_ = r.walkChunks(allRegion, func(reg region) error {
+		data := make([]byte, reg.size())
+		n, err := r.cache.Fetch(r.genID(reg), data)
+		if err != nil || int64(n) != reg.size() {
+			requests[reg] = true // missed cache, needs to fetch remotely.
+			return nil
 		}
-		ro := o - regionOffset
-		n, err := r.cache.Fetch(r.genID(o, size), region[ro:ro+size])
-		if err == nil && int64(n) == size {
-			continue
-		}
-		chunks[o] = &chunk{
-			size: size,
-		}
-	}
+		allData[reg] = data
+		return nil
+	})
 
-	// Get all chunks from the remote store.
-	if err := r.rangeRequest(chunks); err != nil {
+	// Fetch all necessary data from remote store.
+	if err := r.appendFromRemote(allData, requests); err != nil {
 		return 0, err
 	}
 
 	// Write all chunks to the result buffer.
-	wg := &sync.WaitGroup{}
-	for o, c := range chunks {
-		wg.Add(1)
-		go func(o int64, c *chunk) {
-			ro := o - regionOffset
-			copy(region[ro:ro+c.size], c.buffer)
-			r.cache.Add(r.genID(o, c.size), region[ro:ro+c.size])
-			wg.Done()
-		}(o, c)
+	regionData := make([]byte, 0, allRegion.size())
+	if err := r.walkChunks(allRegion, func(reg region) error {
+		data := allData[reg]
+		if int64(len(data)) != reg.size() {
+			return fmt.Errorf("fetched chunk(%d, %d) size is invalid", reg.b, reg.e)
+		}
+		regionData = append(regionData, data...)
+		if requests[reg] {
+			r.cache.Add(r.genID(reg), data)
+		}
+		return nil
+	}); err != nil {
+		return 0, fmt.Errorf("failed to gather chunks for region (%d, %d): %v",
+			allRegion.b, allRegion.e, err)
 	}
-	wg.Wait()
-
 	ro := offset % r.chunkSize
-	return copy(p, region[ro:ro+int64(len(p))]), nil
+	return copy(p, regionData[ro:ro+int64(len(p))]), nil
 }
 
-func (r *urlReaderAt) rangeRequest(chunks map[int64](*chunk)) error {
-	if len(chunks) == 0 {
+// appendFromRemote fetches all specified chunks from remote store.
+func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[region]bool) error {
+	if len(requests) == 0 {
 		return nil
 	}
+
+	// request specified ranges.
 	req, err := http.NewRequest("GET", r.url, nil)
 	if err != nil {
 		return err
@@ -111,11 +131,9 @@ func (r *urlReaderAt) rangeRequest(chunks map[int64](*chunk)) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req = req.WithContext(ctx)
-
-	// Construct request.
 	ranges := "bytes=0-0," // dummy range to make sure the response to be multipart
-	for o, c := range chunks {
-		ranges += fmt.Sprintf("%d-%d,", o, o+c.size-1)
+	for reg, _ := range requests {
+		ranges += fmt.Sprintf("%d-%d,", reg.b, reg.e)
 	}
 	req.Header.Add("Range", ranges[:len(ranges)-1])
 	req.Header.Add("Accept-Encoding", "identity")
@@ -126,87 +144,74 @@ func (r *urlReaderAt) rangeRequest(chunks map[int64](*chunk)) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("unexpected status code on %s: %v", r.url, res.Status)
+		return fmt.Errorf("unexpected status code on %q: %v", r.url, res.Status)
 	}
+
+	// If We get whole blob in one part(= status 200), we chunk and return them.
 	if res.StatusCode == http.StatusOK {
-		// We reach here when the requested range covers whole blob. We got whole
-		// blob in one part so we need to chunk it.
 		data, err := ioutil.ReadAll(res.Body)
 		if err != nil {
 			return fmt.Errorf("Failed to read response body: %v", err)
 		}
-		for o, c := range chunks {
-			if remain := int64(len(data)) - o; c.size > remain {
-				c.size = remain
-			}
-			c.buffer = data[o : o+c.size]
+		for reg, _ := range requests {
+			allData[reg] = data[reg.b : reg.e+1]
 		}
 		return nil
 	}
 
-	// Extract multipart parameters.
+	// Get all chunks responsed as a multipart body.
 	mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
-	if err != nil {
-		return fmt.Errorf("failed to parse media type: %v", err)
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
+		return fmt.Errorf("invalid media type %q: %v", mediaType, err)
 	}
-	if !strings.HasPrefix(mediaType, "multipart/") {
-		return fmt.Errorf("the response is not mulipart: %q", mediaType)
-	}
-
-	// Parse parts and fill returning chunks.
 	mr := multipart.NewReader(res.Body, params["boundary"])
 	mr.NextPart() // Drop the dummy range.
 	for {
 		p, err := mr.NextPart()
 		if err == io.EOF {
 			break
-		}
-		if err != nil {
+		} else if err != nil {
 			return fmt.Errorf("Failed to read multipart response: %v\n", err)
 		}
-
-		// Check Content-Range Header.
-		submatches := contentRangeRegexp.FindStringSubmatch(p.Header.Get("Content-Range"))
-		if len(submatches) < 4 {
-			return fmt.Errorf("Content-Range doesn't have enough information")
-		}
-		offset, err := strconv.ParseInt(submatches[1], 10, 64)
+		reg, err := r.parseRange(p.Header.Get("Content-Range"))
 		if err != nil {
-			return fmt.Errorf("failed to parse beginning offset: %v", err)
+			return fmt.Errorf("failed to parse Content-Range header: %v", err)
 		}
-		c, ok := chunks[offset]
-		if !ok {
-			// This chunk isn't requred.
-			continue
-		}
-
-		// Read this chunk.
 		data, err := ioutil.ReadAll(p)
 		if err != nil {
 			return fmt.Errorf("failed to read multipart response data: %v", err)
 		}
-		if remain := r.size - offset; c.size > remain {
-			c.size = remain
+		if reg.size() != int64(len(data)) {
+			return fmt.Errorf("chunk has invalid size %d; want %d", len(data), reg.size())
 		}
-		if c.size != int64(len(data)) {
-			return fmt.Errorf("fetched data size is invalid: %d(expected) != %d(fetched)",
-				c.size, len(data))
-		}
-		c.buffer = data[:c.size]
-	}
-
-	// Make sure all requested chunks have been fetched.
-	for o, c := range chunks {
-		if c.buffer == nil {
-			return fmt.Errorf("Failed to fetch chunk offset:%s,size:%s", o, c.size)
-		}
+		allData[reg] = data
 	}
 
 	return nil
 }
 
-func (r *urlReaderAt) genID(offset, size int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", r.url, offset, size)))
+func (r *urlReaderAt) parseRange(header string) (reg region, err error) {
+	submatches := contentRangeRegexp.FindStringSubmatch(header)
+	if len(submatches) < 4 {
+		err = fmt.Errorf("Content-Range doesn't have enough information")
+		return
+	}
+	begin, err := strconv.ParseInt(submatches[1], 10, 64)
+	if err != nil {
+		err = fmt.Errorf("failed to parse beginning offset: %v", err)
+		return
+	}
+	end, err := strconv.ParseInt(submatches[2], 10, 64)
+	if err != nil {
+		err = fmt.Errorf("failed to parse end offset: %v", err)
+		return
+	}
+
+	return region{begin, end}, nil
+}
+
+func (r *urlReaderAt) genID(reg region) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", r.url, reg.b, reg.e)))
 	return fmt.Sprintf("%x", sum)
 }
 
