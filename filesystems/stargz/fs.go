@@ -346,7 +346,7 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 
 	// Append whiteouts if no entry replaces the target entry in the lower layer.
 	for w, ent := range whiteouts {
-		if ok := normalEnts[w[len(whiteoutPrefix):]]; !ok {
+		if !normalEnts[w[len(whiteoutPrefix):]] {
 			ents = append(ents, fuse.DirEntry{
 				Mode: syscall.S_IFCHR,
 				Name: w[len(whiteoutPrefix):],
