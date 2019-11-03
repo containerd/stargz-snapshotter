@@ -77,23 +77,11 @@ func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 		return 0, nil
 	}
 
-	// Determine which chunk needs to be fetched.
+	// Fetch all data.
 	allRegion := region{floor(offset, r.chunkSize), ceil(offset+int64(len(p))-1, r.chunkSize) - 1}
 	allData := map[region][]byte{}
-	requests := map[region]bool{}
-	_ = r.walkChunks(allRegion, func(reg region) error {
-		data := make([]byte, reg.size())
-		n, err := r.cache.Fetch(r.genID(reg), data)
-		if err != nil || int64(n) != reg.size() {
-			requests[reg] = true // missed cache, needs to fetch remotely.
-			return nil
-		}
-		allData[reg] = data
-		return nil
-	})
-
-	// Fetch all necessary data from remote store.
-	if err := r.appendFromRemote(allData, requests); err != nil {
+	remotes := r.appendFromCache(allData, allRegion)
+	if err := r.appendFromRemote(allData, remotes); err != nil {
 		return 0, err
 	}
 
@@ -105,7 +93,7 @@ func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 			return fmt.Errorf("fetched chunk(%d, %d) size is invalid", reg.b, reg.e)
 		}
 		regionData = append(regionData, data...)
-		if requests[reg] {
+		if remotes[reg] {
 			r.cache.Add(r.genID(reg), data)
 		}
 		return nil
@@ -113,8 +101,31 @@ func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 		return 0, fmt.Errorf("failed to gather chunks for region (%d, %d): %v",
 			allRegion.b, allRegion.e, err)
 	}
-	ro := offset % r.chunkSize
-	return copy(p, regionData[ro:ro+int64(len(p))]), nil
+	ro := offset - allRegion.b // relative offset from the base of the fetched region
+	copy(p, regionData[ro:ro+int64(len(p))])
+	if remain := r.size - offset; int64(len(p)) > remain {
+		if remain < 0 {
+			remain = 0
+		}
+		p = p[:remain]
+	}
+	return len(p), nil
+}
+
+// appendFromRemote fetches all specified chunks from local cache.
+func (r *urlReaderAt) appendFromCache(allData map[region][]byte, whole region) map[region]bool {
+	remotes := map[region]bool{}
+	_ = r.walkChunks(whole, func(reg region) error {
+		data := make([]byte, reg.size())
+		n, err := r.cache.Fetch(r.genID(reg), data)
+		if err != nil || int64(n) != reg.size() {
+			remotes[reg] = true // missed cache, needs to fetch remotely.
+			return nil
+		}
+		allData[reg] = data
+		return nil
+	})
+	return remotes
 }
 
 // appendFromRemote fetches all specified chunks from remote store.

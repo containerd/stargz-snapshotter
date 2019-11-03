@@ -43,7 +43,7 @@ RUN go get -u "github.com/containerd/continuity/fs" && \
 # get stargzify command to convert images to stargz format
 RUN git clone https://github.com/google/crfs.git $GOPATH/src/github.com/google/crfs && \
     cd $GOPATH/src/github.com/google/crfs && \
-    git checkout 578f64047964a8de782dcaeb21da935aaeed7a02 && \
+    git checkout 12599487789fa1d5abead897932c40a1a17929dd && \
     cd stargz/stargzify && GO111MODULE=on go install
 
 # patched version of containerd(with remote-snapshotter support).
@@ -58,8 +58,8 @@ RUN git clone https://github.com/opencontainers/runc $GOPATH/src/github.com/open
     make && make install
 
 # helper for building and entrypoint
-COPY ./run.sh ./config.sh /
-RUN chmod 755 /run.sh /config.sh && mkdir /etc/containerd
+COPY ./run.sh ./config.sh ./test.sh /
+RUN chmod 755 /run.sh /config.sh /test.sh && mkdir /etc/containerd
 COPY ./config.toml /etc/containerd/config.toml
 
 ENTRYPOINT ["/bin/bash"]

@@ -34,7 +34,7 @@ import (
 type fileReaderAt struct {
 	name string
 	gr   *stargzReader
-	sr   *io.SectionReader
+	ra   io.ReaderAt
 }
 
 // ReadAt reads chunks from the stargz file with trying to fetch as many chunks
@@ -47,9 +47,9 @@ func (fr *fileReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 			break
 		}
 		data := make([]byte, int(ce.ChunkSize))
-		id := fr.gr.genID(ce)
+		id := fr.gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize)
 		if n, err := fr.gr.cache.Fetch(id, data); err != nil || n != int(ce.ChunkSize) {
-			if _, err := fr.sr.ReadAt(data, ce.ChunkOffset); err != nil {
+			if _, err := fr.ra.ReadAt(data, ce.ChunkOffset); err != nil {
 				if err != io.EOF {
 					return 0, fmt.Errorf("failed to read data: %v", err)
 				}
@@ -78,7 +78,7 @@ func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
 	return &fileReaderAt{
 		name: name,
 		gr:   gr,
-		sr:   sr,
+		ra:   sr,
 	}, nil
 }
 
@@ -98,13 +98,15 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) error {
 
 	// Parse the layer and cache chunks
 	gz, err := gzip.NewReader(bytes.NewReader(raw))
-	if err != nil {
+	if err == io.ErrUnexpectedEOF {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("fileReader.ReadAt.gzipNewReader: %v", err)
 	}
 	tr := tar.NewReader(gz)
 	for {
 		h, err := tr.Next()
-		if err == io.EOF {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			break
 		} else if err != nil {
 			return fmt.Errorf("failed to parse tar file: %v", err)
@@ -121,15 +123,16 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) error {
 			if !ok {
 				break
 			}
-			gr.cache.Add(gr.genID(ce), payload[ce.ChunkOffset:ce.ChunkOffset+ce.ChunkSize])
+			gr.cache.Add(gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize),
+				payload[ce.ChunkOffset:ce.ChunkOffset+ce.ChunkSize])
 			nr += ce.ChunkSize
 		}
 	}
 	return nil
 }
 
-func (gr *stargzReader) genID(ce *stargz.TOCEntry) string {
+func (gr *stargzReader) genID(name string, offset, size int64) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%s-%d-%d",
-		gr.digest, ce.Name, ce.ChunkOffset, ce.ChunkSize)))
+		gr.digest, name, offset, size)))
 	return fmt.Sprintf("%x", sum)
 }
