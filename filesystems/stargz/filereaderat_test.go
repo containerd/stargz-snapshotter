@@ -111,9 +111,8 @@ func TestFileReadAt(t *testing.T) {
 								if !ok {
 									break
 								}
-								data := make([]byte, ce.ChunkSize)
-								n, err := f.gr.cache.Fetch(f.gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize), data)
-								if err != nil || n != int(ce.ChunkSize) {
+								data, err := f.gr.cache.Fetch(f.gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize))
+								if err != nil || len(data) != int(ce.ChunkSize) {
 									t.Errorf("missed cache of offset=%d, size=%d: %v(got size=%d)", ce.ChunkOffset, ce.ChunkSize, err, n)
 									return
 								}
@@ -165,7 +164,7 @@ func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) *fileReade
 	f, err := (&stargzReader{
 		digest: "dummy",
 		r:      r,
-		cache:  &testCache{membuf: map[string]([]byte){}, t: t},
+		cache:  &testCache{membuf: map[string]string{}, t: t},
 	}).openFile(testName)
 	if err != nil {
 		t.Fatalf("Failed to open testing file: %v", err)
@@ -273,7 +272,7 @@ func TestPrefetch(t *testing.T) {
 			gr := &stargzReader{
 				digest: "test",
 				r:      r,
-				cache:  &testCache{membuf: map[string]([]byte){}, t: t},
+				cache:  &testCache{membuf: map[string]string{}, t: t},
 			}
 			if err := gr.prefetch(sr, chunkNumToSize(t, tt.fetchNum, sr)); err != nil {
 				t.Errorf("failed to prefetch: %v", err)
@@ -295,8 +294,7 @@ func TestPrefetch(t *testing.T) {
 					if !ok {
 						break
 					}
-					data := make([]byte, ce.ChunkSize)
-					cn, err := gr.cache.Fetch(gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize), data)
+					data, err := gr.cache.Fetch(gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize))
 					if err != nil {
 						t.Errorf("failed to read cache data of %q: %v", file, err)
 						return
@@ -307,8 +305,8 @@ func TestPrefetch(t *testing.T) {
 						t.Errorf("failed to read want data of %q: %v", file, err)
 						return
 					}
-					if cn != wn {
-						t.Errorf("size of cached data %d; want %d", cn, wn)
+					if len(data) != wn {
+						t.Errorf("size of cached data %d; want %d", len(data), wn)
 						return
 					}
 					if bytes.Compare(data, wantData) != 0 {
@@ -433,31 +431,26 @@ func buildTar(t *testing.T, ents []regEntry) (r io.Reader, cancel func()) {
 }
 
 type testCache struct {
-	membuf map[string]([]byte)
+	membuf map[string]string
 	t      *testing.T
 	mu     sync.Mutex
 }
 
-func (tc *testCache) Fetch(blobHash string, p []byte) (int, error) {
+func (tc *testCache) Fetch(blobHash string) ([]byte, error) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
 	cache, ok := tc.membuf[blobHash]
 	if !ok {
-		return 0, fmt.Errorf("Missed cache: %q", blobHash)
+		return nil, fmt.Errorf("Missed cache: %q", blobHash)
 	}
-	if len(p) < len(cache) {
-		return 0, fmt.Errorf("Buffer doesn't have enough length: %d(buffer) < %d(cache)",
-			len(p), len(cache))
-	}
-
-	return copy(p[:len(cache)], cache[:len(cache)]), nil
+	return []byte(cache), nil
 }
 
 func (tc *testCache) Add(blobHash string, p []byte) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
-	tc.membuf[blobHash] = p
+	tc.membuf[blobHash] = string(p)
 	tc.t.Logf("  cached [%s...]: %q", blobHash[:8], string(p))
 
 	return
