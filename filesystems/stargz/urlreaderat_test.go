@@ -103,9 +103,8 @@ func TestURLReadAt(t *testing.T) {
 							cn := 0
 							whole := region{floor(offset, r.chunkSize), ceil(offset+size-1, r.chunkSize) - 1}
 							if err := r.walkChunks(whole, func(reg region) error {
-								data := make([]byte, reg.size())
-								n, err := r.cache.Fetch(r.genID(reg), data)
-								if err != nil || int64(n) != reg.size() {
+								data, err := r.cache.Fetch(r.genID(reg))
+								if err != nil || int64(len(data)) != reg.size() {
 									return fmt.Errorf("missed cache of region={%d,%d}(size=%d): %v(got size=%d)", reg.b, reg.e, reg.size(), err, n)
 								}
 								cn++
@@ -128,7 +127,7 @@ func makeURLReaderAt(t *testing.T, contents []byte, chunkSize int64, fn RoundTri
 		t:         fn,
 		size:      int64(len(contents)),
 		chunkSize: chunkSize,
-		cache:     &testCache{membuf: map[string]([]byte){}, t: t},
+		cache:     &testCache{membuf: map[string]string{}, t: t},
 	}
 }
 

@@ -46,9 +46,10 @@ func (fr *fileReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 		if !ok {
 			break
 		}
-		data := make([]byte, int(ce.ChunkSize))
 		id := fr.gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize)
-		if n, err := fr.gr.cache.Fetch(id, data); err != nil || n != int(ce.ChunkSize) {
+		data, err := fr.gr.cache.Fetch(id)
+		if err != nil || len(data) != int(ce.ChunkSize) {
+			data = make([]byte, int(ce.ChunkSize))
 			if _, err := fr.ra.ReadAt(data, ce.ChunkOffset); err != nil {
 				if err != io.EOF {
 					return 0, fmt.Errorf("failed to read data: %v", err)

@@ -21,6 +21,7 @@ package cache
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -29,7 +30,7 @@ import (
 // TODO: contents validation.
 
 type BlobCache interface {
-	Fetch(blobHash string, p []byte) (int, error)
+	Fetch(blobHash string) ([]byte, error)
 	Add(blobHash string, p []byte)
 }
 
@@ -49,30 +50,28 @@ type directoryCache struct {
 	mu        sync.Mutex
 }
 
-func (dc *directoryCache) Fetch(blobHash string, p []byte) (n int, err error) {
+func (dc *directoryCache) Fetch(blobHash string) (p []byte, err error) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 
 	c := filepath.Join(dc.directory, blobHash[:2], blobHash)
 	if _, err := os.Stat(c); err != nil {
-		return 0, fmt.Errorf("Missed cache: %s", c)
+		return nil, fmt.Errorf("Missed cache: %s", c)
 	}
 
 	file, err := os.Open(c)
 	if err != nil {
-		return 0, fmt.Errorf("Failed to Open cached blob file: %s", c)
+		return nil, fmt.Errorf("Failed to Open cached blob file: %s", c)
 	}
 	defer file.Close()
 
-	if n, err = io.ReadFull(file, p); err != nil {
+	if p, err = ioutil.ReadAll(file); err != nil {
 		if err == io.EOF {
 			err = nil
-		} else {
-			return 0, err
 		}
 	}
 
-	return n, err
+	return
 }
 
 func (dc *directoryCache) Add(blobHash string, p []byte) {
@@ -108,36 +107,31 @@ func (dc *directoryCache) Add(blobHash string, p []byte) {
 
 func NewMemoryCache() BlobCache {
 	return &memoryCache{
-		membuf: map[string]([]byte){},
+		membuf: map[string]string{},
 	}
 }
 
 // meomryCache is a cache implementation which backend is a memory.
 type memoryCache struct {
-	membuf map[string]([]byte)
+	membuf map[string]string // read-only []byte map is more ideal but we don't have it in golang...
 	mu     sync.Mutex
 }
 
-func (mc *memoryCache) Fetch(blobHash string, p []byte) (int, error) {
+func (mc *memoryCache) Fetch(blobHash string) ([]byte, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
 	cache, ok := mc.membuf[blobHash]
 	if !ok {
-		return 0, fmt.Errorf("Missed cache: %s", blobHash)
+		return nil, fmt.Errorf("Missed cache: %s", blobHash)
 	}
-	if len(p) < len(cache) {
-		return 0, fmt.Errorf("Buffer doesn't have enough length: %d(buffer) < %d(cache)",
-			len(p), len(cache))
-	}
-
-	return copy(p[:len(cache)], cache[:len(cache)]), nil
+	return []byte(cache), nil
 }
 
 func (mc *memoryCache) Add(blobHash string, p []byte) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
-	mc.membuf[blobHash] = p
+	mc.membuf[blobHash] = string(p)
 
 	return
 }
@@ -149,8 +143,8 @@ func NewNopCache() BlobCache {
 	return &nopCache{}
 }
 
-func (nc *nopCache) Fetch(blobHash string, p []byte) (int, error) {
-	return 0, fmt.Errorf("Missed cache: %s", blobHash)
+func (nc *nopCache) Fetch(blobHash string) ([]byte, error) {
+	return nil, fmt.Errorf("Missed cache: %s", blobHash)
 }
 
 func (nc *nopCache) Add(blobHash string, p []byte) {

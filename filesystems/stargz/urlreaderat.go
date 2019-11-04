@@ -73,7 +73,7 @@ func (r *urlReaderAt) walkChunks(allRegion region, walkFn walkFunc) error {
 // ReadAt reads remote chunks from specified offset for the buffer size.
 // It tries to fetch as many chunks as possible from local cache.
 func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
-	if len(p) == 0 {
+	if len(p) == 0 || offset > r.size {
 		return 0, nil
 	}
 
@@ -86,7 +86,7 @@ func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 	}
 
 	// Write all chunks to the result buffer.
-	regionData := make([]byte, 0, allRegion.size())
+	var regionData []byte
 	if err := r.walkChunks(allRegion, func(reg region) error {
 		data := allData[reg]
 		if int64(len(data)) != reg.size() {
@@ -101,14 +101,14 @@ func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 		return 0, fmt.Errorf("failed to gather chunks for region (%d, %d): %v",
 			allRegion.b, allRegion.e, err)
 	}
-	ro := offset - allRegion.b // relative offset from the base of the fetched region
-	copy(p, regionData[ro:ro+int64(len(p))])
 	if remain := r.size - offset; int64(len(p)) > remain {
 		if remain < 0 {
 			remain = 0
 		}
 		p = p[:remain]
 	}
+	ro := offset - allRegion.b // relative offset from the base of the fetched region
+	copy(p, regionData[ro:ro+int64(len(p))])
 	return len(p), nil
 }
 
@@ -116,9 +116,8 @@ func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 func (r *urlReaderAt) appendFromCache(allData map[region][]byte, whole region) map[region]bool {
 	remotes := map[region]bool{}
 	_ = r.walkChunks(whole, func(reg region) error {
-		data := make([]byte, reg.size())
-		n, err := r.cache.Fetch(r.genID(reg), data)
-		if err != nil || int64(n) != reg.size() {
+		data, err := r.cache.Fetch(r.genID(reg))
+		if err != nil || int64(len(data)) != reg.size() {
 			remotes[reg] = true // missed cache, needs to fetch remotely.
 			return nil
 		}

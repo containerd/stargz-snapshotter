@@ -111,7 +111,7 @@ func TestWhiteout(t *testing.T) {
 			gr := &stargzReader{
 				digest: "test",
 				r:      r,
-				cache:  &testCache{membuf: map[string]([]byte){}, t: t},
+				cache:  &testCache{membuf: map[string]string{}, t: t},
 			}
 			rootNode := &node{
 				Node: nodefs.NewDefaultNode(),
