@@ -500,10 +500,11 @@ func (f *file) String() string {
 }
 
 func (f *file) Read(buf []byte, off int64) (fuse.ReadResult, fuse.Status) {
-	if _, err := f.ra.ReadAt(buf, off); err != nil {
+	n, err := f.ra.ReadAt(buf, off)
+	if err != nil {
 		return nil, fuse.EIO
 	}
-	return fuse.ReadResultData(buf), fuse.OK
+	return fuse.ReadResultData(buf[:n]), fuse.OK
 }
 
 func (f *file) GetAttr(out *fuse.Attr) fuse.Status {
