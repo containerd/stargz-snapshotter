@@ -17,7 +17,7 @@ services:
     - GOPATH=/go
     tmpfs:
     - /var/lib/containerd
-    - /tmp
+    - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse
     - "${GOPATH}/src/github.com/ktock/remote-snapshotter:/go/src/github.com/ktock/remote-snapshotter"
