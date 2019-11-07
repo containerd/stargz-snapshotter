@@ -25,6 +25,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/golang/groupcache/lru"
 )
 
 // TODO: contents validation.
@@ -34,25 +36,35 @@ type BlobCache interface {
 	Add(blobHash string, p []byte)
 }
 
-func NewDirectoryCache(directory string) (BlobCache, error) {
+func NewDirectoryCache(directory string, memCacheSize int) (BlobCache, error) {
 	err := os.MkdirAll(directory, os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
 	return &directoryCache{
+		cache:     lru.New(memCacheSize),
 		directory: directory,
 	}, nil
 }
 
 // directoryCache is a cache implementation which backend is a directory.
 type directoryCache struct {
+	cache     *lru.Cache
 	directory string
-	mu        sync.Mutex
+	mmu       sync.Mutex
+	fmu       sync.Mutex
 }
 
 func (dc *directoryCache) Fetch(blobHash string) (p []byte, err error) {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
+	dc.mmu.Lock()
+	defer dc.mmu.Unlock()
+
+	if cache, ok := dc.cache.Get(blobHash); ok {
+		p, ok := cache.([]byte)
+		if ok {
+			return p, nil
+		}
+	}
 
 	c := filepath.Join(dc.directory, blobHash[:2], blobHash)
 	if _, err := os.Stat(c); err != nil {
@@ -66,41 +78,49 @@ func (dc *directoryCache) Fetch(blobHash string) (p []byte, err error) {
 	defer file.Close()
 
 	if p, err = ioutil.ReadAll(file); err != nil {
-		if err == io.EOF {
-			err = nil
+		if err != io.EOF {
+			return nil, err
 		}
 	}
+	dc.cache.Add(blobHash, p)
 
 	return
 }
 
 func (dc *directoryCache) Add(blobHash string, p []byte) {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
+	dc.mmu.Lock()
+	defer dc.mmu.Unlock()
 
-	// Check if cache exists.
-	c := filepath.Join(dc.directory, blobHash[:2], blobHash)
-	if _, err := os.Stat(c); err == nil {
-		return
-	}
+	dc.cache.Add(blobHash, p)
 
-	// Create cache file
-	if err := os.MkdirAll(filepath.Dir(c), os.ModePerm); err != nil {
-		fmt.Printf("Warning: Failed to Create blob cache directory %s: %s\n", c, err)
-		return
-	}
-	f, err := os.Create(c)
-	if err != nil {
-		fmt.Printf("Warning: could not create a cache file: %v\n", err)
-		return
-	}
-	defer f.Close()
-	if n, err := f.Write(p); err == nil && n == len(p) {
-		return
-	} else {
-		fmt.Printf("Warning: failed to write cache: %d(wrote)/%d(expected): %v\n",
-			n, len(p), err)
-	}
+	go func() {
+		dc.fmu.Lock()
+		defer dc.fmu.Unlock()
+
+		// Check if cache exists.
+		c := filepath.Join(dc.directory, blobHash[:2], blobHash)
+		if _, err := os.Stat(c); err == nil {
+			return
+		}
+
+		// Create cache file
+		if err := os.MkdirAll(filepath.Dir(c), os.ModePerm); err != nil {
+			fmt.Printf("Warning: Failed to Create blob cache directory %s: %s\n", c, err)
+			return
+		}
+		f, err := os.Create(c)
+		if err != nil {
+			fmt.Printf("Warning: could not create a cache file: %v\n", err)
+			return
+		}
+		defer f.Close()
+		if n, err := f.Write(p); err == nil && n == len(p) {
+			return
+		} else {
+			fmt.Printf("Warning: failed to write cache: %d(wrote)/%d(expected): %v\n",
+				n, len(p), err)
+		}
+	}()
 
 	return
 }

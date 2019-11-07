@@ -63,6 +63,7 @@ const (
 	blockSize             = 512
 	defaultCacheChunkSize = 50000
 	defaultPrefetchSize   = 5000000
+	defaultCacheMaxEntry  = 1000
 	directoryCacheType    = "directory"
 	memoryCacheType       = "memory"
 	whiteoutPrefix        = ".wh."
@@ -75,6 +76,7 @@ type Config struct {
 	Insecure       []string `toml:"insecure"`
 	CacheChunkSize int64    `toml:"cache_chunk_size"`
 	PrefetchSize   int64    `toml:"prefetch_size"`
+	LRUCacheEntry  int      `toml:"lru_max_entry"`
 	HTTPCacheType  string   `toml:"http_cache_type"`
 	FSCacheType    string   `toml:"filesystem_cache_type"`
 }
@@ -97,10 +99,10 @@ func init() {
 }
 
 // getCache gets a cache corresponding to specified type.
-func getCache(ctype, dir string) (cache.BlobCache, error) {
+func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
 	switch ctype {
 	case directoryCacheType:
-		return cache.NewDirectoryCache(dir)
+		return cache.NewDirectoryCache(dir, maxEntry)
 	case memoryCacheType:
 		return cache.NewMemoryCache(), nil
 	default:
@@ -120,11 +122,11 @@ func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
 	if fs.prefetchSize == 0 {
 		fs.prefetchSize = defaultPrefetchSize
 	}
-	fs.httpCache, err = getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"))
+	fs.httpCache, err = getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"), config.LRUCacheEntry)
 	if err != nil {
 		return nil, err
 	}
-	fs.fsCache, err = getCache(config.FSCacheType, filepath.Join(root, "fscache"))
+	fs.fsCache, err = getCache(config.FSCacheType, filepath.Join(root, "fscache"), config.LRUCacheEntry)
 	if err != nil {
 		return nil, err
 	}

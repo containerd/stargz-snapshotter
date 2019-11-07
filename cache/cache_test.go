@@ -18,7 +18,7 @@ func TestDirectoryCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to make tempdir: %v", err)
 	}
-	c, err := NewDirectoryCache(tmp)
+	c, err := NewDirectoryCache(tmp, 10)
 	if err != nil {
 		t.Fatalf("failed to make cache: %v", err)
 	}
@@ -80,7 +80,7 @@ func hit(sample string) check {
 			return
 		}
 		if len(p) != len(sample) {
-			t.Errorf("fetched size %d; want %d", len(p),len(sample))
+			t.Errorf("fetched size %d; want %d", len(p), len(sample))
 			return
 		}
 		df := digestFor(string(p))

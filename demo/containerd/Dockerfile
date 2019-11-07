@@ -33,6 +33,7 @@ ENV PATH=${GOPATH}/bin:${GOROOT}/bin:$PATH
 # remote snapshotter related packages.
 RUN go get -u "github.com/containerd/continuity/fs" && \
     go get -u "github.com/hanwen/go-fuse/fuse" && \
+    go get -u "github.com/golang/groupcache/lru" && \
     go get -u "github.com/pkg/errors" && \
     go get -u "golang.org/x/sys/unix" && \
     git clone https://github.com/google/go-containerregistry \
