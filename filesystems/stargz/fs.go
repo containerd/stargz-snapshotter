@@ -62,7 +62,6 @@ import (
 const (
 	blockSize             = 512
 	defaultCacheChunkSize = 50000
-	defaultPrefetchSize   = 5000000
 	defaultCacheMaxEntry  = 1000
 	directoryCacheType    = "directory"
 	memoryCacheType       = "memory"
@@ -118,9 +117,6 @@ func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
 	}
 	if fs.cacheChunkSize == 0 {
 		fs.cacheChunkSize = defaultCacheChunkSize
-	}
-	if fs.prefetchSize == 0 {
-		fs.prefetchSize = defaultPrefetchSize
 	}
 	fs.httpCache, err = getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"), config.LRUCacheEntry)
 	if err != nil {
