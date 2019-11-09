@@ -260,6 +260,26 @@ func TestPrefetch(t *testing.T) {
 			wantNum:  chunkNum(sampleData1) + chunkNum(sampleData2),
 			wants:    []string{"foo.txt", "bar.txt"},
 		},
+		{
+			name: "builder_specified",
+			in: []regEntry{
+				{
+					name:     "foo.txt",
+					contents: sampleData1,
+				},
+				{
+					name:     prefetchLandmark,
+					contents: string([]byte{1}),
+				},
+				{
+					name:     "bar.txt",
+					contents: sampleData2,
+				},
+			},
+			fetchNum: 0,
+			wantNum:  chunkNum(sampleData1),
+			wants:    []string{"foo.txt"},
+		},
 	}
 
 	for _, tt := range tests {

@@ -31,6 +31,8 @@ import (
 	"github.com/ktock/remote-snapshotter/cache"
 )
 
+const prefetchLandmark = ".prefetch.landmark"
+
 type fileReaderAt struct {
 	name string
 	gr   *stargzReader
@@ -84,6 +86,9 @@ func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
 }
 
 func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) error {
+	if e, ok := gr.r.Lookup(prefetchLandmark); ok {
+		size = e.Offset
+	}
 	if size == 0 {
 		return nil
 	}
