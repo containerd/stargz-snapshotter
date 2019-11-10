@@ -156,7 +156,7 @@ func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) *fileReade
 			name:     testName,
 			contents: string(contents),
 		},
-	}, sampleChunkSize))
+	}, chunkSize))
 	t.Logf("single entry stargz; contents=%q", string(contents))
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
