@@ -18,6 +18,112 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Tests Read method of each file node.
+func TestNodeRead(t *testing.T) {
+	sizeCond := map[string]int64{
+		"single_chunk": sampleChunkSize - sampleMiddleOffset,
+		"multi_chunks": sampleChunkSize + sampleMiddleOffset,
+	}
+	innerOffsetCond := map[string]int64{
+		"at_top":    0,
+		"at_middle": sampleMiddleOffset,
+	}
+	baseOffsetCond := map[string]int64{
+		"of_1st_chunk":  sampleChunkSize * 0,
+		"of_2nd_chunk":  sampleChunkSize * 1,
+		"of_last_chunk": lastChunkOffset1,
+	}
+	fileSizeCond := map[string]int64{
+		"in_1_chunk_file":  sampleChunkSize * 1,
+		"in_2_chunks_file": sampleChunkSize * 2,
+		"in_max_size_file": int64(len(sampleData1)),
+	}
+	for sn, size := range sizeCond {
+		for in, innero := range innerOffsetCond {
+			for bo, baseo := range baseOffsetCond {
+				for fn, filesize := range fileSizeCond {
+					t.Run(fmt.Sprintf("reading_%s_%s_%s_%s", sn, in, bo, fn), func(t *testing.T) {
+						if filesize > int64(len(sampleData1)) {
+							t.Fatal("sample file size is larger than sample data")
+						}
+
+						wantN := size
+						offset := baseo + innero
+						if remain := filesize - offset; remain < wantN {
+							if wantN = remain; wantN < 0 {
+								wantN = 0
+							}
+						}
+
+						// use constant string value as a data source.
+						want := strings.NewReader(sampleData1)
+
+						// data we want to get.
+						wantData := make([]byte, wantN)
+						_, err := want.ReadAt(wantData, offset)
+						if err != nil && err != io.EOF {
+							t.Fatalf("want.ReadAt (offset=%d,size=%d): %v", offset, wantN, err)
+						}
+
+						// data we get from the file node.
+						f := makeNodeReader(t, []byte(sampleData1)[:filesize], sampleChunkSize)
+						tmpbuf := make([]byte, size) // fuse library can request bigger than remain
+						rr, status := f.Read(tmpbuf, offset)
+						if status != fuse.OK {
+							t.Errorf("failed to read off=%d, size=%d, filesize=%d: %v", offset, size, filesize, err)
+							return
+						}
+						if rsize := rr.Size(); int64(rsize) != wantN {
+							t.Errorf("read size: %d; want: %d", rsize, wantN)
+							return
+						}
+						tmpbuf = make([]byte, len(tmpbuf))
+						respData, status := rr.Bytes(tmpbuf)
+						if status != fuse.OK {
+							t.Errorf("failed to read result data for off=%d, size=%d, filesize=%d: %v", offset, size, filesize, err)
+						}
+
+						if !bytes.Equal(wantData, respData) {
+							t.Errorf("off=%d, filesize=%d; read data{size=%d,data=%q}; want (size=%d,data=%q)",
+								offset, filesize, len(respData), string(respData), wantN, string(wantData))
+							return
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
+	testName := "test"
+	r, err := stargz.Open(makeStargz(t, []regEntry{
+		{
+			name:     testName,
+			contents: string(contents),
+		},
+	}, chunkSize))
+	if err != nil {
+		t.Fatal("failed to make stargz")
+	}
+	rootNode := getRootNode(t, r)
+	var attr fuse.Attr
+	inode, status := rootNode.Lookup(&attr, testName, nil)
+	if status != fuse.OK {
+		t.Fatalf("failed to lookup test node; status: %v", status)
+	}
+	ni := inode.Node()
+	node, ok := ni.(*node)
+	if !ok {
+		t.Fatalf("test node is invalid")
+	}
+	f, status := node.Open(0, nil)
+	if status != fuse.OK {
+		t.Fatalf("failed to open test file; status: %v", status)
+	}
+	return f.(*file)
+}
+
 func TestWhiteout(t *testing.T) {
 	tests := []struct {
 		name string
@@ -104,31 +210,37 @@ func TestWhiteout(t *testing.T) {
 			if err != nil {
 				t.Fatalf("stargz.Open: %v", err)
 			}
-			root, ok := r.Lookup("")
-			if !ok {
-				t.Fatalf("failed to find root in stargz")
-			}
-			gr := &stargzReader{
-				digest: "test",
-				r:      r,
-				cache:  &testCache{membuf: map[string]string{}, t: t},
-			}
-			rootNode := &node{
-				Node: nodefs.NewDefaultNode(),
-				gr:   gr,
-				e:    root,
-			}
-			_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
-				NegativeTimeout: 0,
-				AttrTimeout:     time.Second,
-				EntryTimeout:    time.Second,
-				Owner:           nil, // preserve owners.
-			})
+			rootNode := getRootNode(t, r)
 			for _, want := range tt.want {
 				want.check(t, rootNode)
 			}
 		})
 	}
+}
+
+func getRootNode(t *testing.T, r *stargz.Reader) *node {
+	root, ok := r.Lookup("")
+	if !ok {
+		t.Fatalf("failed to find root in stargz")
+	}
+	gr := &stargzReader{
+		digest: "test",
+		r:      r,
+		cache:  &testCache{membuf: map[string]string{}, t: t},
+	}
+	rootNode := &node{
+		Node: nodefs.NewDefaultNode(),
+		gr:   gr,
+		e:    root,
+	}
+	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
+		NegativeTimeout: 0,
+		AttrTimeout:     time.Second,
+		EntryTimeout:    time.Second,
+		Owner:           nil, // preserve owners.
+	})
+
+	return rootNode
 }
 
 func buildTarGz(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
