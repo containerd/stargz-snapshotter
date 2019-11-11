@@ -75,6 +75,7 @@ type Config struct {
 	Insecure       []string `toml:"insecure"`
 	CacheChunkSize int64    `toml:"cache_chunk_size"`
 	PrefetchSize   int64    `toml:"prefetch_size"`
+	NoPrefetch     bool     `toml:"noprefetch"`
 	LRUCacheEntry  int      `toml:"lru_max_entry"`
 	HTTPCacheType  string   `toml:"http_cache_type"`
 	FSCacheType    string   `toml:"filesystem_cache_type"`
@@ -114,6 +115,7 @@ func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
 		insecure:       config.Insecure,
 		cacheChunkSize: config.CacheChunkSize,
 		prefetchSize:   config.PrefetchSize,
+		noprefetch:     config.NoPrefetch,
 	}
 	if fs.cacheChunkSize == 0 {
 		fs.cacheChunkSize = defaultCacheChunkSize
@@ -134,6 +136,7 @@ type filesystem struct {
 	insecure       []string
 	cacheChunkSize int64
 	prefetchSize   int64
+	noprefetch     bool
 	httpCache      cache.BlobCache
 	fsCache        cache.BlobCache
 }
@@ -188,8 +191,10 @@ func (m *mounter) Prepare(ref, digest string) error {
 		r:      r,
 		cache:  m.fs.fsCache,
 	}
-	if err := gr.prefetch(sr, m.fs.prefetchSize); err != nil {
-		return err
+	if !m.fs.noprefetch {
+		if err := gr.prefetch(sr, m.fs.prefetchSize); err != nil {
+			return err
+		}
 	}
 	m.root = &node{
 		Node: nodefs.NewDefaultNode(),
