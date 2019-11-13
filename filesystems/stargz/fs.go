@@ -36,6 +36,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -116,6 +117,7 @@ func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
 		cacheChunkSize: config.CacheChunkSize,
 		prefetchSize:   config.PrefetchSize,
 		noprefetch:     config.NoPrefetch,
+		transport:      http.DefaultTransport,
 	}
 	if fs.cacheChunkSize == 0 {
 		fs.cacheChunkSize = defaultCacheChunkSize
@@ -139,6 +141,7 @@ type filesystem struct {
 	noprefetch     bool
 	httpCache      cache.BlobCache
 	fsCache        cache.BlobCache
+	transport      http.RoundTripper
 }
 
 func (fs *filesystem) Mounter() fsplugin.Mounter {
@@ -267,7 +270,7 @@ func (m *mounter) resolve(host, url, ref string) (string, http.RoundTripper, err
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
 	}
-	tr, err := transport.New(nameref.Context().Registry, auth, http.DefaultTransport, []string{nameref.Scope(transport.PullScope)})
+	tr, err := transport.New(nameref.Context().Registry, auth, m.fs.transport, []string{nameref.Scope(transport.PullScope)})
 	if err != nil {
 		return "", nil, fmt.Errorf("faild to get transport of %q: %v", ref, err)
 	}
@@ -282,9 +285,13 @@ func (m *mounter) resolve(host, url, ref string) (string, http.RoundTripper, err
 		return "", nil, fmt.Errorf("failed to request to the registry of %q: %v", url, err)
 	}
 	req.WithContext(ctx)
+	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	if res, err := tr.RoundTrip(req); err == nil && res.StatusCode < 400 {
-		defer res.Body.Close()
+		defer func() {
+			io.Copy(ioutil.Discard, res.Body)
+			res.Body.Close()
+		}()
 		if redir := res.Header.Get("Location"); redir != "" && res.StatusCode/100 == 3 {
 			url = redir
 		}
@@ -302,6 +309,7 @@ func (m *mounter) getSize(tr http.RoundTripper, url string) (int64, error) {
 		return 0, err
 	}
 	req.WithContext(ctx)
+	req.Close = false
 	res, err := tr.RoundTrip(req)
 	if err != nil {
 		return 0, err
