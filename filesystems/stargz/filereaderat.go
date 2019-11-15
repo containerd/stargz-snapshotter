@@ -31,8 +31,6 @@ import (
 	"github.com/ktock/remote-snapshotter/cache"
 )
 
-const prefetchLandmark = ".prefetch.landmark"
-
 type fileReaderAt struct {
 	name string
 	gr   *stargzReader

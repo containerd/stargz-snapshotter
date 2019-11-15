@@ -124,7 +124,7 @@ func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 	return f.(*file)
 }
 
-func TestWhiteout(t *testing.T) {
+func TestExistence(t *testing.T) {
 	tests := []struct {
 		name string
 		in   []tarEntry
@@ -188,6 +188,18 @@ func TestWhiteout(t *testing.T) {
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
 				hasNodeXattrs("foo/", "foo", "bar"),
 				fileNotExist("foo/.wh..wh..opq"),
+			),
+		},
+		{
+			name: "prefetch_landmark",
+			in: tarOf(
+				regfile(prefetchLandmark, "test"),
+				dir("foo/"),
+				regfile(fmt.Sprintf("foo/%s", prefetchLandmark), "test"),
+			),
+			want: checks(
+				fileNotExist(prefetchLandmark),
+				hasFileDigest(fmt.Sprintf("foo/%s", prefetchLandmark), digestFor("test")),
 			),
 		},
 	}
