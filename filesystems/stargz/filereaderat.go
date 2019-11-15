@@ -83,12 +83,14 @@ func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) error {
+func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) (<-chan struct{}, error) {
+	done := make(chan struct{})
 	if e, ok := gr.r.Lookup(prefetchLandmark); ok {
 		size = e.Offset
 	}
 	if size == 0 {
-		return nil
+		close(done)
+		return done, nil
 	}
 
 	// Prefetch specified range at once
@@ -96,43 +98,50 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) error {
 	_, err := layer.ReadAt(raw, 0)
 	if err != nil {
 		if err != io.EOF {
-			return fmt.Errorf("failed to get raw data: %v", err)
+			close(done)
+			return done, fmt.Errorf("failed to get raw data: %v", err)
 		}
 	}
 
-	// Parse the layer and cache chunks
-	gz, err := gzip.NewReader(bytes.NewReader(raw))
-	if err == io.ErrUnexpectedEOF {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("fileReader.ReadAt.gzipNewReader: %v", err)
-	}
-	tr := tar.NewReader(gz)
-	for {
-		h, err := tr.Next()
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			break
-		} else if err != nil {
-			return fmt.Errorf("failed to parse tar file: %v", err)
-		}
-		payload, err := ioutil.ReadAll(tr)
+	go func() {
+		defer close(done)
+
+		// Parse the layer and cache chunks
+		gz, err := gzip.NewReader(bytes.NewReader(raw))
 		if err == io.ErrUnexpectedEOF {
-			break
+			return
 		} else if err != nil {
-			return fmt.Errorf("failed to read tar payload %v", err)
+			return
 		}
-		var nr int64
-		for nr < h.Size {
-			ce, ok := gr.r.ChunkEntryForOffset(h.Name, nr)
-			if !ok {
+		tr := tar.NewReader(gz)
+		for {
+			h, err := tr.Next()
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				break
+			} else if err != nil {
+				return
 			}
-			gr.cache.Add(gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize),
-				payload[ce.ChunkOffset:ce.ChunkOffset+ce.ChunkSize])
-			nr += ce.ChunkSize
+			payload, err := ioutil.ReadAll(tr)
+			if err == io.ErrUnexpectedEOF {
+				break
+			} else if err != nil {
+				return
+			}
+			var nr int64
+			for nr < h.Size {
+				ce, ok := gr.r.ChunkEntryForOffset(h.Name, nr)
+				if !ok {
+					break
+				}
+				gr.cache.Add(gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize),
+					payload[ce.ChunkOffset:ce.ChunkOffset+ce.ChunkSize])
+				nr += ce.ChunkSize
+			}
 		}
-	}
-	return nil
+		return
+	}()
+
+	return done, nil
 }
 
 func (gr *stargzReader) genID(name string, offset, size int64) string {

@@ -196,7 +196,8 @@ func (m *mounter) Prepare(ref, digest string) error {
 		cache:  m.fs.fsCache,
 	}
 	if !m.fs.noprefetch {
-		if err := gr.prefetch(sr, m.fs.prefetchSize); err != nil {
+		// TODO: make sync/async switchable
+		if _, err := gr.prefetch(sr, m.fs.prefetchSize); err != nil {
 			return err
 		}
 	}

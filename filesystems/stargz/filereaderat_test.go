@@ -294,11 +294,12 @@ func TestPrefetch(t *testing.T) {
 				r:      r,
 				cache:  &testCache{membuf: map[string]string{}, t: t},
 			}
-			if err := gr.prefetch(sr, chunkNumToSize(t, tt.fetchNum, sr)); err != nil {
+			done, err := gr.prefetch(sr, chunkNumToSize(t, tt.fetchNum, sr))
+			if err != nil {
 				t.Errorf("failed to prefetch: %v", err)
 				return
 			}
-			if tt.wantNum != len(gr.cache.(*testCache).membuf) {
+			if <-done; tt.wantNum != len(gr.cache.(*testCache).membuf) {
 				t.Errorf("number of chunks in the cache %d; want %d", len(gr.cache.(*testCache).membuf), tt.wantNum)
 				return
 			}
