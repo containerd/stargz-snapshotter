@@ -70,6 +70,7 @@ const (
 	whiteoutOpaqueDir     = whiteoutPrefix + whiteoutPrefix + ".opq"
 	opaqueXattr           = "trusted.overlay.opaque"
 	opaqueXattrValue      = "y"
+	prefetchLandmark      = ".prefetch.landmark"
 )
 
 type Config struct {
@@ -335,6 +336,11 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	normalEnts := map[string]bool{}
 	n.e.ForeachChild(func(baseName string, ent *stargz.TOCEntry) bool {
 
+		// We don't want to show prefetch landmark in "/".
+		if n.e.Name == "" && baseName == prefetchLandmark {
+			return true
+		}
+
 		// We don't want to show whiteouts.
 		if strings.HasPrefix(baseName, whiteoutPrefix) {
 			if baseName == whiteoutOpaqueDir {
@@ -378,6 +384,11 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 			return nil, s
 		}
 		return c, fuse.OK
+	}
+
+	// We don't want to show prefetch landmark in "/".
+	if n.e.Name == "" && name == prefetchLandmark {
+		return nil, fuse.ENOENT
 	}
 
 	// We don't want to show whiteouts.
