@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"math/rand"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -202,6 +203,16 @@ func TestExistence(t *testing.T) {
 				hasFileDigest(fmt.Sprintf("foo/%s", prefetchLandmark), digestFor("test")),
 			),
 		},
+		{
+			name: "state_file",
+			in: tarOf(
+				regfile("test", "test"),
+			),
+			want: checks(
+				hasFileDigest("test", digestFor("test")),
+				hasStateFile(testStateId),
+			),
+		},
 	}
 
 	for _, tt := range tests {
@@ -230,6 +241,8 @@ func TestExistence(t *testing.T) {
 	}
 }
 
+const testStateId = "teststate"
+
 func getRootNode(t *testing.T, r *stargz.Reader) *node {
 	root, ok := r.Lookup("")
 	if !ok {
@@ -244,6 +257,7 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 		Node: nodefs.NewDefaultNode(),
 		gr:   gr,
 		e:    root,
+		s:    newState(testStateId),
 	}
 	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -436,6 +450,87 @@ func hasNodeXattrs(entry, name, value string) fsCheck {
 		}
 		if string(v) != value {
 			t.Errorf("node %q has an invalid xattr %q; want %q", entry, v, value)
+			return
+		}
+	})
+}
+
+func hasStateFile(id string) fsCheck {
+	return fsCheckFn(func(t *testing.T, root *node) {
+
+		// Check existence of state dir
+		var attr fuse.Attr
+		sti, status := root.Lookup(&attr, stateDirName, nil)
+		if status != fuse.OK {
+			t.Errorf("failed to lookup directory %q: %v", stateDirName, status)
+			return
+		}
+		st, ok := sti.Node().(*state)
+		if !ok {
+			t.Errorf("directory %q isn't a state node", stateDirName)
+			return
+		}
+
+		// Check existence of state file
+		ents, status := st.OpenDir(nil)
+		if status != fuse.OK {
+			t.Errorf("failed to open directory %q: %v", stateDirName, status)
+			return
+		}
+		var found bool
+		for _, e := range ents {
+			if e.Name == id {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("direntry %q not found in %q", id, stateDirName)
+			return
+		}
+		inode, status := st.Lookup(&attr, id, nil)
+		if status != fuse.OK {
+			t.Errorf("failed to lookup node %q in %q: %v", id, stateDirName, status)
+			return
+		}
+		n, ok := inode.Node().(*errFile)
+		if !ok {
+			t.Errorf("entry %q isn't a normal node", id)
+			return
+		}
+
+		// wanted data
+		rand.Seed(time.Now().UnixNano())
+		wantErr := fmt.Errorf("test-%d", rand.Int63())
+		wantData := fmt.Sprintf("%v", wantErr)
+
+		// report the data
+		root.s.report(wantErr)
+
+		// check file size
+		status = n.GetAttr(&attr, nil, nil)
+		if status != fuse.OK {
+			t.Errorf("failed to get attr of state file: %v", status)
+			return
+		}
+		if attr.Size != uint64(len(wantData)) {
+			t.Errorf("size %d; want %d", attr.Size, len(wantData))
+			return
+		}
+
+		// get data via state file
+		tmp := make([]byte, len(wantData))
+		res, status := n.Read(nil, tmp, 0, nil)
+		if status != fuse.OK {
+			t.Errorf("failed to read state file: %v", status)
+			return
+		}
+		gotState, status := res.Bytes(nil)
+		if status != fuse.OK {
+			t.Errorf("failed to get result bytes of state file: %v", status)
+			return
+		}
+		if string(gotState) != wantData {
+			t.Errorf("got %q; want %q", string(gotState), wantData)
 			return
 		}
 	})
