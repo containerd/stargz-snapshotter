@@ -158,6 +158,7 @@ func (fs *filesystem) Mounter() fsplugin.Mounter {
 type mounter struct {
 	root *node
 	fs   *filesystem
+	url  string
 }
 
 func (m *mounter) Prepare(ref, digest string) error {
@@ -171,6 +172,7 @@ func (m *mounter) Prepare(ref, digest string) error {
 	if err != nil {
 		return fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
 	}
+	m.url = url
 
 	// Get size information.
 	size, err := m.getSize(tr, url)
@@ -230,6 +232,32 @@ func (m *mounter) Mount(target string) error {
 	// server.SetDebug(true) // TODO: make configurable with /etc/containerd/config.toml
 	go server.Serve()
 	return server.WaitMount()
+}
+
+// TODO: snapshotter's side. maybe after metadata snapshotter's patch has been done?
+func (m *mounter) Check() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequest("GET", m.url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to request to the registry of %q: %v", m.url, err)
+	}
+	req.WithContext(ctx)
+	req.Close = false
+	req.Header.Set("Range", "bytes=0-1")
+	res, err := m.fs.transport.RoundTrip(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		io.Copy(ioutil.Discard, res.Body)
+		res.Body.Close()
+	}()
+	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("unexpected status code on %q: %v", m.url, res.Status)
+	}
+
+	return nil
 }
 
 // parseReference parses reference and digest then makes an URL of the blob.
