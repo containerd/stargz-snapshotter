@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -18,6 +20,45 @@ import (
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"golang.org/x/sys/unix"
 )
+
+func TestCheck(t *testing.T) {
+	tr := &breakRoundTripper{}
+	m := &mounter{
+		url: "test",
+		fs: &filesystem{
+			transport: tr,
+		},
+	}
+	tr.success = true
+	if err := m.Check(); err != nil {
+		t.Errorf("connectino failed; wanted to succeed")
+	}
+
+	tr.success = false
+	if err := m.Check(); err == nil {
+		t.Errorf("connection succeeded; wanted to fail")
+	}
+}
+
+type breakRoundTripper struct {
+	success bool
+}
+
+func (b *breakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if b.success {
+		return &http.Response{
+			StatusCode: http.StatusPartialContent,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
+		}, nil
+	} else {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		}, nil
+	}
+}
 
 // Tests Read method of each file node.
 func TestNodeRead(t *testing.T) {
