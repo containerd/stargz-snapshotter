@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -153,6 +154,37 @@ func multiRoundTripper(t *testing.T, contents []byte, except ...region) RoundTri
 		}
 		if !strings.HasPrefix(ranges, rangeHeaderPrefix) {
 			return &http.Response{StatusCode: http.StatusNotFound}
+		}
+
+		// check this request can be served as one whole blob.
+		var sorted []region
+		for _, part := range strings.Split(ranges[len(rangeHeaderPrefix):], ",") {
+			begin, end := parseRange(t, part)
+			sorted = append(sorted, region{begin, end})
+		}
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].b < sorted[j].b
+		})
+		var sparse bool
+		if sorted[0].b == 0 {
+			var max int64
+			for _, reg := range sorted {
+				if reg.e > max {
+					if max < reg.b-1 {
+						sparse = true
+						break
+					}
+					max = reg.e
+				}
+			}
+			if max >= int64(len(contents)-1) && !sparse {
+				t.Logf("serving whole range %q = %d", ranges, len(contents))
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       ioutil.NopCloser(bytes.NewReader(contents)),
+				}
+			}
 		}
 
 		// Write multipart response.

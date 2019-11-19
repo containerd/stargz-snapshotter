@@ -359,6 +359,10 @@ func (br *byteReader) ReadByte() (byte, error) {
 }
 
 func chunkNumToSize(t *testing.T, fetchNum int, sr *io.SectionReader) int64 {
+	if fetchNum == 0 {
+		return 0
+	}
+
 	br := &byteReader{sr}
 	zr, err := gzip.NewReader(br)
 	if err != nil {
