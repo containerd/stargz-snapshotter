@@ -18,7 +18,16 @@ func TestDirectoryCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to make tempdir: %v", err)
 	}
+
+	// with enough memory cache
 	c, err := NewDirectoryCache(tmp, 10)
+	if err != nil {
+		t.Fatalf("failed to make cache: %v", err)
+	}
+	testCache(t, c)
+
+	// with smaller memory cache
+	c, err = NewDirectoryCache(tmp, 1)
 	if err != nil {
 		t.Fatalf("failed to make cache: %v", err)
 	}
@@ -32,12 +41,14 @@ func TestMemoryCache(t *testing.T) {
 func testCache(t *testing.T, c BlobCache) {
 	tests := []struct {
 		name   string
-		blob   string
+		blobs  []string
 		checks []check
 	}{
 		{
 			name: "empty_data",
-			blob: "",
+			blobs: []string{
+				"",
+			},
 			checks: []check{
 				hit(""),
 				miss(sampleData),
@@ -45,7 +56,20 @@ func testCache(t *testing.T, c BlobCache) {
 		},
 		{
 			name: "data",
-			blob: sampleData,
+			blobs: []string{
+				sampleData,
+			},
+			checks: []check{
+				hit(sampleData),
+				miss("dummy"),
+			},
+		},
+		{
+			name: "manydata",
+			blobs: []string{
+				sampleData,
+				"test",
+			},
 			checks: []check{
 				hit(sampleData),
 				miss("dummy"),
@@ -55,8 +79,10 @@ func testCache(t *testing.T, c BlobCache) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := digestFor(tt.blob)
-			c.Add(d, []byte(tt.blob))
+			for _, blob := range tt.blobs {
+				d := digestFor(blob)
+				c.Add(d, []byte(blob))
+			}
 			for _, check := range tt.checks {
 				check(t, c)
 			}
@@ -68,7 +94,7 @@ type check func(*testing.T, BlobCache)
 
 func digestFor(content string) string {
 	sum := sha256.Sum256([]byte(content))
-	return fmt.Sprintf("sha256:%x", sum)
+	return fmt.Sprintf("%x", sum)
 }
 
 func hit(sample string) check {
