@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -14,9 +15,18 @@ const (
 
 func TestDirectoryCache(t *testing.T) {
 	tmp, err := ioutil.TempDir("", "testcache")
-	defer os.RemoveAll(tmp)
 	if err != nil {
 		t.Fatalf("failed to make tempdir: %v", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	waitFunc := func(d string) bool {
+		// Check if cache exists.
+		c := filepath.Join(tmp, d[:2], d)
+		if _, err := os.Stat(c); err == nil {
+			return true
+		}
+		return false
 	}
 
 	// with enough memory cache
@@ -24,21 +34,21 @@ func TestDirectoryCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to make cache: %v", err)
 	}
-	testCache(t, c)
+	testCache(t, c, tmp, waitFunc)
 
 	// with smaller memory cache
 	c, err = NewDirectoryCache(tmp, 1)
 	if err != nil {
 		t.Fatalf("failed to make cache: %v", err)
 	}
-	testCache(t, c)
+	testCache(t, c, tmp, waitFunc)
 }
 
 func TestMemoryCache(t *testing.T) {
-	testCache(t, NewMemoryCache())
+	testCache(t, NewMemoryCache(), "", func(d string) bool { return true })
 }
 
-func testCache(t *testing.T, c BlobCache) {
+func testCache(t *testing.T, c BlobCache, cleanDir string, waitFunc func(string) bool) {
 	tests := []struct {
 		name   string
 		blobs  []string
@@ -75,6 +85,16 @@ func testCache(t *testing.T, c BlobCache) {
 				miss("dummy"),
 			},
 		},
+		{
+			name: "dup_data",
+			blobs: []string{
+				sampleData,
+				sampleData,
+			},
+			checks: []check{
+				hit(sampleData),
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -82,9 +102,22 @@ func testCache(t *testing.T, c BlobCache) {
 			for _, blob := range tt.blobs {
 				d := digestFor(blob)
 				c.Add(d, []byte(blob))
+				for {
+					if complete := waitFunc(d); complete {
+						break
+					}
+				}
 			}
 			for _, check := range tt.checks {
 				check(t, c)
+			}
+
+			if cleanDir != "" {
+				os.RemoveAll(cleanDir)
+				err := os.MkdirAll(cleanDir, os.ModePerm)
+				if err != nil {
+					t.Fatalf("failed to recreate cachedir: %v", err)
+				}
 			}
 		})
 	}
