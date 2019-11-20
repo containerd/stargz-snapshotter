@@ -163,8 +163,14 @@ func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[r
 		if err != nil {
 			return fmt.Errorf("Failed to read response body: %v", err)
 		}
+		gotSize := int64(len(data))
+		requiredSize := int64(0)
 		for reg, _ := range requests {
 			allData[reg] = data[reg.b : reg.e+1]
+			requiredSize += reg.e - reg.b + 1
+		}
+		if requiredSize != gotSize {
+			return fmt.Errorf("broken response body; want size %d but got %d", requiredSize, gotSize)
 		}
 		return nil
 	}

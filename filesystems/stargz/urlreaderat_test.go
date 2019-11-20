@@ -122,6 +122,42 @@ func TestURLReadAt(t *testing.T) {
 	}
 }
 
+// Tests ReadAt method for failure cases.
+func TestFailReadAt(t *testing.T) {
+
+	// test failed http respose.
+	r := makeURLReaderAt(t, []byte(sampleData1), sampleChunkSize, failRoundTripper())
+	respData := make([]byte, len(sampleData1))
+	_, err := r.ReadAt(respData, 0)
+	if err == nil || err == io.EOF {
+		t.Errorf("must be fail for http failure but err=%v", err)
+		return
+	}
+
+	// test broken body
+	r = makeURLReaderAt(t, []byte(sampleData1), sampleChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1)))
+	respData = make([]byte, len(sampleData1))
+	_, err = r.ReadAt(respData, 0)
+	if err == nil || err == io.EOF {
+		t.Errorf("must be fail for broken full body but err=%v", err)
+		return
+	}
+	_, err = r.ReadAt(respData[0:len(sampleData1)/2], 0)
+	if err == nil || err == io.EOF {
+		t.Errorf("must be fail for broken multipart body but err=%v", err)
+		return
+	}
+
+	// test broken header
+	r = makeURLReaderAt(t, []byte(sampleData1), sampleChunkSize, brokenHeaderRoundTripper(t, []byte(sampleData1)))
+	respData = make([]byte, len(sampleData1))
+	_, err = r.ReadAt(respData[0:len(sampleData1)/2], 0)
+	if err == nil || err == io.EOF {
+		t.Errorf("must be fail for broken multipart header but err=%v", err)
+		return
+	}
+}
+
 func makeURLReaderAt(t *testing.T, contents []byte, chunkSize int64, fn RoundTripFunc) *urlReaderAt {
 	return &urlReaderAt{
 		url:       testURL,
@@ -241,4 +277,106 @@ func parseRange(t *testing.T, rangeString string) (int64, int64) {
 		t.Fatalf("failed to parse ending offset: %v", err)
 	}
 	return begin, end
+}
+
+func failRoundTripper() RoundTripFunc {
+	return func(req *http.Request) *http.Response {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		}
+	}
+}
+
+func brokenBodyRoundTripper(t *testing.T, contents []byte) RoundTripFunc {
+	return func(req *http.Request) *http.Response {
+		// Validate request
+		if req.Method != "GET" || req.URL.String() != testURL {
+			return &http.Response{StatusCode: http.StatusNotFound}
+		}
+		ranges := req.Header.Get("Range")
+		if ranges == "" {
+			return &http.Response{StatusCode: http.StatusNotFound}
+		}
+		if !strings.HasPrefix(ranges, rangeHeaderPrefix) {
+			return &http.Response{StatusCode: http.StatusNotFound}
+		}
+
+		// check this request can be served as one whole blob.
+		var sorted []region
+		for _, part := range strings.Split(ranges[len(rangeHeaderPrefix):], ",") {
+			begin, end := parseRange(t, part)
+			sorted = append(sorted, region{begin, end})
+		}
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].b < sorted[j].b
+		})
+		var sparse bool
+		if sorted[0].b == 0 {
+			var max int64
+			for _, reg := range sorted {
+				if reg.e > max {
+					if max < reg.b-1 {
+						sparse = true
+						break
+					}
+					max = reg.e
+				}
+			}
+			if max >= int64(len(contents)-1) && !sparse {
+				t.Logf("serving whole range %q = %d [but broken range!]", ranges, len(contents))
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       ioutil.NopCloser(bytes.NewReader(contents[:len(contents)/2])),
+				}
+			}
+		}
+
+		// Write multipart response.
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		parts := strings.Split(ranges[len(rangeHeaderPrefix):], ",")
+		for _, part := range parts {
+			mh := make(textproto.MIMEHeader)
+			mh.Set("Content-Range", fmt.Sprintf("bytes %s/%d", part, len(contents)))
+			w, err := mw.CreatePart(mh)
+			if err != nil {
+				t.Fatalf("failed to create part: %v", err)
+			}
+			begin, end := parseRange(t, part)
+			if begin >= int64(len(contents)) {
+				// skip if out of range.
+				continue
+			}
+			if end > int64(len(contents)-1) {
+				end = int64(len(contents) - 1)
+			}
+			brokenEnd := (end + 1) / 2
+			if n, err := w.Write(contents[begin:brokenEnd]); err != nil || int64(n) != brokenEnd-begin {
+				t.Fatalf("failed to write to part(%d-%d): %v", begin, brokenEnd, err)
+			}
+		}
+		mw.Close()
+		param := map[string]string{
+			"boundary": mw.Boundary(),
+		}
+		header := make(http.Header)
+		header.Add("Content-Type", mime.FormatMediaType("multipart/text", param))
+		return &http.Response{
+			StatusCode: http.StatusPartialContent,
+			Header:     header,
+			Body:       ioutil.NopCloser(&buf),
+		}
+	}
+}
+
+func brokenHeaderRoundTripper(t *testing.T, contents []byte) RoundTripFunc {
+	tr := multiRoundTripper(t, contents)
+	return func(req *http.Request) *http.Response {
+		res := tr(req)
+		res.Header = make(http.Header)
+		return res
+	}
 }
