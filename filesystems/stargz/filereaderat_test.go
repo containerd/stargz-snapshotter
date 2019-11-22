@@ -398,6 +398,107 @@ func chunkNumToSize(t *testing.T, fetchNum int, sr *io.SectionReader) int64 {
 	return rn
 }
 
+// Tests stargzReader for failure cases.
+func TestFailStargzReader(t *testing.T) {
+	testFileName := "test"
+	stargzFile := makeStargz(t, []regEntry{
+		{
+			name:     testFileName,
+			contents: string(sampleData1),
+		},
+	}, sampleChunkSize)
+	br := &breakReaderAt{
+		ReaderAt: stargzFile,
+		success:  true,
+	}
+	bsr := io.NewSectionReader(br, 0, stargzFile.Size())
+	r, err := stargz.Open(bsr)
+	if err != nil {
+		t.Fatalf("Failed to open stargz file: %v", err)
+	}
+	gr := &stargzReader{
+		digest: "dummy",
+		r:      r,
+		cache:  &nopCache{},
+	}
+
+	// tests for opening file
+	f, err := gr.openFile("dummy")
+	if err == nil {
+		t.Errorf("succeeded to open file but wanted to fail")
+		return
+	}
+
+	f, err = gr.openFile(testFileName)
+	if err != nil {
+		t.Errorf("failed to open file but wanted to succeed: %v", err)
+	}
+	fr, ok := f.(*fileReaderAt)
+	if !ok {
+		t.Fatalf("invalid file reader's type")
+	}
+	p := make([]byte, len(sampleData1))
+
+	// tests for reading file
+	br.success = true
+	n, err := fr.ReadAt(p, 0)
+	if err != nil || n != len(sampleData1) || !bytes.Equal([]byte(sampleData1), p) {
+		t.Errorf("failed to read data but wanted to succeed: %v", err)
+		return
+	}
+
+	br.success = false
+	_, err = fr.ReadAt(p, 0)
+	if err == nil {
+		t.Errorf("succeeded to read data but wanted to fail")
+		return
+	}
+
+	// tests for prefetch
+	br.success = true
+	done, err := gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()), stargzFile.Size())
+	if <-done; err != nil {
+		t.Errorf("failed to prefetch but wanted to succeed: %v", err)
+		return
+	}
+
+	br.success = false
+	done, err = gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()), stargzFile.Size())
+	if <-done; err == nil {
+		t.Errorf("suceeded to prefetch but wanted to fail")
+		return
+	}
+
+	dummyData := []byte("dummy") // wants to be succeeded even for dummy data
+	done, err = gr.prefetch(io.NewSectionReader(bytes.NewReader(dummyData), 0, int64(len(dummyData))), int64(len(dummyData)))
+	if <-done; err != nil {
+		t.Errorf("failed to prefetch for dummy but wanted to succeed: %v", err)
+		return
+	}
+}
+
+type breakReaderAt struct {
+	io.ReaderAt
+	success bool
+}
+
+func (br *breakReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if br.success {
+		return br.ReaderAt.ReadAt(p, off)
+	}
+	return 0, fmt.Errorf("failed")
+}
+
+type nopCache struct{}
+
+func (nc *nopCache) Fetch(blobHash string) ([]byte, error) {
+	return nil, fmt.Errorf("Missed cache: %s", blobHash)
+}
+
+func (nc *nopCache) Add(blobHash string, p []byte) {
+	return
+}
+
 type regEntry struct {
 	name     string
 	contents string
