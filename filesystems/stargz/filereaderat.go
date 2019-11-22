@@ -108,24 +108,18 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) (<-chan st
 
 		// Parse the layer and cache chunks
 		gz, err := gzip.NewReader(bytes.NewReader(raw))
-		if err == io.ErrUnexpectedEOF {
-			return
-		} else if err != nil {
+		if err != nil {
 			return
 		}
 		tr := tar.NewReader(gz)
 		for {
 			h, err := tr.Next()
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
+			if err != nil {
 				break
-			} else if err != nil {
-				return
 			}
 			payload, err := ioutil.ReadAll(tr)
-			if err == io.ErrUnexpectedEOF {
+			if err != nil {
 				break
-			} else if err != nil {
-				return
 			}
 			var nr int64
 			for nr < h.Size {
