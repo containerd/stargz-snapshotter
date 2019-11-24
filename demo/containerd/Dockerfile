@@ -54,8 +54,8 @@ RUN git clone https://github.com/opencontainers/runc $GOPATH/src/github.com/open
     make BUILDTAGS='seccomp apparmor' && make install && \
     git clone https://github.com/ktock/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
-    git checkout remote-snapshotter && \
-    git checkout 53110e516e5b4c0cd5b81f61c01fd5e33a25edef && \
+    git checkout filter-by-snapshotter-test && \
+    git checkout 516ed248600081ea9bf12f4c93b3e491c78859cf && \
     make && make install
 
 # helper for building and entrypoint

@@ -123,6 +123,7 @@ func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
 		prefetchSize:   config.PrefetchSize,
 		noprefetch:     config.NoPrefetch,
 		transport:      http.DefaultTransport,
+		url:            make(map[string]string),
 	}
 	if fs.cacheChunkSize == 0 {
 		fs.cacheChunkSize = defaultCacheChunkSize
@@ -147,35 +148,27 @@ type filesystem struct {
 	httpCache      cache.BlobCache
 	fsCache        cache.BlobCache
 	transport      http.RoundTripper
+	url            map[string]string
+	mu             sync.Mutex
 }
 
-func (fs *filesystem) Mounter() fsplugin.Mounter {
-	return &mounter{
-		fs: fs,
-	}
-}
-
-type mounter struct {
-	root *node
-	fs   *filesystem
-	url  string
-}
-
-func (m *mounter) Prepare(ref, digest string) error {
-	host, url, err := m.parseReference(ref, digest)
+func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
+	host, url, err := fs.parseReference(ref, digest)
 	if err != nil {
 		return fmt.Errorf("failed to parse the reference %q: %v", ref, err)
 	}
 
 	// authenticate to the registry using ~/.docker/config.json.
-	url, tr, err := m.resolve(host, url, ref)
+	url, tr, err := fs.resolve(host, url, ref)
 	if err != nil {
 		return fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
 	}
-	m.url = url
+	fs.mu.Lock()
+	fs.url[mountpoint] = url
+	fs.mu.Unlock()
 
 	// Get size information.
-	size, err := m.getSize(tr, url)
+	size, err := fs.getSize(tr, url)
 	if err != nil {
 		return fmt.Errorf("failed to get layer size information from %q: %v", url, err)
 	}
@@ -185,8 +178,8 @@ func (m *mounter) Prepare(ref, digest string) error {
 		url:       url,
 		t:         tr,
 		size:      size,
-		chunkSize: m.fs.cacheChunkSize,
-		cache:     m.fs.httpCache,
+		chunkSize: fs.cacheChunkSize,
+		cache:     fs.httpCache,
 	}, 0, size)
 	r, err := stargz.Open(sr)
 	if err != nil {
@@ -199,33 +192,29 @@ func (m *mounter) Prepare(ref, digest string) error {
 	gr := &stargzReader{
 		digest: digest,
 		r:      r,
-		cache:  m.fs.fsCache,
+		cache:  fs.fsCache,
 	}
-	if !m.fs.noprefetch {
+	if !fs.noprefetch {
 		// TODO: make sync/async switchable
-		if _, err := gr.prefetch(sr, m.fs.prefetchSize); err != nil {
+		if _, err := gr.prefetch(sr, fs.prefetchSize); err != nil {
 			return err
 		}
 	}
-	m.root = &node{
+
+	// Mounting stargz
+	// TODO: bind mount the state directory as a read-only fs on snapshotter's side
+	conn := nodefs.NewFileSystemConnector(&node{
 		Node: nodefs.NewDefaultNode(),
 		gr:   gr,
 		e:    root,
-	}
-	return nil
-}
-
-func (m *mounter) Mount(target string) error {
-	root := m.root
-	// TODO: bind mount the state directory as a read-only fs on snapshotter's side
-	root.s = newState(fmt.Sprintf("%x", sha256.Sum256([]byte(target))))
-	conn := nodefs.NewFileSystemConnector(root, &nodefs.Options{
+		s:    newState(fmt.Sprintf("%x", sha256.Sum256([]byte(mountpoint)))),
+	}, &nodefs.Options{
 		NegativeTimeout: 0,
 		AttrTimeout:     time.Second,
 		EntryTimeout:    time.Second,
 		Owner:           nil, // preserve owners.
 	})
-	server, err := fuse.NewServer(conn.RawFS(), target, &fuse.MountOptions{})
+	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to make server: %v", err)
 	}
@@ -235,17 +224,20 @@ func (m *mounter) Mount(target string) error {
 }
 
 // TODO: snapshotter's side. maybe after metadata snapshotter's patch has been done?
-func (m *mounter) Check() error {
+func (fs *filesystem) Check(mountpoint string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequest("GET", m.url, nil)
+	fs.mu.Lock()
+	url := fs.url[mountpoint]
+	fs.mu.Unlock()
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to request to the registry of %q: %v", m.url, err)
+		return fmt.Errorf("failed to request to the registry of %q: %v", url, err)
 	}
 	req.WithContext(ctx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
-	res, err := m.fs.transport.RoundTrip(req)
+	res, err := fs.transport.RoundTrip(req)
 	if err != nil {
 		return err
 	}
@@ -254,7 +246,7 @@ func (m *mounter) Check() error {
 		res.Body.Close()
 	}()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("unexpected status code on %q: %v", m.url, res.Status)
+		return fmt.Errorf("unexpected status code on %q: %v", fs.url, res.Status)
 	}
 
 	return nil
@@ -263,14 +255,14 @@ func (m *mounter) Check() error {
 // parseReference parses reference and digest then makes an URL of the blob.
 // "ref" must be formatted in <host>/<image>[:<tag>] (<tag> is optional).
 // "diegest" is an OCI's sha256 digest and must be prefixed by "sha256:".
-func (m *mounter) parseReference(ref, digest string) (host string, url string, err error) {
+func (fs *filesystem) parseReference(ref, digest string) (host string, url string, err error) {
 	refs := strings.Split(ref, "/")
 	if len(refs) < 2 {
 		err = fmt.Errorf("reference must contain names of host and image but got %q", ref)
 		return
 	}
 	scheme, host, image := "https", refs[0], strings.Split(strings.Join(refs[1:], "/"), ":")[0]
-	if m.isInsecure(host) {
+	if fs.isInsecure(host) {
 		scheme = "http"
 	}
 	return host, fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, image, digest), nil
@@ -279,8 +271,8 @@ func (m *mounter) parseReference(ref, digest string) (host string, url string, e
 // isInsecure checks if the specified host is registerd as "insecure" registry
 // in this filesystem. If so, this filesystem treat the host in a proper way
 // e.g. using HTTP instead of HTTPS.
-func (m *mounter) isInsecure(host string) bool {
-	for _, i := range m.fs.insecure {
+func (fs *filesystem) isInsecure(host string) bool {
+	for _, i := range fs.insecure {
 		if ok, _ := regexp.Match(i, []byte(host)); ok {
 			return true
 		}
@@ -291,9 +283,9 @@ func (m *mounter) isInsecure(host string) bool {
 
 // resolve resolves specified url and ref by authenticating and dealing with
 // redirection in a proper way. We use `~/.docker/config.json` for authn.
-func (m *mounter) resolve(host, url, ref string) (string, http.RoundTripper, error) {
+func (fs *filesystem) resolve(host, url, ref string) (string, http.RoundTripper, error) {
 	var opts []name.Option
-	if m.isInsecure(host) {
+	if fs.isInsecure(host) {
 		opts = append(opts, name.Insecure)
 	}
 	nameref, err := name.ParseReference(ref, opts...)
@@ -306,7 +298,7 @@ func (m *mounter) resolve(host, url, ref string) (string, http.RoundTripper, err
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
 	}
-	tr, err := transport.New(nameref.Context().Registry, auth, m.fs.transport, []string{nameref.Scope(transport.PullScope)})
+	tr, err := transport.New(nameref.Context().Registry, auth, fs.transport, []string{nameref.Scope(transport.PullScope)})
 	if err != nil {
 		return "", nil, fmt.Errorf("faild to get transport of %q: %v", ref, err)
 	}
@@ -337,7 +329,7 @@ func (m *mounter) resolve(host, url, ref string) (string, http.RoundTripper, err
 }
 
 // getSize fetches the size info of the specified layer by requesting HEAD.
-func (m *mounter) getSize(tr http.RoundTripper, url string) (int64, error) {
+func (fs *filesystem) getSize(tr http.RoundTripper, url string) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequest("HEAD", url, nil)

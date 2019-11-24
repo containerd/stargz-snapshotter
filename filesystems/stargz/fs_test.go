@@ -23,19 +23,19 @@ import (
 
 func TestCheck(t *testing.T) {
 	tr := &breakRoundTripper{}
-	m := &mounter{
-		url: "test",
-		fs: &filesystem{
-			transport: tr,
+	fs := &filesystem{
+		transport: tr,
+		url: map[string]string{
+			"test": "test",
 		},
 	}
 	tr.success = true
-	if err := m.Check(); err != nil {
+	if err := fs.Check("test"); err != nil {
 		t.Errorf("connectino failed; wanted to succeed")
 	}
 
 	tr.success = false
-	if err := m.Check(); err == nil {
+	if err := fs.Check("test"); err == nil {
 		t.Errorf("connection succeeded; wanted to fail")
 	}
 }

@@ -28,30 +28,11 @@ const RemoteFileSystemPlugin plugin.Type = "io.containerd.snapshotter.v1.remote"
 
 // FileSystem is a backing filesystem abstraction.
 //
-// On each Prepare()-ing a snapshot, we get a new Mounter for each FileSystem
-// and try to Mounter.Prepare() with the basic information of the layer(ref,
-// layer digest). If the Prepare()-ing succeeded for the layer on a FileSystem,
-// we treat the layer as being backed by the filesystem and being a remote
-// snapshot.
-//
-// On each Commit(), this snapshotter checks if the active snapshot is a remote
-// snapshot. If so, this snapshotter invokes the corresponding Mounter.Mount()
-// to mount the unpacked remote layer into the committed snapshot directory.
+// Mount() tries to mount a remote snapshot to the specified mount point
+// directory.
+// Check() is called to check the connectibity of the layer mountpoint on each
+// Prepare() operation.
 type FileSystem interface {
-	Mounter() Mounter
-}
-
-// Mounter prepares and mounts unpacked remote layers to the specified snapshot
-// directories.
-//
-// Prepare() is used to attempt to prepare a layer as a remote snapshot with the
-// layer's basic information(ref and the layer digest). Mounter can check if
-// this layer can be mounted as a remote snapshot. If possible, does any
-// necessary initialization.
-//
-// Mount() is used to mount the prepared layer on the committed snapshot
-// directory as a remote snapshot.
-type Mounter interface {
-	Prepare(ref, digest string) error
-	Mount(target string) error
+	Mount(ref, digest, mountpoint string) error
+	Check(mountpoint string) error
 }

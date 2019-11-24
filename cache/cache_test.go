@@ -30,25 +30,31 @@ func TestDirectoryCache(t *testing.T) {
 	}
 
 	// with enough memory cache
-	c, err := NewDirectoryCache(tmp, 10)
-	if err != nil {
-		t.Fatalf("failed to make cache: %v", err)
+	newCache := func() BlobCache {
+		c, err := NewDirectoryCache(tmp, 10)
+		if err != nil {
+			t.Fatalf("failed to make cache: %v", err)
+		}
+		return c
 	}
-	testCache(t, c, tmp, waitFunc)
+	testCache(t, tmp, newCache, waitFunc)
 
 	// with smaller memory cache
-	c, err = NewDirectoryCache(tmp, 1)
-	if err != nil {
-		t.Fatalf("failed to make cache: %v", err)
+	newCache = func() BlobCache {
+		c, err := NewDirectoryCache(tmp, 1)
+		if err != nil {
+			t.Fatalf("failed to make cache: %v", err)
+		}
+		return c
 	}
-	testCache(t, c, tmp, waitFunc)
+	testCache(t, tmp, newCache, waitFunc)
 }
 
 func TestMemoryCache(t *testing.T) {
-	testCache(t, NewMemoryCache(), "", func(d string) bool { return true })
+	testCache(t, "", NewMemoryCache, func(d string) bool { return true })
 }
 
-func testCache(t *testing.T, c BlobCache, cleanDir string, waitFunc func(string) bool) {
+func testCache(t *testing.T, cleanDir string, newCache func() BlobCache, waitFunc func(string) bool) {
 	tests := []struct {
 		name   string
 		blobs  []string
@@ -99,6 +105,7 @@ func testCache(t *testing.T, c BlobCache, cleanDir string, waitFunc func(string)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			c := newCache()
 			for _, blob := range tt.blobs {
 				d := digestFor(blob)
 				c.Add(d, []byte(blob))
