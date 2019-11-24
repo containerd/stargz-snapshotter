@@ -8,15 +8,15 @@ Related discussion of the snapshotter:
 This is an example implementation of a *remote snapshotter* which can be plugged into [patched version of containerd](https://github.com/ktock/containerd/tree/remote-snapshotter).
 By using this snapshotter, any converted but docker-compatible image can be pulled in several seconds even if the images are huge.
 ```
-# time ctr images pull --plain-http --remote-snapshot --snapshotter=remote registry2:5000/fedora:30 > /dev/null 
+# time ctr images pull --plain-http --skip-download --snapshotter=remote registry2:5000/fedora:30 > /dev/null 
 real	0m0.447s
 user	0m0.081s
 sys	0m0.019s
-# time ctr images pull --plain-http --remote-snapshot --snapshotter=remote registry2:5000/python:3.7 > /dev/null 
+# time ctr images pull --plain-http --skip-download --snapshotter=remote registry2:5000/python:3.7 > /dev/null 
 real	0m1.041s
 user	0m0.073s
 sys	0m0.028s
-# time ctr images pull --plain-http --remote-snapshot --snapshotter=remote registry2:5000/jenkins:2.60.3 > /dev/null 
+# time ctr images pull --plain-http --skip-download --snapshotter=remote registry2:5000/jenkins:2.60.3 > /dev/null 
 real	0m1.231s
 user	0m0.112s
 sys	0m0.008s
@@ -52,12 +52,12 @@ The converted image is still __compatible with a normal docker image__ so you ca
 
 ### Pull the image without downloading layers(it's sometimes called "lazypull") and run it
 ```
-# time ctr images pull --plain-http --remote-snapshot --snapshotter=remote registry2:5000/ubuntu:18.04
+# time ctr images pull --plain-http --skip-download --snapshotter=remote registry2:5000/ubuntu:18.04
 (Layer downloads don't occur. So this "pull" operation will end in around 1 sec.)
 real	0m0.248s
 user	0m0.020s
 sys	0m0.011s
-# ctr run --snapshotter=remote registry2:5000/ubuntu:18.04 test /bin/bash
+# ctr run --rm -t --snapshotter=remote registry2:5000/ubuntu:18.04 test /bin/bash
 ls
 ls
 bin
@@ -82,7 +82,7 @@ In the example showed above, you can pull images from your private repository on
 ```
 # docker login
 (Enter username and password)
-# ctr image pull --user <username>:<password> --remote-snapshot --snapshotter remote index.docker.io/<your-repository>/ubuntu:18.04
+# ctr image pull --user <username>:<password> --skip-download --snapshotter remote index.docker.io/<your-repository>/ubuntu:18.04
 ```
 The `--user` option is just for containerd's side which doesn't recognize `~/.docker/config.json`.
 Remote-snapshotter doesn't use credentials specified by this option but uses `~/.docker/config.json` instead.

@@ -27,9 +27,11 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/pkg/testutil"
 	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/containerd/snapshots/handler"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/containerd/snapshots/testsuite"
 	"github.com/ktock/remote-snapshotter/filesystems"
@@ -46,24 +48,12 @@ const (
 func prepareTarget(t *testing.T, sn snapshots.Snapshotter) string {
 	pKey := "/tmp/prepareTarget"
 	ctx := context.TODO()
-	remoteOpt := snapshots.WithLabels(map[string]string{
-		snapshots.RemoteRefLabel:    testRef,
-		snapshots.RemoteDigestLabel: testDigest,
-	})
-	if _, err := sn.Prepare(ctx, pKey, "", remoteOpt); err == nil {
-		if info, err := sn.Stat(ctx, pKey); err == nil {
-			if _, ok := info.Labels[snapshots.RemoteSnapshotLabel]; ok {
-				if err := sn.Commit(ctx, testTarget, pKey); err != nil {
-					t.Fatalf("failed to commit remote snapshot: %v", err)
-				}
-			} else {
-				t.Fatal("prepared snapshot isn't remote snapshot.")
-			}
-		} else {
-			t.Fatalf("failed to stat remote snapshot: %v", err)
-		}
-	} else {
-		t.Fatalf("failed to prepare: %v", err)
+	if _, err := sn.Prepare(ctx, pKey, "", snapshots.WithLabels(map[string]string{
+		handler.TargetSnapshotLabel: testTarget,
+		handler.TargetRefLabel:      testRef,
+		handler.TargetDigestLabel:   testDigest,
+	})); !errdefs.IsAlreadyExists(err) {
+		t.Fatalf("failed to prepare remote snapshot: %v", err)
 	}
 	return testTarget
 }
@@ -73,7 +63,7 @@ func newRemoteSnapshotter(t *testing.T, root string) (snapshots.Snapshotter, fun
 	if err != nil {
 		return nil, nil, err
 	}
-	snapshotter, err := NewSnapshotter(root, []plugin.FileSystem{fs})
+	snapshotter, err := NewSnapshotter(root, map[string]plugin.FileSystem{"test": fs})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,7 +90,7 @@ func TestRemotePrepare(t *testing.T) {
 	var tinfo *snapshots.Info
 	if err := sn.Walk(ctx, func(ctx context.Context, i snapshots.Info) error {
 		if tinfo == nil && i.Kind == snapshots.KindCommitted {
-			if i.Labels[snapshots.RemoteSnapshotLabel] != target {
+			if i.Labels[handler.TargetSnapshotLabel] != target {
 				return nil
 			}
 			if i.Parent != "" {
@@ -125,7 +115,7 @@ func TestRemotePrepare(t *testing.T) {
 	if info.Kind != snapshots.KindCommitted {
 		t.Errorf("snapshot Kind is %q; want %q", info.Kind, snapshots.KindCommitted)
 	}
-	if label, ok := info.Labels[snapshots.RemoteSnapshotLabel]; !ok || label != target {
+	if label, ok := info.Labels[handler.TargetSnapshotLabel]; !ok || label != target {
 		t.Errorf("remote snapshot hasn't valid remote label: %q", label)
 	}
 }
@@ -256,11 +246,6 @@ func TestRemoteCommit(t *testing.T) {
 	}
 }
 
-type filesystem struct {
-	root string
-	t    *testing.T
-}
-
 func bindFileSystem(t *testing.T) (plugin.FileSystem, error) {
 	root, err := ioutil.TempDir("", "remote")
 	if err != nil {
@@ -275,33 +260,22 @@ func bindFileSystem(t *testing.T) (plugin.FileSystem, error) {
 	}, nil
 }
 
-func (fs *filesystem) Mounter() plugin.Mounter {
-	return &mounter{
-		source: fs.root,
-		t:      fs.t,
+type filesystem struct {
+	t    *testing.T
+	root string
+}
+
+func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
+	if ref != testRef || digest != testDigest {
+		return fmt.Errorf("layer not found")
 	}
-}
-
-type mounter struct {
-	source string
-	target bool
-	t      *testing.T
-}
-
-func (m *mounter) Prepare(ref, digest string) error {
-	if ref == testRef && digest == testDigest {
-		m.target = true
+	if err := syscall.Mount(fs.root, mountpoint, "none", syscall.MS_BIND, ""); err != nil {
+		fs.t.Fatalf("failed to bind mount %q to %q: %v", fs.root, mountpoint, err)
 	}
 	return nil
 }
 
-func (m *mounter) Mount(target string) error {
-	if !m.target {
-		return nil
-	}
-	if err := syscall.Mount(m.source, target, "none", syscall.MS_BIND, ""); err != nil {
-		m.t.Fatalf("failed to bind mount %q to %q: %v", m.source, target, err)
-	}
+func (fs *filesystem) Check(mountpoint string) error {
 	return nil
 }
 

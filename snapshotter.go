@@ -48,14 +48,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 
+	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/plugin"
 	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/containerd/snapshots/handler"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
 	"github.com/pkg/errors"
@@ -84,12 +85,12 @@ func init() {
 			//
 			// register all FileSystems which we use to mount unpacked
 			// remote layers as remote snapshots.
-			var fss []fsplugin.FileSystem
-			if ps, err := ic.GetByType(fsplugin.RemoteFileSystemPlugin); err == nil {
-				for _, p := range ps {
+			fss := make(map[string]fsplugin.FileSystem)
+			if ps, err := ic.GetByType(fsplugin.RemoteFileSystemPlugin); ps != nil && err == nil {
+				for id, p := range ps {
 					if i, err := p.Instance(); err == nil {
 						if f, ok := i.(fsplugin.FileSystem); ok {
-							fss = append(fss, f)
+							fss[id] = f
 						}
 					}
 				}
@@ -125,26 +126,14 @@ type snapshotter struct {
 	// ==REMOTE SNAPSHOTTER SPECIFIC==
 	//
 	// FileSystems that this snapshotter recognizes.
-	fss []fsplugin.FileSystem
-
-	// ==REMOTE SNAPSHOTTER SPECIFIC==
-	//
-	// Mounter keyed by the active remote snapshotter that the Mounter
-	// has prepared. We use this map in the Commit() operation to
-	// remenber "What Mounter we used to Prepare() this remote snapshot?"
-	// and we use same Mounter to Mount() the prepared remote snapshot
-	// on the active snapshot directory.
-	// See "/filesystems/plugin.go" in this repo for the definition of
-	// the Mounter.
-	fsmounter map[string]fsplugin.Mounter
-	mu        sync.Mutex
+	fss map[string]fsplugin.FileSystem
 }
 
 // NewSnapshotter returns a Snapshotter which can use unpacked remote layers
 // as snapshots. This is implemented based on the overlayfs snapshotter, so
 // diffs are stored under the provided root and a metadata file is stored under
 // the root as same as overlayfs snapshotter.
-func NewSnapshotter(root string, fss []fsplugin.FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
+func NewSnapshotter(root string, fss map[string]fsplugin.FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
 	var config SnapshotterConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -171,12 +160,14 @@ func NewSnapshotter(root string, fss []fsplugin.FileSystem, opts ...Opt) (snapsh
 		return nil, err
 	}
 
+	if fss == nil {
+		fss = make(map[string]fsplugin.FileSystem)
+	}
 	return &snapshotter{
 		root:        root,
 		ms:          ms,
 		asyncRemove: config.asyncRemove,
 		fss:         fss,
-		fsmounter:   map[string]fsplugin.Mounter{},
 	}, nil
 }
 
@@ -254,29 +245,26 @@ func (o *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, e
 }
 
 func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
+	m, err := o.createSnapshot(ctx, snapshots.KindActive, key, parent, opts)
+	if err != nil {
+		return nil, err
+	}
 
 	// ==REMOTE SNAPSHOTTER SPECIFIC==
 	//
-	// Firstly, try to prepare this snapshot as a remote snapshot using
-	// FileSystems this snapshotter recognizes.
-	if err := o.prepareRemoteSnapshot(key, opts); err == nil {
-		// We succeeded to prepare this snapshot as a remote snapshot
-		// using one of FileSystems this snapshotter recognizes.
-		// We label this snapshot as a remote snapshot so that the
-		// client of this snapshotter can know it.
-		//
-		// We also use this label on Commit() to distinguish the active
-		// remote snapshot and the normal one.
-		// To make sure that this label is applied ON THIS VERY snapshot,
-		// and to avoid accidentally making a remote snapshot by a label
-		// which has been unconsciously inherited by other snapshots, we
-		// store the key of this active snapshot in this label.
-		opts = append(opts, snapshots.WithLabels(map[string]string{
-			snapshots.RemoteSnapshotLabel: key,
-		}))
+	// Try to prepare the remote snapshot. If succeeded, we commit the snapshot now
+	// and return ErrAlreadyExists.
+	if target, ok := getLabel(handler.TargetSnapshotLabel, opts); ok {
+		if err := o.prepareRemoteSnapshot(ctx, key, opts); err != nil {
+			return m, nil // fallback to the normal behavior
+		}
+		if err := o.Commit(ctx, target, key, opts...); err != nil {
+			return m, nil // fallback to the normal behavior
+		}
+		return nil, errors.Wrapf(errdefs.ErrAlreadyExists, "target snapshot %q", target)
 	}
 
-	return o.createSnapshot(ctx, snapshots.KindActive, key, parent, opts)
+	return m, nil
 }
 
 func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
@@ -320,28 +308,14 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		return err
 	}
 
-	usage, err := fs.DiskUsage(ctx, o.upperPath(id))
-	if err != nil {
-		return err
-	}
-
 	// ==REMOTE SNAPSHOTTER SPECIFIC==
 	//
-	// Check if this commit is for a remote snapshot.
-	if pkey, ok := info.Labels[snapshots.RemoteSnapshotLabel]; ok && pkey == key {
-		// This layer is Prepare()-ed as a remote snapshot.
-		// We ignore any changes applied on the active snapshot and
-		// override it by mounting the unpacked remote layer as the
-		// remote snapshot.
-		if err := o.mountRemoteSnapshot(key, o.upperPath(id)); err != nil {
-			return errors.Wrapf(err, "failed to mount a remote snapshot for %s", key)
+	// Avoid walking through mounted remote snapshot.
+	var usage fs.Usage
+	if _, ok := info.Labels[handler.TargetSnapshotLabel]; !ok {
+		if usage, err = fs.DiskUsage(ctx, o.upperPath(id)); err != nil {
+			return err
 		}
-		// We successfully made a remote snapshot.
-		// Mark it as a remote snapshot so we can distinguish a remote
-		// snapshot and normal one when we Stat() it.
-		opts = append(opts, snapshots.WithLabels(map[string]string{
-			snapshots.RemoteSnapshotLabel: name,
-		}))
 	}
 
 	if _, err = storage.CommitActive(ctx, key, name, snapshots.Usage(usage), opts...); err != nil {
@@ -397,14 +371,14 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	return t.Commit()
 }
 
-// Walk the committed snapshots.
-func (o *snapshotter) Walk(ctx context.Context, fn func(context.Context, snapshots.Info) error) error {
+// Walk the snapshots.
+func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...string) error {
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return err
 	}
 	defer t.Rollback()
-	return storage.WalkInfo(ctx, fn)
+	return storage.WalkInfo(ctx, fn, fs...)
 }
 
 // Cleanup cleans up disk resources from removed or abandoned snapshots
@@ -647,64 +621,34 @@ func (o *snapshotter) Close() error {
 // prepareRemoteSnapshot tries to prepare the snapshot as a remote snapshot
 // using FileSystems registered in this snapshotter with the layer's basic
 // information(ref and the layer digest).
-// If succeeded to prepare the snapshot as a remote snapshot using one of
-// the FileSystems, we hold the Mounter to make it enable to be used on
-// Commmit(), when we mount the remote layer on the committed snapshot
-// directory.
-func (o *snapshotter) prepareRemoteSnapshot(key string, opts []snapshots.Opt) error {
-
-	// get ref and layer digest from options.
-	ref, digest, err := getLayerInfo(opts)
+func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, opts []snapshots.Opt) error {
+	ref, ok := getLabel(handler.TargetRefLabel, opts)
+	if !ok {
+		return errors.New("image reference is not passed")
+	}
+	digest, ok := getLabel(handler.TargetDigestLabel, opts)
+	if !ok {
+		return errors.New("image digest are not passed")
+	}
+	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse basic layer information for %s", key)
+		return err
+	}
+	defer t.Rollback()
+	id, _, _, err := storage.GetInfo(ctx, key)
+	if err != nil {
+		return err
 	}
 
 	// Search a filesystem which can mount a remote snapshot for this layer.
 	// TODO: deterministic order.
 	for _, f := range o.fss {
-		m := f.Mounter()
-		if err := m.Prepare(ref, digest); err == nil {
-			o.fsmounter[key] = m
+		if err := f.Mount(ref, digest, o.upperPath(id)); err == nil {
 			return nil
 		}
 	}
 
-	return fmt.Errorf("mountable remote snapshot not found")
-}
-
-// ==REMOTE SNAPSHOTTER SPECIFIC==
-//
-// mountRemoteSnapshot mounts the prepared remote snapshot on the committed
-// snapshot directory as a remote snapshot. This uses the same Mounter which has
-// been used to Prepare this remote snapshot, which has been stored in this
-// snapshotter(in the *snapshotter.fsmounter map).
-func (o *snapshotter) mountRemoteSnapshot(key, target string) error {
-	m, ok := o.fsmounter[key]
-	if !ok {
-		return fmt.Errorf("mounter hasn't been prepared")
-	}
-	delete(o.fsmounter, key) // once we mount, we don't this Mounter anymore.
-
-	if err := m.Mount(target); err != nil {
-		return err
-	}
-	return nil
-}
-
-// ==REMOTE SNAPSHOTTER SPECIFIC==
-//
-// getLayerInfo is used to extract the layer's basic information which is passed
-// through Opt. When the client of this snapshotter want to Prepare() a layer as
-// a remote snapshot, these options MUST be passed.
-func getLayerInfo(opts []snapshots.Opt) (ref, digest string, err error) {
-	var ok bool
-	if ref, ok = getLabel(snapshots.RemoteRefLabel, opts); !ok {
-		return "", "", errors.New("image reference is not passed")
-	}
-	if digest, ok = getLabel(snapshots.RemoteDigestLabel, opts); !ok {
-		return "", "", errors.New("image digest are not passed")
-	}
-	return
+	return errors.New("mountable remote layer not found")
 }
 
 // ==REMOTE SNAPSHOTTER SPECIFIC==
