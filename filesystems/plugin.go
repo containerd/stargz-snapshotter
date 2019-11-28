@@ -22,16 +22,17 @@ import (
 	"github.com/containerd/containerd/plugin"
 )
 
-// We use RemoteFileSystemPlugin to mount unpacked remote layers as remote
-// snapshots.
+// Implement each filesystem as RemoteFileSystemPlugin to mount remote layers as
+// remote snapshots.
 const RemoteFileSystemPlugin plugin.Type = "io.containerd.snapshotter.v1.remote"
 
 // FileSystem is a backing filesystem abstraction.
 //
 // Mount() tries to mount a remote snapshot to the specified mount point
-// directory.
-// Check() is called to check the connectibity of the layer mountpoint on each
-// Prepare() operation.
+// directory. If succeed, the mountpoint directory will be treated as a layer
+// snapshot.
+// Check() is called to check the connectibity of the existing layer snapshot on
+// each Prepare() operation.
 type FileSystem interface {
 	Mount(ref, digest, mountpoint string) error
 	Check(mountpoint string) error

@@ -58,13 +58,8 @@ real	0m0.248s
 user	0m0.020s
 sys	0m0.011s
 # ctr run --rm -t --snapshotter=remote registry2:5000/ubuntu:18.04 test /bin/bash
-ls
-ls
-bin
-boot
-dev
-etc
-...
+root@8dab301bd68d:/# ls
+bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
 ```
 
 ### Cleanup
@@ -87,6 +82,10 @@ In the example showed above, you can pull images from your private repository on
 The `--user` option is just for containerd's side which doesn't recognize `~/.docker/config.json`.
 Remote-snapshotter doesn't use credentials specified by this option but uses `~/.docker/config.json` instead.
 If you have no right to access the repository with credentials stored in `~/.docker/config.json`, this pull optration fallbacks to the normal one(i.e. overlayfs).
+
+## Filesystem integration
+
+Filesystems can be easily integrated with this snapshotter and containerd by implementing a simple interface described [here](filesystems/plugin.go) without thinking about remote snapshotter protocol. See [the existing implementation](filesystems/stargz/fs.go).
 
 # TODO
 
