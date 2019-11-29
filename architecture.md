@@ -1,3 +1,6 @@
+# NOTICE: This doc is stale. See https://github.com/containerd/containerd/issues/3731 for latest discussion.
+We will update it soon.
+
 # Remote Snapshotter Architecture
 
 This is an example implementation of a containerd's *remote snapshotter*.
