@@ -223,7 +223,6 @@ func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
 	return server.WaitMount()
 }
 
-// TODO: snapshotter's side. maybe after metadata snapshotter's patch has been done?
 func (fs *filesystem) Check(mountpoint string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

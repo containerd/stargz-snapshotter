@@ -31,8 +31,8 @@ const RemoteFileSystemPlugin plugin.Type = "io.containerd.snapshotter.v1.remote"
 // Mount() tries to mount a remote snapshot to the specified mount point
 // directory. If succeed, the mountpoint directory will be treated as a layer
 // snapshot.
-// Check() is called to check the connectibity of the existing layer snapshot on
-// each Prepare() operation.
+// Check() is called to check the connectibity of the existing layer snapshot
+// every time the layer is used by containerd.
 type FileSystem interface {
 	Mount(ref, digest, mountpoint string) error
 	Check(mountpoint string) error

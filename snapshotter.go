@@ -48,6 +48,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/containerd/containerd/errdefs"
@@ -85,12 +86,12 @@ func init() {
 			//
 			// register all FileSystems which we use to mount unpacked
 			// remote layers as remote snapshots.
-			fss := make(map[string]fsplugin.FileSystem)
+			var fss []fsplugin.FileSystem
 			if ps, err := ic.GetByType(fsplugin.RemoteFileSystemPlugin); ps != nil && err == nil {
-				for id, p := range ps {
+				for _, p := range ps {
 					if i, err := p.Instance(); err == nil {
 						if f, ok := i.(fsplugin.FileSystem); ok {
-							fss[id] = f
+							fss = append(fss, f)
 						}
 					}
 				}
@@ -126,14 +127,20 @@ type snapshotter struct {
 	// ==REMOTE SNAPSHOTTER SPECIFIC==
 	//
 	// FileSystems that this snapshotter recognizes.
-	fss map[string]fsplugin.FileSystem
+	fss []fsplugin.FileSystem
+
+	// ==REMOTE SNAPSHOTTER SPECIFIC==
+	//
+	// Map from mountpoint to FileSystem used to mount it.
+	fsmounts map[string]fsplugin.FileSystem
+	mu       sync.Mutex
 }
 
 // NewSnapshotter returns a Snapshotter which can use unpacked remote layers
 // as snapshots. This is implemented based on the overlayfs snapshotter, so
 // diffs are stored under the provided root and a metadata file is stored under
 // the root as same as overlayfs snapshotter.
-func NewSnapshotter(root string, fss map[string]fsplugin.FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
+func NewSnapshotter(root string, fss []fsplugin.FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
 	var config SnapshotterConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -160,14 +167,12 @@ func NewSnapshotter(root string, fss map[string]fsplugin.FileSystem, opts ...Opt
 		return nil, err
 	}
 
-	if fss == nil {
-		fss = make(map[string]fsplugin.FileSystem)
-	}
 	return &snapshotter{
 		root:        root,
 		ms:          ms,
 		asyncRemove: config.asyncRemove,
 		fss:         fss,
+		fsmounts:    make(map[string]fsplugin.FileSystem),
 	}, nil
 }
 
@@ -285,7 +290,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get active mount")
 	}
-	return o.mounts(s), nil
+	return o.mounts(s)
 }
 
 func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snapshots.Opt) error {
@@ -446,7 +451,11 @@ func (o *snapshotter) cleanupSnapshotDirectory(dir string) error {
 	// On a remote snapshot, the layer is mounted on the "fs" direcotry.
 	// Filesystem can do any finalization by detecting this "unmount" event
 	// and we don't care the finalization explicitly at this stage.
-	_ = syscall.Unmount(filepath.Join(dir, "fs"), 0)
+	mp := filepath.Join(dir, "fs")
+	_ = syscall.Unmount(mp, 0)
+	o.mu.Lock()
+	delete(o.fsmounts, mp)
+	o.mu.Unlock()
 	if err := os.RemoveAll(dir); err != nil {
 		return errors.Wrapf(err, "failed to remove directory %s", dir)
 	}
@@ -525,7 +534,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		return nil, errors.Wrap(err, "commit failed")
 	}
 
-	return o.mounts(s), nil
+	return o.mounts(s)
 }
 
 func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, kind snapshots.Kind) (string, error) {
@@ -547,7 +556,7 @@ func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, 
 	return td, nil
 }
 
-func (o *snapshotter) mounts(s storage.Snapshot) []mount.Mount {
+func (o *snapshotter) mounts(s storage.Snapshot) ([]mount.Mount, error) {
 	if len(s.ParentIDs) == 0 {
 		// if we only have one layer/no parents then just return a bind mount as overlay
 		// will not work
@@ -556,6 +565,9 @@ func (o *snapshotter) mounts(s storage.Snapshot) []mount.Mount {
 			roFlag = "ro"
 		}
 
+		if err := o.checkAvailability(o.upperPath(s.ID)); err != nil {
+			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ID, err)
+		}
 		return []mount.Mount{
 			{
 				Source: o.upperPath(s.ID),
@@ -565,7 +577,7 @@ func (o *snapshotter) mounts(s storage.Snapshot) []mount.Mount {
 					"rbind",
 				},
 			},
-		}
+		}, nil
 	}
 	var options []string
 
@@ -575,6 +587,9 @@ func (o *snapshotter) mounts(s storage.Snapshot) []mount.Mount {
 			fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
 		)
 	} else if len(s.ParentIDs) == 1 {
+		if err := o.checkAvailability(o.upperPath(s.ParentIDs[0])); err != nil {
+			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ParentIDs[0], err)
+		}
 		return []mount.Mount{
 			{
 				Source: o.upperPath(s.ParentIDs[0]),
@@ -584,11 +599,14 @@ func (o *snapshotter) mounts(s storage.Snapshot) []mount.Mount {
 					"rbind",
 				},
 			},
-		}
+		}, nil
 	}
 
 	parentPaths := make([]string, len(s.ParentIDs))
 	for i := range s.ParentIDs {
+		if err := o.checkAvailability(o.upperPath(s.ParentIDs[i])); err != nil {
+			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ParentIDs[i], err)
+		}
 		parentPaths[i] = o.upperPath(s.ParentIDs[i])
 	}
 
@@ -599,7 +617,7 @@ func (o *snapshotter) mounts(s storage.Snapshot) []mount.Mount {
 			Source:  "overlay",
 			Options: options,
 		},
-	}
+	}, nil
 
 }
 
@@ -644,11 +662,28 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, opt
 	// TODO: deterministic order.
 	for _, f := range o.fss {
 		if err := f.Mount(ref, digest, o.upperPath(id)); err == nil {
+			o.mu.Lock()
+			o.fsmounts[o.upperPath(id)] = f
+			o.mu.Unlock()
 			return nil
 		}
 	}
 
 	return errors.New("mountable remote layer not found")
+}
+
+// ==REMOTE SNAPSHOTTER SPECIFIC==
+//
+// checkAvailability checks the avaiability of specified mountpoint using
+// filesystem's checking functionality.
+func (o *snapshotter) checkAvailability(mountpoint string) error {
+	o.mu.Lock()
+	fs, ok := o.fsmounts[mountpoint]
+	o.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return fs.Check(mountpoint)
 }
 
 // ==REMOTE SNAPSHOTTER SPECIFIC==

@@ -58,16 +58,16 @@ func prepareTarget(t *testing.T, sn snapshots.Snapshotter) string {
 	return testTarget
 }
 
-func newRemoteSnapshotter(t *testing.T, root string) (snapshots.Snapshotter, func() error, error) {
+func newRemoteSnapshotter(t *testing.T, root string) (snapshots.Snapshotter, plugin.FileSystem, error) {
 	fs, err := bindFileSystem(t)
 	if err != nil {
 		return nil, nil, err
 	}
-	snapshotter, err := NewSnapshotter(root, map[string]plugin.FileSystem{"test": fs})
+	snapshotter, err := NewSnapshotter(root, []plugin.FileSystem{fs})
 	if err != nil {
 		return nil, nil, err
 	}
-	return snapshotter, func() error { return snapshotter.Close() }, nil
+	return snapshotter, fs, nil
 }
 
 func TestRemotePrepare(t *testing.T) {
@@ -178,6 +178,48 @@ func TestRemoteOverlay(t *testing.T) {
 	}
 }
 
+func TestFailureDetection(t *testing.T) {
+	ctx := context.TODO()
+	root, err := ioutil.TempDir("", "remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	sn, fi, err := newRemoteSnapshotter(t, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs, ok := fi.(*filesystem)
+	if !ok {
+		t.Fatalf("Invalid filesystem type(not *filesystem)")
+	}
+
+	// Prepare a base remote snapshot.
+	target := prepareTarget(t, sn)
+	defer sn.Remove(ctx, target)
+	pKey := "/tmp/test"
+
+	// Tests if we can detect layer unavailablity on Prepare().
+	fs.failure = true
+	if _, err := sn.Prepare(ctx, pKey, target); !errdefs.IsUnavailable(err) {
+		t.Errorf("got %q; want ErrUnavailable", err)
+		return
+	}
+	sn.Remove(ctx, pKey)
+
+	// Tests if we can detect layer unavailablity on Mounts().
+	fs.failure = false
+	if _, err := sn.Prepare(ctx, pKey, target); err != nil {
+		t.Fatalf("failed to prepare snapshot: %q", err)
+	}
+	fs.failure = true
+	if _, err := sn.Mounts(ctx, pKey); !errdefs.IsUnavailable(err) {
+		t.Errorf("got %q; want ErrUnavailable", err)
+		return
+	}
+	sn.Remove(ctx, pKey)
+}
+
 func TestRemoteCommit(t *testing.T) {
 	ctx := context.TODO()
 	root, err := ioutil.TempDir("", "remote")
@@ -261,8 +303,9 @@ func bindFileSystem(t *testing.T) (plugin.FileSystem, error) {
 }
 
 type filesystem struct {
-	t    *testing.T
-	root string
+	t       *testing.T
+	root    string
+	failure bool
 }
 
 func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
@@ -276,6 +319,9 @@ func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
 }
 
 func (fs *filesystem) Check(mountpoint string) error {
+	if fs.failure {
+		return fmt.Errorf("failed")
+	}
 	return nil
 }
 

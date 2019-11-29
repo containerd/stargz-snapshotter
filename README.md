@@ -94,8 +94,8 @@ Filesystems can be easily integrated with this snapshotter and containerd by imp
 - [ ] Contributing CRFS to make it more stable.
 
 ## Snapshotter specific issues:
-- [ ] Resiliency:
-  - [ ] Ensure all mounts are available on every Prepare() and report erros when unavailable.
-  - [ ] Deal with runtime problems(NW disconnection, authn failure and so on).
+- [x] Resiliency:
+  - [x] Ensure all mounts are available on every Prepare() and report erros when unavailable.
+  - [x] Deal with runtime problems(NW disconnection, authn failure and so on).
 - [x] Authn: Implement fundamental private repository authentication using `~/.docker/config.json`.
 - [ ] Performance: READ performance improvement
