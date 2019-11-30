@@ -80,7 +80,6 @@ const (
 type Config struct {
 	Insecure       []string `toml:"insecure"`
 	CacheChunkSize int64    `toml:"cache_chunk_size"`
-	PrefetchSize   int64    `toml:"prefetch_size"`
 	NoPrefetch     bool     `toml:"noprefetch"`
 	LRUCacheEntry  int      `toml:"lru_max_entry"`
 	HTTPCacheType  string   `toml:"http_cache_type"`
@@ -120,7 +119,6 @@ func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
 	fs = &filesystem{
 		insecure:       config.Insecure,
 		cacheChunkSize: config.CacheChunkSize,
-		prefetchSize:   config.PrefetchSize,
 		noprefetch:     config.NoPrefetch,
 		transport:      http.DefaultTransport,
 		url:            make(map[string]string),
@@ -143,7 +141,6 @@ func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
 type filesystem struct {
 	insecure       []string
 	cacheChunkSize int64
-	prefetchSize   int64
 	noprefetch     bool
 	httpCache      cache.BlobCache
 	fsCache        cache.BlobCache
@@ -196,7 +193,7 @@ func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
 	}
 	if !fs.noprefetch {
 		// TODO: make sync/async switchable
-		if _, err := gr.prefetch(sr, fs.prefetchSize); err != nil {
+		if _, err := gr.prefetch(sr); err != nil {
 			return err
 		}
 	}

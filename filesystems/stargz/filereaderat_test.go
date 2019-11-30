@@ -3,7 +3,6 @@ package main
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -176,92 +175,23 @@ func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) *fileReade
 // Tests prefetch method of each stargz file.
 func TestPrefetch(t *testing.T) {
 	tests := []struct {
-		name     string
-		in       []regEntry
-		fetchNum int      // number of chunks to fetch
-		wantNum  int      // number of chunks wanted in the cache
-		wants    []string // filenames to compare
+		name    string
+		in      []regEntry
+		wantNum int      // number of chunks wanted in the cache
+		wants   []string // filenames to compare
 	}{
 		{
-			name: "zero_region",
+			name: "no_prefetch",
 			in: []regEntry{
 				{
 					name:     "foo.txt",
 					contents: sampleData1,
 				},
 			},
-			fetchNum: 0,
-			wantNum:  0,
+			wantNum: 0,
 		},
 		{
-			name: "smaller_region",
-			in: []regEntry{
-				{
-					name:     "foo.txt",
-					contents: sampleData1,
-				},
-			},
-			fetchNum: 1 + chunkNum(sampleData1)/2, // header + file(partial)
-			wantNum:  0,
-		},
-		{
-			name: "just_file_region",
-			in: []regEntry{
-				{
-					name:     "foo.txt",
-					contents: sampleData1,
-				},
-			},
-			fetchNum: 1 + chunkNum(sampleData1), // header + file(full)
-			wantNum:  chunkNum(sampleData1),
-			wants:    []string{"foo.txt"},
-		},
-		{
-			name: "bigger_region",
-			in: []regEntry{
-				{
-					name:     "foo.txt",
-					contents: sampleData1,
-				},
-				{
-					name:     "bar.txt",
-					contents: sampleData2,
-				},
-			},
-			fetchNum: 1 + chunkNum(sampleData1) + (chunkNum(sampleData2) / 2), // header + file(full) + file(partial)
-			wantNum:  chunkNum(sampleData1),
-			wants:    []string{"foo.txt"},
-		},
-		{
-			name: "over_whole_stargz",
-			in: []regEntry{
-				{
-					name:     "foo.txt",
-					contents: sampleData1,
-				},
-			},
-			fetchNum: 1 + chunkNum(sampleData1) + (chunkNum(sampleData1) / 2), // header + file(full) + file(partial)
-			wantNum:  chunkNum(sampleData1),
-			wants:    []string{"foo.txt"},
-		},
-		{
-			name: "2_files",
-			in: []regEntry{
-				{
-					name:     "foo.txt",
-					contents: sampleData1,
-				},
-				{
-					name:     "bar.txt",
-					contents: sampleData2,
-				},
-			},
-			fetchNum: 1 + chunkNum(sampleData1) + 1 + chunkNum(sampleData2), // header + file(full) + header + file(full)
-			wantNum:  chunkNum(sampleData1) + chunkNum(sampleData2),
-			wants:    []string{"foo.txt", "bar.txt"},
-		},
-		{
-			name: "builder_specified",
+			name: "prefetch",
 			in: []regEntry{
 				{
 					name:     "foo.txt",
@@ -276,9 +206,8 @@ func TestPrefetch(t *testing.T) {
 					contents: sampleData2,
 				},
 			},
-			fetchNum: 0,
-			wantNum:  chunkNum(sampleData1),
-			wants:    []string{"foo.txt"},
+			wantNum: chunkNum(sampleData1),
+			wants:   []string{"foo.txt"},
 		},
 	}
 
@@ -294,7 +223,7 @@ func TestPrefetch(t *testing.T) {
 				r:      r,
 				cache:  &testCache{membuf: map[string]string{}, t: t},
 			}
-			done, err := gr.prefetch(sr, chunkNumToSize(t, tt.fetchNum, sr))
+			done, err := gr.prefetch(sr)
 			if err != nil {
 				t.Errorf("failed to prefetch: %v", err)
 				return
@@ -346,58 +275,6 @@ func chunkNum(data string) int {
 	return (len(data)-1)/sampleChunkSize + 1
 }
 
-type byteReader struct {
-	io.Reader
-}
-
-func (br *byteReader) ReadByte() (byte, error) {
-	var b [1]byte
-	if n, _ := br.Read(b[:]); n > 0 {
-		return b[0], nil
-	}
-	return 0, io.EOF
-}
-
-func chunkNumToSize(t *testing.T, fetchNum int, sr *io.SectionReader) int64 {
-	if fetchNum == 0 {
-		return 0
-	}
-
-	br := &byteReader{sr}
-	zr, err := gzip.NewReader(br)
-	if err != nil {
-		t.Fatalf("failed to get gzip reader for original data: %v", err)
-	}
-
-	nc := 0
-	for {
-		if nc >= fetchNum {
-			break
-		}
-		zr.Multistream(false)
-		if _, err := ioutil.ReadAll(zr); err != nil {
-			t.Fatalf("failed to read gzip stream: %v", err)
-		}
-		if err := zr.Reset(br); err == io.EOF {
-			break
-		} else if err != nil {
-			t.Fatalf("failed to reset gzip stream: %v", err)
-		}
-		nc++
-	}
-	if err := zr.Close(); err != nil {
-		t.Fatalf("failed to close gzip stream: %v", err)
-	}
-
-	// get current position
-	rn, err := sr.Seek(0, io.SeekCurrent)
-	if err != nil {
-		t.Fatalf("failed to seek to current position to get size: %v", err)
-	}
-
-	return rn
-}
-
 // Tests stargzReader for failure cases.
 func TestFailStargzReader(t *testing.T) {
 	testFileName := "test"
@@ -405,6 +282,10 @@ func TestFailStargzReader(t *testing.T) {
 		{
 			name:     testFileName,
 			contents: string(sampleData1),
+		},
+		{
+			name:     prefetchLandmark,
+			contents: string([]byte{1}),
 		},
 	}, sampleChunkSize)
 	br := &breakReaderAt{
@@ -456,21 +337,21 @@ func TestFailStargzReader(t *testing.T) {
 
 	// tests for prefetch
 	br.success = true
-	done, err := gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()), stargzFile.Size())
+	done, err := gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
 	if <-done; err != nil {
 		t.Errorf("failed to prefetch but wanted to succeed: %v", err)
 		return
 	}
 
 	br.success = false
-	done, err = gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()), stargzFile.Size())
+	done, err = gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
 	if <-done; err == nil {
 		t.Errorf("suceeded to prefetch but wanted to fail")
 		return
 	}
 
 	dummyData := []byte("dummy") // wants to be succeeded even for dummy data
-	done, err = gr.prefetch(io.NewSectionReader(bytes.NewReader(dummyData), 0, int64(len(dummyData))), int64(len(dummyData)))
+	done, err = gr.prefetch(io.NewSectionReader(bytes.NewReader(dummyData), 0, int64(len(dummyData))))
 	if <-done; err != nil {
 		t.Errorf("failed to prefetch for dummy but wanted to succeed: %v", err)
 		return
