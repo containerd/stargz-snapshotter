@@ -83,15 +83,14 @@ func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *stargzReader) prefetch(layer *io.SectionReader, size int64) (<-chan struct{}, error) {
+func (gr *stargzReader) prefetch(layer *io.SectionReader) (<-chan struct{}, error) {
 	done := make(chan struct{})
-	if e, ok := gr.r.Lookup(prefetchLandmark); ok {
-		size = e.Offset
-	}
-	if size == 0 {
+	e, ok := gr.r.Lookup(prefetchLandmark)
+	if !ok {
 		close(done)
 		return done, nil
 	}
+	size := e.Offset
 
 	// Prefetch specified range at once
 	raw := make([]byte, size)
