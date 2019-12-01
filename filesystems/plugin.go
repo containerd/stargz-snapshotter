@@ -19,6 +19,7 @@
 package plugin
 
 import (
+	"context"
 	"github.com/containerd/containerd/plugin"
 )
 
@@ -34,6 +35,6 @@ const RemoteFileSystemPlugin plugin.Type = "io.containerd.snapshotter.v1.remote"
 // Check() is called to check the connectibity of the existing layer snapshot
 // every time the layer is used by containerd.
 type FileSystem interface {
-	Mount(ref, digest, mountpoint string) error
-	Check(mountpoint string) error
+	Mount(ctx context.Context, ref, digest, mountpoint string) error
+	Check(ctx context.Context, mountpoint string) error
 }

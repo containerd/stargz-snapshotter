@@ -308,7 +308,7 @@ type filesystem struct {
 	failure bool
 }
 
-func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
+func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string) error {
 	if ref != testRef || digest != testDigest {
 		return fmt.Errorf("layer not found")
 	}
@@ -318,7 +318,7 @@ func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
 	return nil
 }
 
-func (fs *filesystem) Check(mountpoint string) error {
+func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	if fs.failure {
 		return fmt.Errorf("failed")
 	}
