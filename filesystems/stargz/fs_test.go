@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -30,12 +31,12 @@ func TestCheck(t *testing.T) {
 		},
 	}
 	tr.success = true
-	if err := fs.Check("test"); err != nil {
-		t.Errorf("connectino failed; wanted to succeed")
+	if err := fs.Check(context.TODO(), "test"); err != nil {
+		t.Errorf("connection failed; wanted to succeed")
 	}
 
 	tr.success = false
-	if err := fs.Check("test"); err == nil {
+	if err := fs.Check(context.TODO(), "test"); err == nil {
 		t.Errorf("connection succeeded; wanted to fail")
 	}
 }

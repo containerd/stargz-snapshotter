@@ -51,6 +51,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/plugin"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -149,16 +150,18 @@ type filesystem struct {
 	mu             sync.Mutex
 }
 
-func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
+func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string) error {
 	host, url, err := fs.parseReference(ref, digest)
 	if err != nil {
-		return fmt.Errorf("failed to parse the reference %q: %v", ref, err)
+		log.G(ctx).WithError(err).WithField("ref", ref).WithField("digest", digest).Debug("stargz: failed to parse the reference")
+		return err
 	}
 
 	// authenticate to the registry using ~/.docker/config.json.
 	url, tr, err := fs.resolve(host, url, ref)
 	if err != nil {
-		return fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
+		log.G(ctx).WithError(err).WithField("ref", ref).WithField("url", url).Debug("stargz: failed to resolve the reference")
+		return err
 	}
 	fs.mu.Lock()
 	fs.url[mountpoint] = url
@@ -167,7 +170,8 @@ func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
 	// Get size information.
 	size, err := fs.getSize(tr, url)
 	if err != nil {
-		return fmt.Errorf("failed to get layer size information from %q: %v", url, err)
+		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to get layer size information")
+		return err
 	}
 
 	// Construct filesystem from the remote stargz layer.
@@ -180,11 +184,13 @@ func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
 	}, 0, size)
 	r, err := stargz.Open(sr)
 	if err != nil {
-		return fmt.Errorf("failed to parse stargz at %q: %v", url, err)
+		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to parse stargz")
+		return err
 	}
 	root, ok := r.Lookup("")
 	if !ok {
-		return fmt.Errorf("failed to get a TOCEntry of the root node of layer %q", url)
+		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to get a TOCEntry of the root node of the layer")
+		return err
 	}
 	gr := &stargzReader{
 		digest: digest,
@@ -194,6 +200,7 @@ func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
 	if !fs.noprefetch {
 		// TODO: make sync/async switchable
 		if _, err := gr.prefetch(sr); err != nil {
+			log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to prefetch layer")
 			return err
 		}
 	}
@@ -213,28 +220,31 @@ func (fs *filesystem) Mount(ref, digest, mountpoint string) error {
 	})
 	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to make server: %v", err)
+		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to make server")
+		return err
 	}
 	// server.SetDebug(true) // TODO: make configurable with /etc/containerd/config.toml
 	go server.Serve()
 	return server.WaitMount()
 }
 
-func (fs *filesystem) Check(mountpoint string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
+	rCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	fs.mu.Lock()
 	url := fs.url[mountpoint]
 	fs.mu.Unlock()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to request to the registry of %q: %v", url, err)
+		log.G(ctx).WithError(err).WithField("url", url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to make request")
+		return err
 	}
-	req.WithContext(ctx)
+	req.WithContext(rCtx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := fs.transport.RoundTrip(req)
 	if err != nil {
+		log.G(ctx).WithError(err).WithField("url", url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to request to the registry")
 		return err
 	}
 	defer func() {
@@ -242,7 +252,8 @@ func (fs *filesystem) Check(mountpoint string) error {
 		res.Body.Close()
 	}()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("unexpected status code on %q: %v", fs.url, res.Status)
+		log.G(ctx).WithField("url", url).WithField("mountpoint", mountpoint).WithField("status", res.Status).Debug("stargz: check failed: unexpected response code")
+		return fmt.Errorf("unexpected status code %q", res.StatusCode)
 	}
 
 	return nil

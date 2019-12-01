@@ -37,4 +37,4 @@ echo "preparing plugins..."
 prepare_plugin
 
 echo "running containerd..."
-containerd --config="${CONFIG}" &
+containerd --config="${CONFIG}" $@ &

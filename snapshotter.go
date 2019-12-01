@@ -290,7 +290,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get active mount")
 	}
-	return o.mounts(s)
+	return o.mounts(ctx, s)
 }
 
 func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snapshots.Opt) error {
@@ -534,7 +534,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		return nil, errors.Wrap(err, "commit failed")
 	}
 
-	return o.mounts(s)
+	return o.mounts(ctx, s)
 }
 
 func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, kind snapshots.Kind) (string, error) {
@@ -556,7 +556,7 @@ func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, 
 	return td, nil
 }
 
-func (o *snapshotter) mounts(s storage.Snapshot) ([]mount.Mount, error) {
+func (o *snapshotter) mounts(ctx context.Context, s storage.Snapshot) ([]mount.Mount, error) {
 	if len(s.ParentIDs) == 0 {
 		// if we only have one layer/no parents then just return a bind mount as overlay
 		// will not work
@@ -565,7 +565,7 @@ func (o *snapshotter) mounts(s storage.Snapshot) ([]mount.Mount, error) {
 			roFlag = "ro"
 		}
 
-		if err := o.checkAvailability(o.upperPath(s.ID)); err != nil {
+		if err := o.checkAvailability(ctx, o.upperPath(s.ID)); err != nil {
 			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ID, err)
 		}
 		return []mount.Mount{
@@ -587,7 +587,7 @@ func (o *snapshotter) mounts(s storage.Snapshot) ([]mount.Mount, error) {
 			fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
 		)
 	} else if len(s.ParentIDs) == 1 {
-		if err := o.checkAvailability(o.upperPath(s.ParentIDs[0])); err != nil {
+		if err := o.checkAvailability(ctx, o.upperPath(s.ParentIDs[0])); err != nil {
 			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ParentIDs[0], err)
 		}
 		return []mount.Mount{
@@ -604,7 +604,7 @@ func (o *snapshotter) mounts(s storage.Snapshot) ([]mount.Mount, error) {
 
 	parentPaths := make([]string, len(s.ParentIDs))
 	for i := range s.ParentIDs {
-		if err := o.checkAvailability(o.upperPath(s.ParentIDs[i])); err != nil {
+		if err := o.checkAvailability(ctx, o.upperPath(s.ParentIDs[i])); err != nil {
 			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ParentIDs[i], err)
 		}
 		parentPaths[i] = o.upperPath(s.ParentIDs[i])
@@ -661,7 +661,7 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, opt
 	// Search a filesystem which can mount a remote snapshot for this layer.
 	// TODO: deterministic order.
 	for _, f := range o.fss {
-		if err := f.Mount(ref, digest, o.upperPath(id)); err == nil {
+		if err := f.Mount(ctx, ref, digest, o.upperPath(id)); err == nil {
 			o.mu.Lock()
 			o.fsmounts[o.upperPath(id)] = f
 			o.mu.Unlock()
@@ -676,14 +676,14 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, opt
 //
 // checkAvailability checks the avaiability of specified mountpoint using
 // filesystem's checking functionality.
-func (o *snapshotter) checkAvailability(mountpoint string) error {
+func (o *snapshotter) checkAvailability(ctx context.Context, mountpoint string) error {
 	o.mu.Lock()
 	fs, ok := o.fsmounts[mountpoint]
 	o.mu.Unlock()
 	if !ok {
 		return nil
 	}
-	return fs.Check(mountpoint)
+	return fs.Check(ctx, mountpoint)
 }
 
 // ==REMOTE SNAPSHOTTER SPECIFIC==
