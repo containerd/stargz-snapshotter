@@ -65,7 +65,6 @@ import (
 const (
 	blockSize             = 512
 	defaultCacheChunkSize = 50000
-	defaultCacheMaxEntry  = 1000
 	directoryCacheType    = "directory"
 	memoryCacheType       = "memory"
 	whiteoutPrefix        = ".wh."
@@ -114,8 +113,9 @@ func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
 	}
 }
 
-func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
-	fs = &filesystem{
+func NewFilesystem(root string, config *Config) (fsplugin.FileSystem, error) {
+	var err error
+	fs := &filesystem{
 		insecure:       config.Insecure,
 		cacheChunkSize: config.CacheChunkSize,
 		noprefetch:     config.NoPrefetch,
@@ -134,7 +134,7 @@ func NewFilesystem(root string, config *Config) (fs *filesystem, err error) {
 		return nil, err
 	}
 
-	return
+	return fs, nil
 }
 
 type filesystem struct {
@@ -237,7 +237,7 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 		log.G(ctx).WithError(err).WithField("url", url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to make request")
 		return err
 	}
-	req.WithContext(rCtx)
+	req = req.WithContext(rCtx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := fs.transport.RoundTrip(req)
@@ -273,7 +273,7 @@ func (fs *filesystem) parseReference(ref, digest string) (host string, url strin
 	return host, fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, image, digest), nil
 }
 
-// isInsecure checks if the specified host is registerd as "insecure" registry
+// isInsecure checks if the specified host is registered as "insecure" registry
 // in this filesystem. If so, this filesystem treat the host in a proper way
 // e.g. using HTTP instead of HTTPS.
 func (fs *filesystem) isInsecure(host string) bool {
@@ -317,7 +317,7 @@ func (fs *filesystem) resolve(host, url, ref string) (string, http.RoundTripper,
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to request to the registry of %q: %v", url, err)
 	}
-	req.WithContext(ctx)
+	req = req.WithContext(ctx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	if res, err := tr.RoundTrip(req); err == nil && res.StatusCode < 400 {
@@ -341,7 +341,7 @@ func (fs *filesystem) getSize(tr http.RoundTripper, url string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	req.WithContext(ctx)
+	req = req.WithContext(ctx)
 	req.Close = false
 	res, err := tr.RoundTrip(req)
 	if err != nil {
@@ -354,7 +354,7 @@ func (fs *filesystem) getSize(tr http.RoundTripper, url string) (int64, error) {
 	return strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
 }
 
-// node is a filesystem inode abstruction which implements node in go-fuse.
+// node is a filesystem inode abstraction which implements node in go-fuse.
 type node struct {
 	nodefs.Node
 	gr     *stargzReader
@@ -528,7 +528,7 @@ func (n *node) ListXAttr(ctx *fuse.Context) (attrs []string, code fuse.Status) {
 		// This node is an opaque directory so add overlayfs-compliant indicator.
 		attrs = append(attrs, opaqueXattr)
 	}
-	for k, _ := range n.e.Xattrs {
+	for k := range n.e.Xattrs {
 		attrs = append(attrs, k)
 	}
 	return attrs, fuse.OK
@@ -546,7 +546,7 @@ func (n *node) StatFs() *fuse.StatfsOut {
 	return defaultStatfs()
 }
 
-// file is a file abstruction which implements file in go-fuse.
+// file is a file abstraction which implements file in go-fuse.
 type file struct {
 	nodefs.File
 	n  *node
@@ -571,7 +571,7 @@ func (f *file) GetAttr(out *fuse.Attr) fuse.Status {
 	return entryToAttr(f.e, out)
 }
 
-// whiteout is a whiteout abstruction compliant to overlayfs. This implements
+// whiteout is a whiteout abstraction compliant to overlayfs. This implements
 // node in go-fuse.
 type whiteout struct {
 	nodefs.Node
@@ -610,7 +610,7 @@ func (s *state) report(err error) {
 
 func (s *state) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	return []fuse.DirEntry{
-		fuse.DirEntry{
+		{
 			Mode: syscall.S_IFREG | s.err.mode(),
 			Name: s.id,
 			Ino:  s.err.ino(),
@@ -659,7 +659,7 @@ func (s *state) ino() uint64 {
 	return uint64(uintptr(unsafe.Pointer(s)))
 }
 
-func (e *state) mode() uint32 {
+func (s *state) mode() uint32 {
 	return 0500
 }
 

@@ -61,20 +61,21 @@ type breakRoundTripper struct {
 	success bool
 }
 
-func (b *breakRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+func (b *breakRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
 	if b.success {
-		return &http.Response{
+		res = &http.Response{
 			StatusCode: http.StatusPartialContent,
 			Header:     make(http.Header),
 			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
-		}, nil
+		}
 	} else {
-		return &http.Response{
+		res = &http.Response{
 			StatusCode: http.StatusInternalServerError,
 			Header:     make(http.Header),
 			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
-		}, nil
+		}
 	}
+	return
 }
 
 // Tests Read method of each file node.
@@ -268,7 +269,7 @@ func TestExistence(t *testing.T) {
 			),
 			want: checks(
 				hasFileDigest("test", digestFor("test")),
-				hasStateFile(testStateId),
+				hasStateFile(testStateID),
 			),
 		},
 	}
@@ -299,7 +300,7 @@ func TestExistence(t *testing.T) {
 	}
 }
 
-const testStateId = "teststate"
+const testStateID = "teststate"
 
 func getRootNode(t *testing.T, r *stargz.Reader) *node {
 	root, ok := r.Lookup("")
@@ -315,7 +316,7 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 		Node: nodefs.NewDefaultNode(),
 		gr:   gr,
 		e:    root,
-		s:    newState(testStateId),
+		s:    newState(testStateID),
 	}
 	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -342,7 +343,6 @@ func buildTarGz(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
 			t.Errorf("closing write of input tar: %v", err)
 		}
 		pw.Close()
-		return
 	}()
 	return pr, func() { go pr.Close(); go pw.Close() }
 }
@@ -387,13 +387,12 @@ func dir(d string, opts ...interface{}) tarEntry {
 				return fmt.Errorf("unsupported opt")
 			}
 		}
-		name := string(d)
-		if !strings.HasSuffix(name, "/") {
-			panic(fmt.Sprintf("missing trailing slash in dir %q ", name))
+		if !strings.HasSuffix(d, "/") {
+			panic(fmt.Sprintf("missing trailing slash in dir %q ", d))
 		}
 		return tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeDir,
-			Name:     name,
+			Name:     d,
 			Mode:     0755,
 			Xattrs:   xattrs,
 		})

@@ -32,7 +32,7 @@ import (
 	"github.com/containerd/containerd/snapshots/handler"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/containerd/snapshots/testsuite"
-	"github.com/ktock/remote-snapshotter/filesystems"
+	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
 )
 
 const (
@@ -56,12 +56,12 @@ func prepareTarget(t *testing.T, sn snapshots.Snapshotter) string {
 	return testTarget
 }
 
-func newRemoteSnapshotter(t *testing.T, root string) (snapshots.Snapshotter, plugin.FileSystem, error) {
+func newRemoteSnapshotter(t *testing.T, root string) (snapshots.Snapshotter, fsplugin.FileSystem, error) {
 	fs, err := bindFileSystem(t)
 	if err != nil {
 		return nil, nil, err
 	}
-	snapshotter, err := NewSnapshotter(root, []plugin.FileSystem{fs})
+	snapshotter, err := NewSnapshotter(root, []fsplugin.FileSystem{fs})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -286,7 +286,7 @@ func TestRemoteCommit(t *testing.T) {
 	}
 }
 
-func bindFileSystem(t *testing.T) (plugin.FileSystem, error) {
+func bindFileSystem(t *testing.T) (fsplugin.FileSystem, error) {
 	root, err := ioutil.TempDir("", "remote")
 	if err != nil {
 		return nil, err

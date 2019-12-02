@@ -129,7 +129,6 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader) (<-chan struct{}, erro
 				nr += ce.ChunkSize
 			}
 		}
-		return
 	}()
 
 	return done, nil

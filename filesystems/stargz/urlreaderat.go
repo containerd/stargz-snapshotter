@@ -140,7 +140,7 @@ func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[r
 	defer cancel()
 	req = req.WithContext(ctx)
 	ranges := "bytes=0-0," // dummy range to make sure the response to be multipart
-	for reg, _ := range requests {
+	for reg := range requests {
 		ranges += fmt.Sprintf("%d-%d,", reg.b, reg.e)
 	}
 	req.Header.Add("Range", ranges[:len(ranges)-1])
@@ -163,7 +163,7 @@ func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[r
 		}
 		gotSize := int64(len(data))
 		requiredSize := int64(0)
-		for reg, _ := range requests {
+		for reg := range requests {
 			allData[reg] = data[reg.b : reg.e+1]
 			requiredSize += reg.e - reg.b + 1
 		}
@@ -185,7 +185,7 @@ func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[r
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return fmt.Errorf("Failed to read multipart response: %v\n", err)
+			return fmt.Errorf("Failed to read multipart response: %v", err)
 		}
 		reg, err := r.parseRange(p.Header.Get("Content-Range"))
 		if err != nil {

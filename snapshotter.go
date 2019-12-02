@@ -446,7 +446,7 @@ func (o *snapshotter) cleanupSnapshotDirectory(dir string) error {
 
 	// ==REMOTE SNAPSHOTTER SPECIFIC==
 	//
-	// On a remote snapshot, the layer is mounted on the "fs" direcotry.
+	// On a remote snapshot, the layer is mounted on the "fs" directory.
 	// Filesystem can do any finalization by detecting this "unmount" event
 	// and we don't care the finalization explicitly at this stage.
 	mp := filepath.Join(dir, "fs")
