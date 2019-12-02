@@ -112,15 +112,11 @@ func (dc *directoryCache) Add(blobHash string, p []byte) {
 			return
 		}
 		defer f.Close()
-		if n, err := f.Write(p); err == nil && n == len(p) {
-			return
-		} else {
+		if n, err := f.Write(p); err != nil || n != len(p) {
 			fmt.Printf("Warning: failed to write cache: %d(wrote)/%d(expected): %v\n",
 				n, len(p), err)
 		}
 	}()
-
-	return
 }
 
 func NewMemoryCache() BlobCache {
@@ -150,8 +146,6 @@ func (mc *memoryCache) Add(blobHash string, p []byte) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	mc.membuf[blobHash] = string(p)
-
-	return
 }
 
 // nopCache is a cache implementation which doesn't cache anything.
@@ -165,6 +159,4 @@ func (nc *nopCache) Fetch(blobHash string) ([]byte, error) {
 	return nil, fmt.Errorf("Missed cache: %s", blobHash)
 }
 
-func (nc *nopCache) Add(blobHash string, p []byte) {
-	return
-}
+func (nc *nopCache) Add(blobHash string, p []byte) {}

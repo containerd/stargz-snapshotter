@@ -30,13 +30,11 @@ import (
 )
 
 const (
-	tarHeaderSize      = 512
 	sampleChunkSize    = 3
 	sampleMiddleOffset = sampleChunkSize / 2
 	sampleData1        = "0123456789"
 	sampleData2        = "abcdefghij"
 	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
-	lastChunkOffset2   = sampleChunkSize * (int64(len(sampleData2)) / sampleChunkSize)
 )
 
 // Tests ReadAt method of each file.
@@ -275,7 +273,7 @@ func TestPrefetch(t *testing.T) {
 						t.Errorf("size of cached data %d; want %d", len(data), wn)
 						return
 					}
-					if bytes.Compare(data, wantData) != 0 {
+					if !bytes.Equal(data, wantData) {
 						t.Errorf("cached data %q; want %q", string(data), string(wantData))
 						return
 					}
@@ -320,13 +318,13 @@ func TestFailStargzReader(t *testing.T) {
 	}
 
 	// tests for opening file
-	f, err := gr.openFile("dummy")
+	_, err = gr.openFile("dummy")
 	if err == nil {
 		t.Errorf("succeeded to open file but wanted to fail")
 		return
 	}
 
-	f, err = gr.openFile(testFileName)
+	f, err := gr.openFile(testFileName)
 	if err != nil {
 		t.Errorf("failed to open file but wanted to succeed: %v", err)
 	}
@@ -362,7 +360,7 @@ func TestFailStargzReader(t *testing.T) {
 	br.success = false
 	done, err = gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
 	if <-done; err == nil {
-		t.Errorf("suceeded to prefetch but wanted to fail")
+		t.Errorf("succeeded to prefetch but wanted to fail")
 		return
 	}
 
@@ -392,9 +390,7 @@ func (nc *nopCache) Fetch(blobHash string) ([]byte, error) {
 	return nil, fmt.Errorf("Missed cache: %s", blobHash)
 }
 
-func (nc *nopCache) Add(blobHash string, p []byte) {
-	return
-}
+func (nc *nopCache) Add(blobHash string, p []byte) {}
 
 type regEntry struct {
 	name     string
@@ -448,7 +444,6 @@ func buildTar(t *testing.T, ents []regEntry) (r io.Reader, cancel func()) {
 			t.Errorf("closing write of input tar: %v", err)
 		}
 		pw.Close()
-		return
 	}()
 	return pr, func() { go pr.Close(); go pw.Close() }
 }
@@ -475,6 +470,4 @@ func (tc *testCache) Add(blobHash string, p []byte) {
 	defer tc.mu.Unlock()
 	tc.membuf[blobHash] = string(p)
 	tc.t.Logf("  cached [%s...]: %q", blobHash[:8], string(p))
-
-	return
 }
