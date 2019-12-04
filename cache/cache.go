@@ -34,21 +34,43 @@ type BlobCache interface {
 	Add(blobHash string, p []byte)
 }
 
-func NewDirectoryCache(directory string, memCacheSize int) (BlobCache, error) {
+type dirOpt struct {
+	syncAdd bool
+}
+
+type DirOption func(o *dirOpt) *dirOpt
+
+func SyncAdd() DirOption {
+	return func(o *dirOpt) *dirOpt {
+		o.syncAdd = true
+		return o
+	}
+}
+
+func NewDirectoryCache(directory string, memCacheSize int, opts ...DirOption) (BlobCache, error) {
+	opt := &dirOpt{}
+	for _, o := range opts {
+		opt = o(opt)
+	}
 	err := os.MkdirAll(directory, os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
-	return &directoryCache{
+	dc := &directoryCache{
 		cache:     lru.New(memCacheSize),
 		directory: directory,
-	}, nil
+	}
+	if opt.syncAdd {
+		dc.syncAdd = true
+	}
+	return dc, nil
 }
 
 // directoryCache is a cache implementation which backend is a directory.
 type directoryCache struct {
 	cache     *lru.Cache
 	directory string
+	syncAdd   bool
 	mmu       sync.Mutex
 	fmu       sync.Mutex
 }
@@ -91,7 +113,7 @@ func (dc *directoryCache) Add(blobHash string, p []byte) {
 
 	dc.cache.Add(blobHash, p)
 
-	go func() {
+	addFunc := func() {
 		dc.fmu.Lock()
 		defer dc.fmu.Unlock()
 
@@ -116,7 +138,13 @@ func (dc *directoryCache) Add(blobHash string, p []byte) {
 			fmt.Printf("Warning: failed to write cache: %d(wrote)/%d(expected): %v\n",
 				n, len(p), err)
 		}
-	}()
+	}
+
+	if dc.syncAdd {
+		addFunc()
+	} else {
+		go addFunc()
+	}
 }
 
 func NewMemoryCache() BlobCache {

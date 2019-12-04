@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -30,47 +29,43 @@ const (
 )
 
 func TestDirectoryCache(t *testing.T) {
-	tmp, err := ioutil.TempDir("", "testcache")
-	if err != nil {
-		t.Fatalf("failed to make tempdir: %v", err)
-	}
-	defer os.RemoveAll(tmp)
-
-	waitFunc := func(d string) bool {
-		// Check if cache exists.
-		c := filepath.Join(tmp, d[:2], d)
-		if _, err := os.Stat(c); err == nil {
-			return true
-		}
-		return false
-	}
 
 	// with enough memory cache
-	newCache := func() BlobCache {
-		c, err := NewDirectoryCache(tmp, 10)
+	newCache := func() (BlobCache, cleanFunc) {
+		tmp, err := ioutil.TempDir("", "testcache")
+		if err != nil {
+			t.Fatalf("failed to make tempdir: %v", err)
+		}
+		c, err := NewDirectoryCache(tmp, 10, SyncAdd())
 		if err != nil {
 			t.Fatalf("failed to make cache: %v", err)
 		}
-		return c
+		return c, func() { os.RemoveAll(tmp) }
 	}
-	testCache(t, tmp, newCache, waitFunc)
+	testCache(t, "dir-with-enough-mem", newCache)
 
 	// with smaller memory cache
-	newCache = func() BlobCache {
-		c, err := NewDirectoryCache(tmp, 1)
+	newCache = func() (BlobCache, cleanFunc) {
+		tmp, err := ioutil.TempDir("", "testcache")
+		if err != nil {
+			t.Fatalf("failed to make tempdir: %v", err)
+		}
+		c, err := NewDirectoryCache(tmp, 1, SyncAdd())
 		if err != nil {
 			t.Fatalf("failed to make cache: %v", err)
 		}
-		return c
+		return c, func() { os.RemoveAll(tmp) }
 	}
-	testCache(t, tmp, newCache, waitFunc)
+	testCache(t, "dir-with-small-mem", newCache)
 }
 
 func TestMemoryCache(t *testing.T) {
-	testCache(t, "", NewMemoryCache, func(d string) bool { return true })
+	testCache(t, "memory", func() (BlobCache, cleanFunc) { return NewMemoryCache(), func() {} })
 }
 
-func testCache(t *testing.T, cleanDir string, newCache func() BlobCache, waitFunc func(string) bool) {
+type cleanFunc func()
+
+func testCache(t *testing.T, name string, newCache func() (BlobCache, cleanFunc)) {
 	tests := []struct {
 		name   string
 		blobs  []string
@@ -120,27 +115,15 @@ func testCache(t *testing.T, cleanDir string, newCache func() BlobCache, waitFun
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := newCache()
+		t.Run(fmt.Sprintf("%s-%s", name, tt.name), func(t *testing.T) {
+			c, clean := newCache()
+			defer clean()
 			for _, blob := range tt.blobs {
 				d := digestFor(blob)
 				c.Add(d, []byte(blob))
-				for {
-					if complete := waitFunc(d); complete {
-						break
-					}
-				}
 			}
 			for _, check := range tt.checks {
 				check(t, c)
-			}
-
-			if cleanDir != "" {
-				os.RemoveAll(cleanDir)
-				err := os.MkdirAll(cleanDir, os.ModePerm)
-				if err != nil {
-					t.Fatalf("failed to recreate cachedir: %v", err)
-				}
 			}
 		})
 	}
