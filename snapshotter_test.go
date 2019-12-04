@@ -255,6 +255,7 @@ func TestRemoteCommit(t *testing.T) {
 	if err := ioutil.WriteFile(filepath.Join(snapshot, "bar"), []byte("hi"), 0660); err != nil {
 		t.Fatal(err)
 	}
+	mount.Unmount(snapshot, 0)
 
 	// Commit the active snapshot
 	cKey := "/tmp/layer"
