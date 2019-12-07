@@ -35,14 +35,14 @@ __NOTICE:__
 
 ### Build and run the environment
 ```
-$ cd ${GOPATH}/src/github.com/ktock/remote-snapshotter/demo
+$ cd ${GOPATH}/src/github.com/ktock/remote-snapshotter/script/demo
 $ docker-compose build --build-arg HTTP_PROXY=$HTTP_PROXY \
                        --build-arg HTTPS_PROXY=$HTTP_PROXY \
                        --build-arg http_proxy=$HTTP_PROXY \
                        --build-arg https_proxy=$HTTP_PROXY \
-                       containerd
+                       containerd_demo
 $ docker-compose up -d
-$ docker exec -it containerd /bin/bash
+$ docker exec -it containerd_demo /bin/bash
 (inside container) # /run.sh
 ```
 

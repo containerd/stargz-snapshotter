@@ -1,0 +1,50 @@
+---
+  # See appveyor.yml for windows build.
+  sudo: required
+  language: go
+  dist: trusty
+  osx_image: xcode10.1
+  os:
+    - linux
+    - osx
+  notifications:
+    email: false
+  go:
+    - 1.12.x
+  addons:
+    apt:
+      packages:
+        - libsecret-1-dev
+        - pass
+  before_script:
+    - make deps
+    - "export DISPLAY=:99.0"
+    - if [[ "$TRAVIS_OS_NAME" == "linux"  ]]; then sh ci/before_script_linux.sh; fi
+    - make validate
+  script: make test
+
+  before_deploy:
+    - sh ci/before_deploy.sh
+
+  deploy:
+    provider: releases
+    api_key:
+      secure: "$GITHUB_TOKEN"
+    # upload file artifacts using a glob expression.
+    # It requires both options `file_glob` and `file`:
+    # https://github.com/travis-ci/dpl/blob/master/lib/dpl/provider/releases.rb#L47-L53
+    file_glob: true
+    file: docker-credential-*-${TRAVIS_TAG}-amd64.tar.gz
+    # don't delete the artifacts from previous phases
+    skip_cleanup: true
+    # deploy when a new tag is pushed
+    on:
+      tags: true
+
+  branches:
+    only:
+      # Pushes and PR to the master branch
+      - master
+      # IMPORTANT Ruby regex to match tags. Required, or travis won't trigger deploys when a new tag
+      # is pushed. This regex matches semantic versions like v1.2.3-rc4+2016.02.22
+      - /^v\d+\.\d+\.\d+.*$/
