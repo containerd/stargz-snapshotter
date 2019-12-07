@@ -1,5 +1,7 @@
 # Remote Snapshotter
 
+[![Tests Status](https://github.com/ktock/remote-snapshotter/workflows/Tests/badge.svg)](https://github.com/ktock/remote-snapshotter/actions)
+
 Pulling image is one of the major performance bottlenecks in container workload. Research shows that time for pulling accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Remote snapshotter* is a solution discussed in the containerd community and this implementation is based on it.
 
 Related discussion of the snapshotter in containerd community:
