@@ -42,8 +42,11 @@ func TestCheck(t *testing.T) {
 	tr := &breakRoundTripper{}
 	fs := &filesystem{
 		transport: tr,
-		url: map[string]string{
-			"test": "test",
+		conn: map[string]*connection{
+			"test": {
+				url: "test",
+				tr:  tr,
+			},
 		},
 	}
 	tr.success = true

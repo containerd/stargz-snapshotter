@@ -120,7 +120,7 @@ func NewFilesystem(root string, config *Config) (fsplugin.FileSystem, error) {
 		cacheChunkSize: config.CacheChunkSize,
 		noprefetch:     config.NoPrefetch,
 		transport:      http.DefaultTransport,
-		url:            make(map[string]string),
+		conn:           make(map[string]*connection),
 	}
 	if fs.cacheChunkSize == 0 {
 		fs.cacheChunkSize = defaultCacheChunkSize
@@ -144,8 +144,13 @@ type filesystem struct {
 	httpCache      cache.BlobCache
 	fsCache        cache.BlobCache
 	transport      http.RoundTripper
-	url            map[string]string
+	conn           map[string]*connection
 	mu             sync.Mutex
+}
+
+type connection struct {
+	url string
+	tr  http.RoundTripper
 }
 
 func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string) error {
@@ -162,7 +167,7 @@ func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string)
 		return err
 	}
 	fs.mu.Lock()
-	fs.url[mountpoint] = url
+	fs.conn[mountpoint] = &connection{url, tr}
 	fs.mu.Unlock()
 
 	// Get size information.
@@ -230,19 +235,23 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	rCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	fs.mu.Lock()
-	url := fs.url[mountpoint]
+	c := fs.conn[mountpoint]
 	fs.mu.Unlock()
-	req, err := http.NewRequest("GET", url, nil)
+	if c == nil {
+		log.G(ctx).WithField("mountpoint", mountpoint).Debug("stargz: check failed: connection not registered")
+		return fmt.Errorf("connection not regisiterd")
+	}
+	req, err := http.NewRequest("GET", c.url, nil)
 	if err != nil {
-		log.G(ctx).WithError(err).WithField("url", url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to make request")
+		log.G(ctx).WithError(err).WithField("url", c.url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to make request")
 		return err
 	}
 	req = req.WithContext(rCtx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
-	res, err := fs.transport.RoundTrip(req)
+	res, err := c.tr.RoundTrip(req)
 	if err != nil {
-		log.G(ctx).WithError(err).WithField("url", url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to request to the registry")
+		log.G(ctx).WithError(err).WithField("url", c.url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to request to the registry")
 		return err
 	}
 	defer func() {
@@ -250,7 +259,7 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 		res.Body.Close()
 	}()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		log.G(ctx).WithField("url", url).WithField("mountpoint", mountpoint).WithField("status", res.Status).Debug("stargz: check failed: unexpected response code")
+		log.G(ctx).WithField("url", c.url).WithField("mountpoint", mountpoint).WithField("status", res.Status).Debug("stargz: check failed: unexpected response code")
 		return fmt.Errorf("unexpected status code %q", res.StatusCode)
 	}
 
