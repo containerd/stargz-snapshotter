@@ -1,0 +1,32 @@
+sudo: false
+
+dist: trusty
+
+language:
+  - go
+
+go:
+  - "1.12"
+  - "1.13"
+
+env:
+  - "GO111MODULE=off"
+  - "GO111MODULE=on"
+
+git:
+  depth: 1
+
+cache:
+  directories:
+    - $GOPATH/pkg/mod
+
+services:
+  - docker
+
+script:
+  - ./hack/presubmit.sh
+  - go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+  - cmd/registry/test.sh
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
