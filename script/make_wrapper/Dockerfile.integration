@@ -40,4 +40,4 @@ RUN git clone https://github.com/opencontainers/runc \
     git checkout 12599487789fa1d5abead897932c40a1a17929dd && \
     GO111MODULE=on go install github.com/google/crfs/stargz/stargzify
 
-COPY ./config.toml /etc/containerd/config.toml
+COPY ./config.integration.stargz.toml /etc/containerd/config.integration.stargz.toml

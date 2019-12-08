@@ -46,12 +46,27 @@ function check {
     fi
 }
 
+function isServedAsRemoteSnapshot {
+    LOG_PATH="${1}"
+    if [ "$(cat ${LOG_PATH})" == "" ] ; then
+        echo "Log is empty. Something is wrong."
+        return 1
+    fi
+
+    LAYER_LOG=$(cat "${LOG_PATH}" | grep "layer-sha256:")
+    if [ "${LAYER_LOG}" != "" ] ; then
+        echo "Some layer have been downloaded by containerd"
+        return 1
+    fi
+    return 0
+}
+
 CONTAINERD_ROOT=/var/lib/containerd/
 function reboot_containerd {
     ps aux | grep containerd | grep -v grep | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {}
     ls -1d "${CONTAINERD_ROOT}io.containerd.snapshotter.v1.${SNAPSHOT_NAME}/snapshots/"* | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
     rm -rf "${CONTAINERD_ROOT}"*
-    containerd --log-level debug --config=/etc/containerd/config.toml &
+    containerd ${@} &
     retry ctr version
 }
 
@@ -70,7 +85,7 @@ cd /go/src/github.com/ktock/remote-snapshotter
 GO111MODULE=off make clean && GO111MODULE=off make -j2 && GO111MODULE=off make install
 check "Installing remote snapshotter"
 
-reboot_containerd
+reboot_containerd --log-level debug --config=/etc/containerd/config.integration.stargz.toml
 
 ############
 # Tests for remote snapshotter
@@ -97,14 +112,21 @@ fi
 stargzify ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
 check "Stargzify"
 
-reboot_containerd
+reboot_containerd --log-level debug --config=/etc/containerd/config.integration.stargz.toml
 ctr images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:18.04"
 check "Getting original image"
 ctr run --rm "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr1.tar
 
-reboot_containerd
-ctr images pull --user "${DUMMYUSER}:${DUMMYPASS}" --skip-download --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:18.04"
+PULL_LOG=$(mktemp)
+check "Preparing log file"
+reboot_containerd --log-level debug --config=/etc/containerd/config.integration.stargz.toml
+ctr images pull --user "${DUMMYUSER}:${DUMMYPASS}" --skip-download --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:18.04" | tee "${PULL_LOG}"
 check "Getting image lazily"
+if ! isServedAsRemoteSnapshot "${PULL_LOG}" ; then
+    echo "Failed to serve all layers as remote snapshots: ${LAYER_LOG}"
+    exit 1
+fi
+rm "${PULL_LOG}"
 ctr run --rm --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr2.tar
 
 mkdir /usr1 /usr2 && tar -xf /usr1.tar -C /usr1 && tar -xf /usr2.tar -C /usr2

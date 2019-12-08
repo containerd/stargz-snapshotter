@@ -63,11 +63,18 @@ import (
 	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
 )
 
+type Config struct {
+	// FileSystems config option enables us to specify filesystems that this
+	// snapshotter recognizes and the priority of these filesystems. The first
+	// element of the slice has the highest priority.
+	FileSystems []string `toml:"filesystems"`
+}
+
 func init() {
 	plugin.Register(&plugin.Registration{
-		Type: plugin.SnapshotPlugin,
-		ID:   "remote",
-
+		Type:   plugin.SnapshotPlugin,
+		ID:     "remote",
+		Config: &Config{},
 		// ==REMOTE SNAPSHOTTER SPECIFIC==
 		//
 		// We use RemoteFileSystemPlugin to mount unpacked remote layers
@@ -80,22 +87,41 @@ func init() {
 			ic.Meta.Platforms = append(ic.Meta.Platforms, platforms.DefaultSpec())
 			ic.Meta.Exports["root"] = ic.Root
 
+			config, ok := ic.Config.(*Config)
+			if !ok {
+				return nil, fmt.Errorf("invalid stargz configuration")
+			}
+
 			// ==REMOTE SNAPSHOTTER SPECIFIC==
 			//
 			// register all FileSystems which we use to mount unpacked
 			// remote layers as remote snapshots.
-			var fss []fsplugin.FileSystem
+			fsMap := make(map[string]fsplugin.FileSystem)
+			var filesystems []string
 			if ps, err := ic.GetByType(fsplugin.RemoteFileSystemPlugin); ps != nil && err == nil {
-				for _, p := range ps {
+				for id, p := range ps {
 					if i, err := p.Instance(); err == nil {
 						if f, ok := i.(fsplugin.FileSystem); ok {
-							fss = append(fss, f)
+							fsMap[id] = f
+							filesystems = append(filesystems, id)
 						}
 					}
 				}
 			}
 
-			return NewSnapshotter(ic.Root, fss, AsynchronousRemove)
+			var fsChain []fsplugin.FileSystem
+			if config.FileSystems != nil {
+				filesystems = config.FileSystems
+			}
+			for _, id := range filesystems {
+				f, ok := fsMap[id]
+				if !ok {
+					return nil, fmt.Errorf("required filesystem %v not found", id)
+				}
+				fsChain = append(fsChain, f)
+			}
+
+			return NewSnapshotter(ic.Root, fsChain, AsynchronousRemove)
 		},
 	})
 }
@@ -124,8 +150,8 @@ type snapshotter struct {
 
 	// ==REMOTE SNAPSHOTTER SPECIFIC==
 	//
-	// FileSystems that this snapshotter recognizes.
-	fss []fsplugin.FileSystem
+	// fsChain is filesystems that this snapshotter recognizes.
+	fsChain []fsplugin.FileSystem
 
 	// ==REMOTE SNAPSHOTTER SPECIFIC==
 	//
@@ -138,7 +164,7 @@ type snapshotter struct {
 // as snapshots. This is implemented based on the overlayfs snapshotter, so
 // diffs are stored under the provided root and a metadata file is stored under
 // the root as same as overlayfs snapshotter.
-func NewSnapshotter(root string, fss []fsplugin.FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
+func NewSnapshotter(root string, fsChain []fsplugin.FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
 	var config SnapshotterConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -169,7 +195,7 @@ func NewSnapshotter(root string, fss []fsplugin.FileSystem, opts ...Opt) (snapsh
 		root:        root,
 		ms:          ms,
 		asyncRemove: config.asyncRemove,
-		fss:         fss,
+		fsChain:     fsChain,
 		fsmounts:    make(map[string]fsplugin.FileSystem),
 	}, nil
 }
@@ -657,8 +683,7 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, opt
 	}
 
 	// Search a filesystem which can mount a remote snapshot for this layer.
-	// TODO: deterministic order.
-	for _, f := range o.fss {
+	for _, f := range o.fsChain {
 		if err := f.Mount(ctx, ref, digest, o.upperPath(id)); err == nil {
 			o.mu.Lock()
 			o.fsmounts[o.upperPath(id)] = f
