@@ -56,18 +56,6 @@ func prepareTarget(t *testing.T, sn snapshots.Snapshotter) string {
 	return testTarget
 }
 
-func newRemoteSnapshotter(t *testing.T, root string) (snapshots.Snapshotter, fsplugin.FileSystem, error) {
-	fs, err := bindFileSystem(t)
-	if err != nil {
-		return nil, nil, err
-	}
-	snapshotter, err := NewSnapshotter(root, []fsplugin.FileSystem{fs})
-	if err != nil {
-		return nil, nil, err
-	}
-	return snapshotter, fs, nil
-}
-
 func TestRemotePrepare(t *testing.T) {
 	ctx := context.TODO()
 	root, err := ioutil.TempDir("", "overlay")
@@ -75,9 +63,9 @@ func TestRemotePrepare(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	sn, _, err := newRemoteSnapshotter(t, root)
+	sn, err := NewSnapshotter(root, []fsplugin.FileSystem{bindFileSystem(t)})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to make new remote snapshotter: %q", err)
 	}
 
 	// Prepare a remote snapshot.
@@ -125,9 +113,9 @@ func TestRemoteOverlay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	sn, _, err := newRemoteSnapshotter(t, root)
+	sn, err := NewSnapshotter(root, []fsplugin.FileSystem{bindFileSystem(t)})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to make new remote snapshotter: %q", err)
 	}
 
 	// Prepare a remote snapshot.
@@ -183,9 +171,10 @@ func TestFailureDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	sn, fi, err := newRemoteSnapshotter(t, root)
+	fi := bindFileSystem(t)
+	sn, err := NewSnapshotter(root, []fsplugin.FileSystem{fi})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to make new Snapshotter: %q", err)
 	}
 	fs, ok := fi.(*filesystem)
 	if !ok {
@@ -198,7 +187,7 @@ func TestFailureDetection(t *testing.T) {
 	pKey := "/tmp/test"
 
 	// Tests if we can detect layer unavailablity on Prepare().
-	fs.failure = true
+	fs.checkFailure = true
 	if _, err := sn.Prepare(ctx, pKey, target); !errdefs.IsUnavailable(err) {
 		t.Errorf("got %q; want ErrUnavailable", err)
 		return
@@ -206,11 +195,11 @@ func TestFailureDetection(t *testing.T) {
 	sn.Remove(ctx, pKey)
 
 	// Tests if we can detect layer unavailablity on Mounts().
-	fs.failure = false
+	fs.checkFailure = false
 	if _, err := sn.Prepare(ctx, pKey, target); err != nil {
 		t.Fatalf("failed to prepare snapshot: %q", err)
 	}
-	fs.failure = true
+	fs.checkFailure = true
 	if _, err := sn.Mounts(ctx, pKey); !errdefs.IsUnavailable(err) {
 		t.Errorf("got %q; want ErrUnavailable", err)
 		return
@@ -225,9 +214,9 @@ func TestRemoteCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	sn, _, err := newRemoteSnapshotter(t, root)
+	sn, err := NewSnapshotter(root, []fsplugin.FileSystem{bindFileSystem(t)})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to make new remote snapshotter: %q", err)
 	}
 
 	// Prepare a remote snapshot.
@@ -287,27 +276,98 @@ func TestRemoteCommit(t *testing.T) {
 	}
 }
 
-func bindFileSystem(t *testing.T) (fsplugin.FileSystem, error) {
+func TestFallback(t *testing.T) {
+	tests := []struct {
+		name           string
+		fs1Failure     bool
+		fs2Failure     bool
+		fs1mountCalled bool
+		fs2mountCalled bool
+		notFound       bool
+	}{
+		{"fs1_serve", false, false, true, false, false}, // fs1 serves
+		{"fs2_serve", true, false, true, true, false},   // fs1 fails and fallbacked fs2 serves
+		{"fail_all", true, true, true, true, true},      // all filesystems fail
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, err := ioutil.TempDir("", "remote")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(root)
+			fi1, fi2 := bindFileSystem(t), bindFileSystem(t)
+			sn, err := NewSnapshotter(root, []fsplugin.FileSystem{fi1, fi2})
+			if err != nil {
+				t.Fatalf("failed to make new remote snapshotter: %q", err)
+			}
+
+			fs1, ok := fi1.(*filesystem)
+			if !ok {
+				t.Fatalf("Invalid filesystem type(not *filesystem)")
+			}
+			fs2, ok := fi2.(*filesystem)
+			if !ok {
+				t.Fatalf("Invalid filesystem type(not *filesystem)")
+			}
+
+			fs1.mountFailure, fs2.mountFailure = tt.fs1Failure, tt.fs2Failure
+			fs1.mountCalled, fs2.mountCalled = false, false
+			pKey := "/tmp/prepareTarget"
+			ctx := context.TODO()
+			_, err = sn.Prepare(ctx, pKey, "", snapshots.WithLabels(map[string]string{
+				handler.TargetSnapshotLabel: testTarget,
+				handler.TargetRefLabel:      testRef,
+				handler.TargetDigestLabel:   testDigest,
+			}))
+			defer sn.Remove(ctx, pKey)
+			if !(fs1.mountCalled == tt.fs1mountCalled && fs2.mountCalled == tt.fs2mountCalled) {
+				t.Errorf("fs1 called: %t, fs2 called %t; want fs1 called: %t, fs2 called %t",
+					fs1.mountCalled, fs2.mountCalled, tt.fs1mountCalled, tt.fs2mountCalled)
+				return
+
+			}
+			if tt.notFound {
+				if errdefs.IsAlreadyExists(err) {
+					t.Errorf("succeeded to preprare remote snapshot but want to fail")
+					return
+				}
+			} else if !errdefs.IsAlreadyExists(err) {
+				t.Errorf("fail to preprare snapshot but want to success")
+				return
+			}
+		})
+	}
+}
+
+func bindFileSystem(t *testing.T) fsplugin.FileSystem {
 	root, err := ioutil.TempDir("", "remote")
 	if err != nil {
-		return nil, err
+		t.Fatalf("failed to prepare working-space for bind filesystem: %q", err)
 	}
 	if err := ioutil.WriteFile(filepath.Join(root, remoteSampleFile), []byte(remoteSampleFileContents), 0660); err != nil {
-		return nil, err
+		t.Fatalf("failed to write sample file of bind filesystem: %q", err)
 	}
 	return &filesystem{
 		root: root,
 		t:    t,
-	}, nil
+	}
 }
 
 type filesystem struct {
-	t       *testing.T
-	root    string
-	failure bool
+	t            *testing.T
+	root         string
+	mountFailure bool
+	checkFailure bool
+	mountCalled  bool
 }
 
 func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string) error {
+	fs.mountCalled = true
+	if fs.mountFailure {
+		return fmt.Errorf("failed")
+	}
 	if ref != testRef || digest != testDigest {
 		return fmt.Errorf("layer not found")
 	}
@@ -318,7 +378,7 @@ func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string)
 }
 
 func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
-	if fs.failure {
+	if fs.checkFailure {
 		return fmt.Errorf("failed")
 	}
 	return nil
