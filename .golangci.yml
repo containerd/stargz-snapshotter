@@ -17,6 +17,6 @@ linters:
 run:
   deadline: 2m
   skip-dirs:
-    - demo
     - images
+    - script
     - vendor
