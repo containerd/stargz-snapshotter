@@ -212,9 +212,11 @@ func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string)
 	// TODO: bind mount the state directory as a read-only fs on snapshotter's side
 	conn := nodefs.NewFileSystemConnector(&node{
 		Node: nodefs.NewDefaultNode(),
+		fs:   fs,
 		gr:   gr,
 		e:    root,
 		s:    newState(fmt.Sprintf("%x", sha256.Sum256([]byte(mountpoint)))),
+		root: mountpoint,
 	}, &nodefs.Options{
 		NegativeTimeout: 0,
 		AttrTimeout:     time.Second,
@@ -366,10 +368,18 @@ func (fs *filesystem) getSize(tr http.RoundTripper, url string) (int64, error) {
 // node is a filesystem inode abstraction which implements node in go-fuse.
 type node struct {
 	nodefs.Node
+	fs     *filesystem
 	gr     *stargzReader
 	e      *stargz.TOCEntry
 	s      *state
+	root   string
 	opaque bool // true if this node is an overlayfs opaque directory
+}
+
+func (n *node) OnUnmount() {
+	n.fs.mu.Lock()
+	delete(n.fs.conn, n.root)
+	n.fs.mu.Unlock()
 }
 
 func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
@@ -471,9 +481,11 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 	}
 	return n.Inode().NewChild(name, ce.Stat().IsDir(), &node{
 		Node:   nodefs.NewDefaultNode(),
+		fs:     n.fs,
 		gr:     n.gr,
 		e:      ce,
 		s:      n.s,
+		root:   n.root,
 		opaque: opaque,
 	}), entryToAttr(ce, out)
 }
