@@ -1,0 +1,4 @@
+[proxy_plugins]
+  [proxy_plugins.remote]
+    type = "snapshot"
+    address = "/var/lib/rs/rs.sock"

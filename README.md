@@ -45,7 +45,7 @@ $ docker-compose build --build-arg HTTP_PROXY=$HTTP_PROXY \
                        containerd_demo
 $ docker-compose up -d
 $ docker exec -it containerd_demo /bin/bash
-(inside container) # /run.sh
+(inside container) # ./script/demo/run.sh
 ```
 
 ### Prepare stargz-formatted image on a registry
