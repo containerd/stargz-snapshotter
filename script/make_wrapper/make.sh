@@ -65,27 +65,30 @@ if [ "${INTEGRATION}" == "true" ] ; then
     check "Preparing authentication information"
     
     DOCKER_COMPOSE_YAML=$(mktemp)
-    "${CONTEXT}"/docker-compose-integration.yml.sh "${CONTEXT}/../../" "${AUTH_DIR}" > "${DOCKER_COMPOSE_YAML}"
+    RS_DIR=$(mktemp -d)
+    check "Preparing temp dir for /var/lib/rs"
+
+    "${CONTEXT}"/docker-compose-integration.yml.sh "${CONTEXT}/../../" "${AUTH_DIR}" "${RS_DIR}" > "${DOCKER_COMPOSE_YAML}"
     check "Preparing docker-compose.yml"
 
-    if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS} testenv_integration && \
+    if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS} testenv_integration remote_snapshotter_integration && \
                docker-compose -f "${DOCKER_COMPOSE_YAML}" up --exit-code-from testenv_integration ) ; then
         FAIL=true
     fi
-    docker-compose -f "${DOCKER_COMPOSE_YAML}" down
+
+    echo "Cleaning up environment..."
+    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
     rm "${DOCKER_COMPOSE_YAML}"
     rm -rf "${AUTH_DIR}"
+    rm -rf "${RS_DIR}"
 fi
 
 if [ "$TARGETS" != "" ] ; then
-    docker build ${DOCKER_BUILD_ARGS} -f ./Dockerfile.minimal -t testenv:mini .
-    check "Building mini environment"
-
     if ! docker run --rm --privileged --device /dev/fuse \
          --tmpfs /tmp:exec,mode=777 \
          -w /go/src/github.com/ktock/remote-snapshotter \
-         -v "${CONTEXT}/../../:/go/src/github.com/ktock/remote-snapshotter" \
-         testenv:mini make $TARGETS ; then
+         -v "${CONTEXT}/../../:/go/src/github.com/ktock/remote-snapshotter:ro" \
+         golang:1.12 make $TARGETS PREFIX=/tmp/out/ ; then
         FAIL=true
     fi
 fi
