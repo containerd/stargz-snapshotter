@@ -18,10 +18,11 @@ services:
     - GOPATH=/go
     tmpfs:
     - /var/lib/containerd
+    - /var/lib/rs
     - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse
-    - "${GOPATH}/src/github.com/ktock/remote-snapshotter:/go/src/github.com/ktock/remote-snapshotter"
+    - "${GOPATH}/src/github.com/ktock/remote-snapshotter:/go/src/github.com/ktock/remote-snapshotter:ro"
   registry2:
     image: registry:2
     container_name: registry2

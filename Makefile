@@ -14,27 +14,31 @@
 
 
 # Base path used to install.
-DESTDIR ?= /opt/containerd
+PLUGIN_DESTDIR ?= /opt/rs
+CMD_DESTDIR ?= /usr/local
 DOCKER_ARGS ?=
 GO111MODULE_VALUE=off
+PREFIX ?= out/
 
-PLUGINS=remotesn-linux-amd64.so stargzfs-linux-amd64.so
+PLUGINS=stargzfs-linux-amd64.so
+CMD=rs
 
-BINARIES=$(addprefix plugins/,$(PLUGINS))
+PLUGIN_BINARIES=$(addprefix $(PREFIX),$(PLUGINS))
+CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
 
 .PHONY: check build
 
 all: build
 
-build: $(BINARIES)
+build: $(PLUGINS) $(CMD)
 
 FORCE:
 
-plugins/remotesn-linux-amd64.so: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -buildmode=plugin -o $@ -v .
+stargzfs-linux-amd64.so: FORCE
+	GO111MODULE=$(GO111MODULE_VALUE) go build -buildmode=plugin -o $(PREFIX)$@ -v ./filesystems/stargz
 
-plugins/stargzfs-linux-amd64.so: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -buildmode=plugin -o $@ -v ./filesystems/stargz
+rs: FORCE
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/rs
 
 # TODO: git-validation
 check:
@@ -50,16 +54,20 @@ install-check-tools:
 
 install:
 	@echo "$@"
-	@mkdir -p $(DESTDIR)/plugins
-	@install $(BINARIES) $(DESTDIR)/plugins
+	@mkdir -p $(PLUGIN_DESTDIR)/plugins
+	@mkdir -p $(CMD_DESTDIR)/bin
+	@install $(PLUGIN_BINARIES) $(PLUGIN_DESTDIR)/plugins
+	@install $(CMD_BINARIES) $(CMD_DESTDIR)/bin
 
 uninstall:
 	@echo "$@"
-	@rm -f $(addprefix $(DESTDIR)/plugins/,$(notdir $(BINARIES)))
+	@rm -f $(addprefix $(PLUGIN_DESTDIR)/plugins/,$(notdir $(PLUGIN_BINARIES)))
+	@rm -f $(addprefix $(CMD_DESTDIR)/bin/,$(notdir $(CMD_BINARIES)))
 
 clean:
 	@echo "$@"
-	@rm -f $(BINARIES)
+	@rm -f $(PLUGIN_BINARIES)
+	@rm -f $(CMD_BINARIES)
 
 test:
 	@echo "$@"
@@ -67,7 +75,7 @@ test:
 
 test-root:
 	@echo "$@"
-	@GO111MODULE=$(GO111MODULE_VALUE) go test -test.root
+	@GO111MODULE=$(GO111MODULE_VALUE) go test ./snapshot -test.root
 
 test-all: test-root test
 
