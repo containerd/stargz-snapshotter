@@ -39,7 +39,3 @@ RUN git clone https://github.com/opencontainers/runc \
     cd $GOPATH/src/github.com/google/crfs && \
     git checkout 12599487789fa1d5abead897932c40a1a17929dd && \
     cd stargz/stargzify && GO111MODULE=on go install
-
-COPY ./config.toml /etc/containerd/config.toml
-COPY ./run.sh /run.sh
-RUN chmod 755 /run.sh

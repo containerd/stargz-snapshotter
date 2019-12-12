@@ -14,10 +14,13 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-CONFIG=/etc/containerd/config.toml
-CONTAINERD_ROOT=/var/lib/containerd
-PLUGINS_DIR=/opt/containerd/plugins
+REPO=$GOPATH/src/github.com/ktock/remote-snapshotter
 SNAPSHOT_NAME=remote
+CONTAINERD_CONFIG_DIR=/etc/containerd/
+RS_CONFIG_DIR=/etc/rs/
+CONTAINERD_ROOT=/var/lib/containerd/
+REMOTE_SNAPSHOTTER_ROOT=/var/lib/rs/
+REMOTE_SNAPSHOTTER_SOCKET=/var/lib/rs/rs.sock
 
 function check {
     if [ $? -ne 0 ] ; then
@@ -26,22 +29,56 @@ function check {
     fi
 }
 
-function kill_all_containerd {
-    ps aux | grep containerd | grep -v grep | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {}
+RETRYNUM=30
+RETRYINTERVAL=1
+TIMEOUTSEC=180
+function retry {
+    for i in $(seq ${RETRYNUM}) ; do
+        if eval "timeout ${TIMEOUTSEC} ${@}" ; then
+            break
+        fi
+        echo "Fail(${i}). Retrying..."
+        sleep ${RETRYINTERVAL}
+    done
+    if [ ${i} -eq ${RETRYNUM} ] ; then
+        return 1
+    else
+        return 0
+    fi
 }
 
-function cleanup_root {
-    ls -1d "${CONTAINERD_ROOT}/io.containerd.snapshotter.v1.${SNAPSHOT_NAME}/snapshots/"* | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
-    rm -rf "${CONTAINERD_ROOT}/"*
+function kill_all {
+    if [ "${1}" != "" ] ; then
+        ps aux | grep "${1}" | grep -v grep | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {}
+    fi
 }
+
+function cleanup {
+    rm -rf "${CONTAINERD_ROOT}"*
+    rm "${REMOTE_SNAPSHOTTER_SOCKET}"
+    ls -1d "${REMOTE_SNAPSHOTTER_ROOT}io.containerd.snapshotter.v1.${SNAPSHOT_NAME}/snapshots/"* | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
+    rm -rf "${REMOTE_SNAPSHOTTER_ROOT}"*
+}
+
+echo "copying config from repo..."
+mkdir -p /etc/containerd /etc/rs && \
+    cp "${REPO}/script/demo/config.containerd.toml" "${CONTAINERD_CONFIG_DIR}" && \
+    cp "${REPO}/script/demo/config.rs.toml" "${RS_CONFIG_DIR}"
 
 echo "cleaning up the environment..."
-kill_all_containerd
-cleanup_root
+kill_all "containerd"
+kill_all "rs --log-level=debug"
+cleanup
 
 echo "preparing plugins..."
-( cd $GOPATH/src/github.com/ktock/remote-snapshotter && make -j2 && make install -j2 )
+( cd "${REPO}" && PREFIX=/tmp/out/ make clean && \
+      PREFIX=/tmp/out/ make -j2 && \
+      PREFIX=/tmp/out/ make install )
 check "Preparing plugins"
 
+echo "running remote snaphsotter..."
+rs --log-level=debug --address="${REMOTE_SNAPSHOTTER_SOCKET}" --config="${RS_CONFIG_DIR}config.rs.toml" &
+retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
+
 echo "running containerd..."
-containerd --config="${CONFIG}" $@ &
+containerd --config="${CONTAINERD_CONFIG_DIR}config.containerd.toml" $@ &
