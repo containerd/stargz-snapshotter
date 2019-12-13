@@ -70,9 +70,9 @@ function reboot_containerd {
 }
 
 function cleanup {
-    echo "Cleaning up /var/lib/rs..."
-    ls -1d /var/lib/rs/io.containerd.snapshotter.v1.remote/snapshots/* | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
-    rm -rf /var/lib/rs/*
+    echo "Cleaning up /var/lib/rsnapshotd..."
+    ls -1d /var/lib/rsnapshotd/io.containerd.snapshotter.v1.remote/snapshots/* | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
+    rm -rf /var/lib/rsnapshotd/*
 }
 
 trap "cleanup ; exit 1" SIGHUP SIGINT SIGQUIT SIGTERM
@@ -94,7 +94,7 @@ stargzify "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:sta
 check "Stargzifying images"
 
 # Wait for booting remote snapshotter
-RETRYNUM=600 retry ls /var/lib/rs/rs.sock
+RETRYNUM=600 retry ls /run/rsnapshotd/rsnapshotd.sock
 mkdir -p /etc/containerd && \
     cp ./script/make_wrapper/containerd/config.toml /etc/containerd/config.toml
 

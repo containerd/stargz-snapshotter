@@ -63,6 +63,6 @@ GO111MODULE=off PREFIX=/tmp/out/ make clean && \
 check "Installing remote snapshotter"
 
 # Run remote snapshotter
-mkdir -p /etc/rs && \
-    cp ./script/make_wrapper/rs/config.stargz.toml /etc/rs/config.stargz.toml
-rs --log-level=debug --config=/etc/rs/config.stargz.toml
+mkdir -p /etc/rsnapshotd && \
+    cp ./script/make_wrapper/rsnapshotd/config.stargz.toml /etc/rsnapshotd/config.stargz.toml
+rsnapshotd --log-level=debug --config=/etc/rsnapshotd/config.stargz.toml

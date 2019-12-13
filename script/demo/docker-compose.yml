@@ -18,7 +18,8 @@ services:
     - GOPATH=/go
     tmpfs:
     - /var/lib/containerd
-    - /var/lib/rs
+    - /var/lib/rsnapshotd
+    - /run/rsnapshotd
     - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse

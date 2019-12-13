@@ -11,13 +11,13 @@ if [ "${2}" == "" ]; then
 fi
 
 if [ "${3}" == "" ]; then
-    echo "Temp dir for /var/lib/rs must be provided."
+    echo "Temp dir for /var/lib/rsnapshotd must be provided."
     exit 1
 fi
 
 REPO="${1}"
 AUTH="${2}"
-RS_DIR="${3}"
+RS_ROOT_DIR="${3}"
 
 cat <<EOF
 version: "3"
@@ -43,7 +43,8 @@ services:
     volumes:
     - "${REPO}:/go/src/github.com/ktock/remote-snapshotter:ro"
     - ${AUTH}:/auth
-    - "${RS_DIR}:/var/lib/rs:rshared"
+    - "${RS_ROOT_DIR}:/var/lib/rsnapshotd:rshared"
+    - rsstate:/run/rsnapshotd
   registry:
     image: registry:2
     container_name: registry_integration
@@ -61,12 +62,12 @@ services:
     - ${AUTH}:/auth
   remote_snapshotter_integration:
     build:
-      context: "${REPO}/script/make_wrapper/rs"
+      context: "${REPO}/script/make_wrapper/rsnapshotd"
       dockerfile: Dockerfile
     container_name: remote_snapshotter_integration
     privileged: true
     working_dir: /go/src/github.com/ktock/remote-snapshotter
-    entrypoint: ./script/make_wrapper/rs/entrypoint.sh
+    entrypoint: ./script/make_wrapper/rsnapshotd/entrypoint.sh
     environment:
     - GO111MODULE=off
     - NO_PROXY=127.0.0.1,localhost,registry_integration:5000
@@ -79,6 +80,9 @@ services:
     volumes:
     - "${REPO}:/go/src/github.com/ktock/remote-snapshotter:ro"
     - "${AUTH}:/auth"
-    - "${RS_DIR}:/var/lib/rs:rshared"
+    - "${RS_ROOT_DIR}:/var/lib/rsnapshotd:rshared"
+    - rsstate:/run/rsnapshotd
     - /dev/fuse:/dev/fuse
+volumes:
+  rsstate:
 EOF

@@ -65,10 +65,10 @@ if [ "${INTEGRATION}" == "true" ] ; then
     check "Preparing authentication information"
     
     DOCKER_COMPOSE_YAML=$(mktemp)
-    RS_DIR=$(mktemp -d)
-    check "Preparing temp dir for /var/lib/rs"
+    RS_ROOT_DIR=$(mktemp -d)
+    check "Preparing temp dir for /var/lib/rsnapshotd"
 
-    "${CONTEXT}"/docker-compose-integration.yml.sh "${CONTEXT}/../../" "${AUTH_DIR}" "${RS_DIR}" > "${DOCKER_COMPOSE_YAML}"
+    "${CONTEXT}"/docker-compose-integration.yml.sh "${CONTEXT}/../../" "${AUTH_DIR}" "${RS_ROOT_DIR}" > "${DOCKER_COMPOSE_YAML}"
     check "Preparing docker-compose.yml"
 
     if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS} testenv_integration remote_snapshotter_integration && \
@@ -80,7 +80,7 @@ if [ "${INTEGRATION}" == "true" ] ; then
     docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
     rm "${DOCKER_COMPOSE_YAML}"
     rm -rf "${AUTH_DIR}"
-    rm -rf "${RS_DIR}"
+    rm -rf "${RS_ROOT_DIR}"
 fi
 
 if [ "$TARGETS" != "" ] ; then
