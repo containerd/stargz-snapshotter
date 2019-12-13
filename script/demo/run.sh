@@ -17,10 +17,10 @@
 REPO=$GOPATH/src/github.com/ktock/remote-snapshotter
 SNAPSHOT_NAME=remote
 CONTAINERD_CONFIG_DIR=/etc/containerd/
-RS_CONFIG_DIR=/etc/rs/
 CONTAINERD_ROOT=/var/lib/containerd/
-REMOTE_SNAPSHOTTER_ROOT=/var/lib/rs/
-REMOTE_SNAPSHOTTER_SOCKET=/var/lib/rs/rs.sock
+REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/rsnapshotd/
+REMOTE_SNAPSHOTTER_ROOT=/var/lib/rsnapshotd/
+REMOTE_SNAPSHOTTER_SOCKET=/run/rsnapshotd/rsnapshotd.sock
 
 function check {
     if [ $? -ne 0 ] ; then
@@ -61,13 +61,13 @@ function cleanup {
 }
 
 echo "copying config from repo..."
-mkdir -p /etc/containerd /etc/rs && \
+mkdir -p /etc/containerd /etc/rsnapshotd && \
     cp "${REPO}/script/demo/config.containerd.toml" "${CONTAINERD_CONFIG_DIR}" && \
-    cp "${REPO}/script/demo/config.rs.toml" "${RS_CONFIG_DIR}"
+    cp "${REPO}/script/demo/config.rsnapshotd.toml" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}"
 
 echo "cleaning up the environment..."
 kill_all "containerd"
-kill_all "rs --log-level=debug"
+kill_all "rsnapshotd"
 cleanup
 
 echo "preparing plugins..."
@@ -77,7 +77,7 @@ echo "preparing plugins..."
 check "Preparing plugins"
 
 echo "running remote snaphsotter..."
-rs --log-level=debug --address="${REMOTE_SNAPSHOTTER_SOCKET}" --config="${RS_CONFIG_DIR}config.rs.toml" &
+rsnapshotd --log-level=debug --address="${REMOTE_SNAPSHOTTER_SOCKET}" --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.rsnapshotd.toml" &
 retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
 
 echo "running containerd..."

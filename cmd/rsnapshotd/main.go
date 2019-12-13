@@ -37,11 +37,11 @@ import (
 )
 
 const (
-	defaultStateDir   = "/run/rs"
-	defaultRootDir    = "/var/lib/rs"
-	defaultConfigPath = "/etc/rs/config.toml"
-	defaultAddress    = "/var/lib/rs/rs.sock"
-	defaultPluginsDir = "/opt/rs/plugins"
+	defaultStateDir   = "/run/rsnapshotd"
+	defaultRootDir    = "/var/lib/rsnapshotd"
+	defaultConfigPath = "/etc/rsnapshotd/config.toml"
+	defaultAddress    = "/run/rsnapshotd/rsnapshotd.sock"
+	defaultPluginsDir = "/opt/rsnapshotd/plugins"
 	defaultLogLevel   = logrus.InfoLevel
 )
 

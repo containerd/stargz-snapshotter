@@ -14,14 +14,14 @@
 
 
 # Base path used to install.
-PLUGIN_DESTDIR ?= /opt/rs
+PLUGIN_DESTDIR ?= /opt/rsnapshotd
 CMD_DESTDIR ?= /usr/local
 DOCKER_ARGS ?=
 GO111MODULE_VALUE=off
 PREFIX ?= out/
 
 PLUGINS=stargzfs-linux-amd64.so
-CMD=rs
+CMD=rsnapshotd
 
 PLUGIN_BINARIES=$(addprefix $(PREFIX),$(PLUGINS))
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
@@ -37,8 +37,8 @@ FORCE:
 stargzfs-linux-amd64.so: FORCE
 	GO111MODULE=$(GO111MODULE_VALUE) go build -buildmode=plugin -o $(PREFIX)$@ -v ./filesystems/stargz
 
-rs: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/rs
+rsnapshotd: FORCE
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/rsnapshotd
 
 # TODO: git-validation
 check:
