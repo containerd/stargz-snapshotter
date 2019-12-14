@@ -109,12 +109,18 @@ func init() {
 			var filesystems []string
 			if ps, err := ic.GetByType(fsplugin.RemoteFileSystemPlugin); ps != nil && err == nil {
 				for id, p := range ps {
-					if i, err := p.Instance(); err == nil {
-						if f, ok := i.(fsplugin.FileSystem); ok {
-							fsMap[id] = f
-							filesystems = append(filesystems, id)
-						}
+					i, err := p.Instance()
+					if err != nil {
+						log.G(ctx).WithError(err).Warnf("failed to initialize filesystem plugin %q", id)
+						continue
 					}
+					f, ok := i.(fsplugin.FileSystem)
+					if !ok {
+						log.G(ctx).WithError(err).Warnf("filesystem plugin %q has invalid API", id)
+						continue
+					}
+					fsMap[id] = f
+					filesystems = append(filesystems, id)
 				}
 			}
 
@@ -122,10 +128,11 @@ func init() {
 			if config.FileSystems != nil {
 				filesystems = config.FileSystems
 			}
-			for _, id := range filesystems {
+			for prio, id := range filesystems {
+				log.G(ctx).WithField("priority", prio).Infof("Registering filesystem plugin %q...", id)
 				f, ok := fsMap[id]
 				if !ok {
-					return nil, fmt.Errorf("required filesystem %v not found", id)
+					return nil, fmt.Errorf("required filesystem %q not found", id)
 				}
 				fsChain = append(fsChain, f)
 			}
