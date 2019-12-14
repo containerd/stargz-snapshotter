@@ -19,9 +19,7 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"net"
-	"os"
 
 	"google.golang.org/grpc"
 
@@ -58,10 +56,13 @@ func main() {
 	flag.Parse()
 	lvl, err := logrus.ParseLevel(*logLevel)
 	if err != nil {
-		fmt.Print(err)
-		os.Exit(1)
+		log.L.WithError(err).Fatal("failed to prepare logger")
 	}
 	logrus.SetLevel(lvl)
+	logrus.SetFormatter(&logrus.TextFormatter{
+		TimestampFormat: log.RFC3339NanoFixed,
+		FullTimestamp:   true,
+	})
 
 	ctx := log.WithLogger(context.Background(), log.L)
 	config := &srvconfig.Config{
@@ -71,15 +72,13 @@ func main() {
 	}
 	if *configPath != "" {
 		if err := srvconfig.LoadConfig(*configPath, config); err != nil {
-			fmt.Printf("failed to load config file %q, %q", *configPath, err)
-			os.Exit(1)
+			log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
 		}
 	}
 	var rs snplugin.Snapshotter
 	if *pluginsDir != "" {
 		if err := plugin.Load(*pluginsDir); err != nil {
-			fmt.Printf("failed to load plugin from %q: %q", *pluginsDir, err)
-			os.Exit(1)
+			log.G(ctx).WithError(err).Fatalf("failed to load plugin from %q", *pluginsDir)
 		}
 	}
 	plugins := plugin.Graph(func(r *plugin.Registration) bool {
@@ -100,30 +99,26 @@ func main() {
 		if p.Config != nil {
 			pc, err := config.Decode(p)
 			if err != nil {
-				fmt.Printf("failed to parse config file: %q", err)
-				os.Exit(1)
+				log.G(ctx).WithError(err).Fatal("failed to parse config file")
 			}
 			initContext.Config = pc
 		}
 		result := p.Init(initContext)
 		if err := initialized.Add(result); err != nil {
-			fmt.Printf("failed to add plugin %q result to plugin set: %q", p.ID, err)
-			os.Exit(1)
+			log.G(ctx).WithError(err).Fatalf("failed to add plugin %q to plugin set", p.ID)
 		}
 		i, err := result.Instance()
 		if err != nil {
-			fmt.Printf("failed to load plugin %q: %q", p.ID, err)
-			os.Exit(1)
+			log.G(ctx).WithError(err).Fatalf("failed to load plugin %q", p.ID)
 		}
 		if sn, ok := i.(snplugin.Snapshotter); ok {
+			log.G(ctx).Infof("Registering snapshotter plugin %q...", p.ID)
 			rs = sn
-			log.G(ctx).Infof("Registered snapshotter plugin %s", p.ID)
 		}
 	}
 
 	if rs == nil {
-		fmt.Println("failed to register snapshotter")
-		os.Exit(1)
+		log.G(ctx).Fatalf("failed to register snapshotter")
 	}
 
 	// Create a gRPC server
@@ -138,11 +133,9 @@ func main() {
 	// Listen and serve
 	l, err := net.Listen("unix", *address)
 	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
+		log.G(ctx).WithError(err).Fatalf("error on listen socket %q", *address)
 	}
 	if err := rpc.Serve(l); err != nil {
-		fmt.Printf("error: %v\n", err)
-		os.Exit(1)
+		log.G(ctx).WithError(err).Fatalf("error on serving via socket %q", *address)
 	}
 }
