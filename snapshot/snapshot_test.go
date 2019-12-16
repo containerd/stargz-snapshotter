@@ -56,6 +56,7 @@ func prepareTarget(t *testing.T, sn snapshots.Snapshotter) string {
 }
 
 func TestRemotePrepare(t *testing.T) {
+	testutil.RequiresRoot(t)
 	ctx := context.TODO()
 	root, err := ioutil.TempDir("", "overlay")
 	if err != nil {
@@ -106,6 +107,7 @@ func TestRemotePrepare(t *testing.T) {
 }
 
 func TestRemoteOverlay(t *testing.T) {
+	testutil.RequiresRoot(t)
 	ctx := context.TODO()
 	root, err := ioutil.TempDir("", "remote")
 	if err != nil {
@@ -164,6 +166,7 @@ func TestRemoteOverlay(t *testing.T) {
 }
 
 func TestFailureDetection(t *testing.T) {
+	testutil.RequiresRoot(t)
 	ctx := context.TODO()
 	root, err := ioutil.TempDir("", "remote")
 	if err != nil {
@@ -207,6 +210,7 @@ func TestFailureDetection(t *testing.T) {
 }
 
 func TestRemoteCommit(t *testing.T) {
+	testutil.RequiresRoot(t)
 	ctx := context.TODO()
 	root, err := ioutil.TempDir("", "remote")
 	if err != nil {
@@ -276,6 +280,7 @@ func TestRemoteCommit(t *testing.T) {
 }
 
 func TestFallback(t *testing.T) {
+	testutil.RequiresRoot(t)
 	tests := []struct {
 		name           string
 		fs1Failure     bool
