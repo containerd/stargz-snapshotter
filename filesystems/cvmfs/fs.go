@@ -85,11 +85,10 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 			err := fmt.Errorf("Layer from path: %s does not seems to be in the CVMFS repository", path)
 			log.G(ctx).WithError(err).WithField("mountpoint", mountpoint).WithField("layer path", path).Error("cvmfs: the mounted layer does not seem to exist.")
 			return err
-		} else {
-			err := fmt.Errorf("Error in stat-ing the layer: %s", statErr)
-			log.G(ctx).WithError(err).WithField("mountpoint", mountpoint).WithField("layer path", path).Error("cvmfs: unknow error in stating the file.")
-			return err
 		}
+		err := fmt.Errorf("Error in stat-ing the layer: %s", statErr)
+		log.G(ctx).WithError(err).WithField("mountpoint", mountpoint).WithField("layer path", path).Error("cvmfs: unknow error in stating the file.")
+		return err
 	}
 	return statErr
 }
