@@ -41,7 +41,7 @@ type Config struct {
 	Repository string `toml:"repository" default:"unpacked.cern.ch"`
 }
 
-func NewFilesystem(root string, config *Config) (*filesystem, error) {
+func NewFilesystem(root string, config *Config) (fsplugin.FileSystem, error) {
 	repository := config.Repository
 	if repository == "" {
 		repository = "unpacked.cern.ch"
