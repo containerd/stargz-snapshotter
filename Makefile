@@ -19,7 +19,7 @@ CMD_DESTDIR ?= /usr/local
 GO111MODULE_VALUE=off
 PREFIX ?= out/
 
-PLUGINS=stargzfs-linux-amd64.so
+PLUGINS=stargzfs-linux-amd64.so cvmfs-linux-amd64.so
 CMD=rsnapshotd ctr-remote
 
 PLUGIN_BINARIES=$(addprefix $(PREFIX),$(PLUGINS))
@@ -35,6 +35,10 @@ FORCE:
 
 stargzfs-linux-amd64.so: FORCE
 	GO111MODULE=$(GO111MODULE_VALUE) go build -buildmode=plugin -o $(PREFIX)$@ -v ./filesystems/stargz
+
+cvmfs-linux-amd64.so: FORCE
+	GO111MODULE=$(GO111MODULE_VALUE) go build -buildmode=plugin -o $(PREFIX)$@ -v ./filesystems/cvmfs
+
 
 rsnapshotd: FORCE
 	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/rsnapshotd
