@@ -8,25 +8,25 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - name: Build all
-      run: ./script/make_wrapper/make.sh build -j2
+      run: ./script/make.sh build -j2
   test:
     runs-on: ubuntu-18.04
     name: Test
     steps:
     - uses: actions/checkout@v1
     - name: Test all
-      run: ./script/make_wrapper/make.sh test-all -j2
+      run: ./script/make.sh test-all -j2
   check:
     runs-on: ubuntu-18.04
     name: Check
     steps:
     - uses: actions/checkout@v1
     - name: Check all
-      run: ./script/make_wrapper/make.sh install-check-tools check
+      run: ./script/make.sh install-check-tools check
   integration:
     runs-on: ubuntu-18.04
     name: Integration
     steps:
     - uses: actions/checkout@v1
     - name: Run integration test
-      run: ./script/make_wrapper/make.sh integration
+      run: ./script/make.sh integration

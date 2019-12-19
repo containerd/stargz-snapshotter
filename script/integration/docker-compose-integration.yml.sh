@@ -24,12 +24,12 @@ version: "3"
 services:
   testenv_integration:
     build:
-      context: "${REPO}/script/make_wrapper/containerd"
+      context: "${REPO}/script/integration/containerd"
       dockerfile: Dockerfile
     container_name: testenv_integration
     privileged: true
     working_dir: /go/src/github.com/ktock/remote-snapshotter
-    entrypoint: ./script/make_wrapper/containerd/entrypoint.sh
+    entrypoint: ./script/integration/containerd/entrypoint.sh
     environment:
     - GO111MODULE=off
     - NO_PROXY=127.0.0.1,localhost,registry_integration:5000
@@ -62,12 +62,12 @@ services:
     - ${AUTH}:/auth
   remote_snapshotter_integration:
     build:
-      context: "${REPO}/script/make_wrapper/rsnapshotd"
+      context: "${REPO}/script/integration/rsnapshotd"
       dockerfile: Dockerfile
     container_name: remote_snapshotter_integration
     privileged: true
     working_dir: /go/src/github.com/ktock/remote-snapshotter
-    entrypoint: ./script/make_wrapper/rsnapshotd/entrypoint.sh
+    entrypoint: ./script/integration/rsnapshotd/entrypoint.sh
     environment:
     - GO111MODULE=off
     - NO_PROXY=127.0.0.1,localhost,registry_integration:5000

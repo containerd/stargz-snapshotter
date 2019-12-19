@@ -80,4 +80,4 @@ test-root:
 test-all: test-root test
 
 integration:
-	@./script/make_wrapper/make.sh integration $(DOCKER_ARGS)
+	@./script/make.sh integration $(DOCKER_ARGS)

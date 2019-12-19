@@ -64,5 +64,5 @@ check "Installing remote snapshotter"
 
 # Run remote snapshotter
 mkdir -p /etc/rsnapshotd && \
-    cp ./script/make_wrapper/rsnapshotd/config.stargz.toml /etc/rsnapshotd/config.stargz.toml
+    cp ./script/integration/rsnapshotd/config.stargz.toml /etc/rsnapshotd/config.stargz.toml
 rsnapshotd --log-level=debug --config=/etc/rsnapshotd/config.stargz.toml
