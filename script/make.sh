@@ -17,6 +17,7 @@
 REGISTRY_HOST=registry_integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
+REPO="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/../"
 
 function check {
     if [ ${?} = 0 ] ; then
@@ -36,8 +37,6 @@ fi
 echo ${DOCKER_BUILD_ARGS}
 
 COMMAND="${1}"
-CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd "${CONTEXT}"
 
 TARGETS=
 INTEGRATION=false
@@ -68,7 +67,9 @@ if [ "${INTEGRATION}" == "true" ] ; then
     RS_ROOT_DIR=$(mktemp -d)
     check "Preparing temp dir for /var/lib/rsnapshotd"
 
-    "${CONTEXT}"/docker-compose-integration.yml.sh "${CONTEXT}/../../" "${AUTH_DIR}" "${RS_ROOT_DIR}" > "${DOCKER_COMPOSE_YAML}"
+    CONTEXT="${REPO}/script/integration"
+    cd "${CONTEXT}"
+    "${CONTEXT}"/docker-compose-integration.yml.sh "${REPO}" "${AUTH_DIR}" "${RS_ROOT_DIR}" > "${DOCKER_COMPOSE_YAML}"
     check "Preparing docker-compose.yml"
 
     if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS} testenv_integration remote_snapshotter_integration && \
@@ -87,7 +88,7 @@ if [ "$TARGETS" != "" ] ; then
     if ! docker run --rm --privileged --device /dev/fuse \
          --tmpfs /tmp:exec,mode=777 \
          -w /go/src/github.com/ktock/remote-snapshotter \
-         -v "${CONTEXT}/../../:/go/src/github.com/ktock/remote-snapshotter:ro" \
+         -v "${REPO}:/go/src/github.com/ktock/remote-snapshotter:ro" \
          golang:1.12 make $TARGETS PREFIX=/tmp/out/ ; then
         FAIL=true
     fi

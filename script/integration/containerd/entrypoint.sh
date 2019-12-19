@@ -96,7 +96,7 @@ check "Stargzifying images"
 # Wait for booting remote snapshotter
 RETRYNUM=600 retry ls /run/rsnapshotd/rsnapshotd.sock
 mkdir -p /etc/containerd && \
-    cp ./script/make_wrapper/containerd/config.toml /etc/containerd/config.toml
+    cp ./script/integration/containerd/config.toml /etc/containerd/config.toml
 
 ############
 # Tests for remote snapshotter
