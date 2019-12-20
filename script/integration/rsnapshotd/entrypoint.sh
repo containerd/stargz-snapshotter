@@ -27,21 +27,23 @@ function check {
     fi
 }
 
-RETRYNUM=30
+RETRYNUM=100
 RETRYINTERVAL=1
 TIMEOUTSEC=180
 function retry {
+    SUCCESS=false
     for i in $(seq ${RETRYNUM}) ; do
         if eval "timeout ${TIMEOUTSEC} ${@}" ; then
+            SUCCESS=true
             break
         fi
         echo "Fail(${i}). Retrying..."
         sleep ${RETRYINTERVAL}
     done
-    if [ ${i} -eq ${RETRYNUM} ] ; then
-        return 1
-    else
+    if [ "${SUCCESS}" == "true" ] ; then
         return 0
+    else
+        return 1
     fi
 }
 
