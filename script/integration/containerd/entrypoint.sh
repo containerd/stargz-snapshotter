@@ -19,21 +19,23 @@ REGISTRY_HOST=registry_integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
-RETRYNUM=30
+RETRYNUM=100
 RETRYINTERVAL=1
 TIMEOUTSEC=180
 function retry {
+    SUCCESS=false
     for i in $(seq ${RETRYNUM}) ; do
         if eval "timeout ${TIMEOUTSEC} ${@}" ; then
+            SUCCESS=true
             break
         fi
         echo "Fail(${i}). Retrying..."
         sleep ${RETRYINTERVAL}
     done
-    if [ ${i} -eq ${RETRYNUM} ] ; then
-        return 1
-    else
+    if [ "${SUCCESS}" == "true" ] ; then
         return 0
+    else
+        return 1
     fi
 }
 
@@ -70,13 +72,15 @@ function reboot_containerd {
 }
 
 function cleanup {
+    ORG_EXIT_CODE="${1}"
     echo "Cleaning up /var/lib/rsnapshotd..."
     ls -1d /var/lib/rsnapshotd/io.containerd.snapshotter.v1.remote/snapshots/* | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
     rm -rf /var/lib/rsnapshotd/*
+    echo "Exit with code: ${ORG_EXIT_CODE}"
+    exit "${ORG_EXIT_CODE}"
 }
 
-trap "cleanup ; exit 1" SIGHUP SIGINT SIGQUIT SIGTERM
-trap "cleanup ; exit 0" EXIT
+trap 'cleanup $?' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 # Log into the registry
 cp /auth/certs/domain.crt /usr/local/share/ca-certificates
