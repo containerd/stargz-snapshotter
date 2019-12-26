@@ -39,9 +39,4 @@ RUN git clone https://github.com/opencontainers/runc \
               $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
     git checkout 516ed248600081ea9bf12f4c93b3e491c78859cf && \
-    GO111MODULE=off make -j2 && GO111MODULE=off make install && \
-    git clone https://github.com/google/crfs.git \
-              $GOPATH/src/github.com/google/crfs && \
-    cd $GOPATH/src/github.com/google/crfs && \
-    git checkout 12599487789fa1d5abead897932c40a1a17929dd && \
-    GO111MODULE=on go install github.com/google/crfs/stargz/stargzify
+    GO111MODULE=off make -j2 && GO111MODULE=off make install
