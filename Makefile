@@ -16,7 +16,6 @@
 # Base path used to install.
 PLUGIN_DESTDIR ?= /opt/rsnapshotd
 CMD_DESTDIR ?= /usr/local
-DOCKER_ARGS ?=
 GO111MODULE_VALUE=off
 PREFIX ?= out/
 
@@ -80,4 +79,4 @@ test-root:
 test-all: test-root test
 
 integration:
-	@./script/make.sh integration $(DOCKER_ARGS)
+	@./script/make.sh integration
