@@ -30,3 +30,10 @@ jobs:
     - uses: actions/checkout@v1
     - name: Run integration test
       run: ./script/make.sh integration
+  test-optimize:
+    runs-on: ubuntu-18.04
+    name: Optimize
+    steps:
+    - uses: actions/checkout@v1
+    - name: Run test for optimize
+      run: ./script/make.sh test-optimize
