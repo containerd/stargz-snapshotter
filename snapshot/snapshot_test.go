@@ -36,8 +36,6 @@ import (
 
 const (
 	testTarget               = "testTarget"
-	testRef                  = "targetRef"
-	testDigest               = "deadbeaf"
 	remoteSampleFile         = "foo"
 	remoteSampleFileContents = "remote layer"
 )
@@ -47,8 +45,6 @@ func prepareTarget(t *testing.T, sn snapshots.Snapshotter) string {
 	ctx := context.TODO()
 	if _, err := sn.Prepare(ctx, pKey, "", snapshots.WithLabels(map[string]string{
 		targetSnapshotLabel: testTarget,
-		targetRefLabel:      testRef,
-		targetDigestLabel:   testDigest,
 	})); !errdefs.IsAlreadyExists(err) {
 		t.Fatalf("failed to prepare remote snapshot: %v", err)
 	}
@@ -322,8 +318,6 @@ func TestFallback(t *testing.T) {
 			ctx := context.TODO()
 			_, err = sn.Prepare(ctx, pKey, "", snapshots.WithLabels(map[string]string{
 				targetSnapshotLabel: testTarget,
-				targetRefLabel:      testRef,
-				targetDigestLabel:   testDigest,
 			}))
 			defer sn.Remove(ctx, pKey)
 			if !(fs1.mountCalled == tt.fs1mountCalled && fs2.mountCalled == tt.fs2mountCalled) {
@@ -367,13 +361,10 @@ type filesystem struct {
 	mountCalled  bool
 }
 
-func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string) error {
+func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
 	fs.mountCalled = true
 	if fs.mountFailure {
 		return fmt.Errorf("failed")
-	}
-	if ref != testRef || digest != testDigest {
-		return fmt.Errorf("layer not found")
 	}
 	if err := syscall.Mount(fs.root, mountpoint, "none", syscall.MS_BIND, ""); err != nil {
 		fs.t.Fatalf("failed to bind mount %q to %q: %v", fs.root, mountpoint, err)

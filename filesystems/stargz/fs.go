@@ -59,6 +59,7 @@ import (
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"github.com/ktock/remote-snapshotter/cache"
 	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
+	"github.com/ktock/remote-snapshotter/filesystems/stargz/handler"
 	"golang.org/x/sys/unix"
 )
 
@@ -153,7 +154,17 @@ type connection struct {
 	tr  http.RoundTripper
 }
 
-func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string) error {
+func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
+	ref, ok := labels[handler.TargetRefLabel]
+	if !ok {
+		log.G(ctx).Debug("stargz: reference hasn't been passed")
+		return fmt.Errorf("reference hasn't been passed")
+	}
+	digest, ok := labels[handler.TargetDigestLabel]
+	if !ok {
+		log.G(ctx).Debug("stargz: digest hasn't been passed")
+		return fmt.Errorf("digest hasn't been passed")
+	}
 	host, url, err := fs.parseReference(ref, digest)
 	if err != nil {
 		log.G(ctx).WithError(err).WithField("ref", ref).WithField("digest", digest).Debug("stargz: failed to parse the reference")

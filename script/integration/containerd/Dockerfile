@@ -35,8 +35,8 @@ RUN git clone https://github.com/opencontainers/runc \
     git checkout d736ef14f0288d6993a1845745d6756cfc9ddd5a && \
     GO111MODULE=off make -j2 BUILDTAGS='seccomp apparmor' && \
     GO111MODULE=off make install && \
-    git clone https://github.com/ktock/containerd \
+    git clone https://github.com/containerd/containerd \
               $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
-    git checkout 516ed248600081ea9bf12f4c93b3e491c78859cf && \
+    git checkout 6b94b646b7712ecbf0d16ce19588dc1b083b829f && \
     GO111MODULE=off make -j2 && GO111MODULE=off make install
