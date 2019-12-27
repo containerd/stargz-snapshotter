@@ -27,7 +27,7 @@ Namespaces are specified as an array of entries inside the `namespaces` root fie
 The following parameters can be specified to set up namespaces:
 
 * **`type`** *(string, REQUIRED)* - namespace type. The following namespace types are supported:
-    * **`pid`** processes inside the container will only be able to see other processes inside the same container or inside the same pid namespace.
+    * **`pid`** processes inside the container will only be able to see other processes inside the same container.
     * **`network`** the container will have its own network stack.
     * **`mount`** the container will have an isolated mount table.
     * **`ipc`** processes inside the container will only be able to communicate to other processes inside the same container via system level IPC.
@@ -394,9 +394,6 @@ For more information, see the kernel cgroups documentation about [HugeTLB][cgrou
 Each entry has the following structure:
 
 * **`pageSize`** *(string, REQUIRED)* - hugepage size
-    The value has the format `<size><unit-prefix>B` (64KB, 2MB, 1GB), and must match the `<hugepagesize>` of the
-    corresponding control file found in `/sys/fs/cgroup/hugetlb/hugetlb.<hugepagesize>.limit_in_bytes`.
-    Values of `<unit-prefix>` are intended to be parsed using base 1024 ("1KB" = 1024, "1MB" = 1048576, etc).
 * **`limit`** *(uint64, REQUIRED)* - limit in bytes of *hugepagesize* HugeTLB usage
 
 #### Example
@@ -406,10 +403,6 @@ Each entry has the following structure:
         {
             "pageSize": "2MB",
             "limit": 209715200
-        },
-        {
-            "pageSize": "64KB",
-            "limit": 1000000
         }
    ]
 ```
@@ -586,14 +579,6 @@ The following parameters can be specified to set up seccomp:
     * `SCMP_ARCH_PARISC`
     * `SCMP_ARCH_PARISC64`
 
-* **`flags`** *(array of strings, OPTIONAL)* - list of flags to use with seccomp(2).
-
-    A valid list of constants is shown below.
-
-    * `SECCOMP_FILTER_FLAG_TSYNC`
-    * `SECCOMP_FILTER_FLAG_LOG`
-    * `SECCOMP_FILTER_FLAG_SPEC_ALLOW`
-
 * **`syscalls`** *(array of objects, OPTIONAL)* - match a syscall in seccomp.
 
     While this property is OPTIONAL, some values of `defaultAction` are not useful without `syscalls` entries.
@@ -604,14 +589,13 @@ The following parameters can be specified to set up seccomp:
     * **`names`** *(array of strings, REQUIRED)* - the names of the syscalls.
         `names` MUST contain at least one entry.
     * **`action`** *(string, REQUIRED)* - the action for seccomp rules.
-        A valid list of constants as of libseccomp v2.4.0 is shown below.
+        A valid list of constants as of libseccomp v2.3.2 is shown below.
 
         * `SCMP_ACT_KILL`
         * `SCMP_ACT_TRAP`
         * `SCMP_ACT_ERRNO`
         * `SCMP_ACT_TRACE`
         * `SCMP_ACT_ALLOW`
-        * `SCMP_ACT_LOG`
 
     * **`args`** *(array of objects, OPTIONAL)* - the specific syscall in seccomp.
 

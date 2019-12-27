@@ -476,7 +476,7 @@ Here is a full example `config.json` for reference.
 
 ```json
 {
-    "ociVersion": "1.0.1",
+    "ociVersion": "0.5.0-dev",
     "process": {
         "terminal": true,
         "user": {
@@ -710,10 +710,6 @@ Here is a full example `config.json` for reference.
                 {
                     "pageSize": "2MB",
                     "limit": 9223372036854772000
-                },
-                {
-                    "pageSize": "64KB",
-                    "limit": 1000000
                 }
             ],
             "memory": {
