@@ -11,15 +11,15 @@ Related discussion of the snapshotter in containerd community:
 
 By using this snapshotter, images(even if they are huge) can be pulled in lightning speed because this skips pulling layers but fetches the contents on demand at runtime.
 ```
-# time ctr images pull --plain-http --skip-download --snapshotter=remote registry2:5000/fedora:30 > /dev/null 
+# time ctr images rpull --plain-http registry2:5000/fedora:30 > /dev/null 
 real	0m0.447s
 user	0m0.081s
 sys	0m0.019s
-# time ctr images pull --plain-http --skip-download --snapshotter=remote registry2:5000/python:3.7 > /dev/null 
+# time ctr images rpull --plain-http registry2:5000/python:3.7 > /dev/null 
 real	0m1.041s
 user	0m0.073s
 sys	0m0.028s
-# time ctr images pull --plain-http --skip-download --snapshotter=remote registry2:5000/jenkins:2.60.3 > /dev/null 
+# time ctr images rpull --plain-http registry2:5000/jenkins:2.60.3 > /dev/null 
 real	0m1.231s
 user	0m0.112s
 sys	0m0.008s
@@ -58,21 +58,18 @@ Use optimize command to convert the image into stargz-formatted one as well as o
 The converted image is still __compatible with a normal docker image__ so you can still pull and run it with normal tools(e.g. docker).
 
 ### Pull the image without downloading layers(it's sometimes called "lazypull") and run it
+Layer downloads don't occur. So this "pull" operation ends soon.
 ```
-# time ctr images pull --plain-http --skip-download --snapshotter=remote registry2:5000/ubuntu:18.04
-(Layer downloads don't occur. So this "pull" operation will end in around 1 sec.)
-real	0m0.248s
-user	0m0.020s
-sys	0m0.011s
-# ctr run --rm -t --snapshotter=remote registry2:5000/ubuntu:18.04 test /bin/bash
+# time /tmp/out/ctr images rpull --plain-http registry2:5000/ubuntu:18.04
+fetching sha256:728332a6... application/vnd.docker.distribution.manifest.v2+json
+fetching sha256:80026893... application/vnd.docker.container.image.v1+json
+
+real	0m0.176s
+user	0m0.025s
+sys	0m0.005s
+# /tmp/out/ctr run --rm -t --snapshotter=remote registry2:5000/ubuntu:18.04 test /bin/bash
 root@8dab301bd68d:/# ls
 bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
-```
-
-### Cleanup
-```
-# ctr t kill -s 9 test
-# ctr c rm test
 ```
 
 ## Authentication
@@ -84,7 +81,7 @@ In the example showed above, you can pull images from your private repository on
 ```
 # docker login
 (Enter username and password)
-# ctr image pull --user <username>:<password> --skip-download --snapshotter remote index.docker.io/<your-repository>/ubuntu:18.04
+# /tmp/out/ctr image rpull --user <username>:<password> index.docker.io/<your-repository>/ubuntu:18.04
 ```
 The `--user` option is just for containerd's side which doesn't recognize `~/.docker/config.json`.
 We doesn't use credentials specified by this option but uses `~/.docker/config.json` instead.
@@ -98,8 +95,9 @@ Filesystems can be easily integrated with this snapshotter and containerd by imp
 
 ## General issues:
 - [ ] Completing necessary patches on the containerd.
-  - [x] Implement the protocol on metadata snapshotter: https://github.com/containerd/containerd/pull/3793
-  - [ ] Skip downloading remote snapshot layers: https://github.com/containerd/containerd/pull/3846
+  - [x] Implement the protocol on metadata snapshotter: [#3793](https://github.com/containerd/containerd/pull/3793)
+  - [x] Skip downloading remote snapshot layers: [#3846](https://github.com/containerd/containerd/pull/3846), [#3870](https://github.com/containerd/containerd/pull/3870), [#3911](https://github.com/containerd/containerd/pull/3911)
+  - [ ] Add handlers for image information propagation
   - [ ] Deal with ErrUnavailable error and try re-pull layers
 
 ## Snapshotter specific issues:

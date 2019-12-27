@@ -64,8 +64,6 @@ import (
 
 const (
 	targetSnapshotLabel = "containerd.io/snapshot.ref"
-	targetRefLabel      = "containerd.io/snapshot/target.reference"
-	targetDigestLabel   = "containerd.io/snapshot/target.digest"
 )
 
 type Config struct {
@@ -301,8 +299,14 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	//
 	// Try to prepare the remote snapshot. If succeeded, we commit the snapshot now
 	// and return ErrAlreadyExists.
-	if target, ok := getLabel(targetSnapshotLabel, opts); ok {
-		if err := o.prepareRemoteSnapshot(ctx, key, opts); err != nil {
+	var base snapshots.Info
+	for _, opt := range opts {
+		if err := opt(&base); err != nil {
+			return nil, err
+		}
+	}
+	if target, ok := base.Labels[targetSnapshotLabel]; ok {
+		if err := o.prepareRemoteSnapshot(ctx, key, base.Labels); err != nil {
 			return m, nil // fallback to the normal behavior
 		}
 		if err := o.Commit(ctx, target, key, opts...); err != nil {
@@ -681,15 +685,7 @@ func (o *snapshotter) Close() error {
 // prepareRemoteSnapshot tries to prepare the snapshot as a remote snapshot
 // using FileSystems registered in this snapshotter with the layer's basic
 // information(ref and the layer digest).
-func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, opts []snapshots.Opt) error {
-	ref, ok := getLabel(targetRefLabel, opts)
-	if !ok {
-		return errors.New("image reference is not passed")
-	}
-	digest, ok := getLabel(targetDigestLabel, opts)
-	if !ok {
-		return errors.New("image digest are not passed")
-	}
+func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, labels map[string]string) error {
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return err
@@ -702,7 +698,7 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, opt
 
 	// Search a filesystem which can mount a remote snapshot for this layer.
 	for _, f := range o.fsChain {
-		if err := f.Mount(o.context, ref, digest, o.upperPath(id)); err == nil {
+		if err := f.Mount(o.context, o.upperPath(id), labels); err == nil {
 			o.mu.Lock()
 			o.fsmounts[o.upperPath(id)] = f
 			o.mu.Unlock()
@@ -725,21 +721,4 @@ func (o *snapshotter) checkAvailability(ctx context.Context, mountpoint string) 
 		return nil
 	}
 	return fs.Check(o.context, mountpoint)
-}
-
-// ==REMOTE SNAPSHOTTER SPECIFIC==
-//
-// getLabel is a helper function to extract a value which is stored as a value
-// of a label in Opts.
-func getLabel(label string, opts []snapshots.Opt) (string, bool) {
-	var base snapshots.Info
-	for _, opt := range opts {
-		if err := opt(&base); err != nil {
-			return "", false
-		}
-	}
-	if v, ok := base.Labels[label]; ok {
-		return v, true
-	}
-	return "", false
 }
