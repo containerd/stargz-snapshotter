@@ -50,9 +50,10 @@ $ docker exec -it containerd_demo /bin/bash
 
 ### Prepare stargz-formatted image on a registry
 
-Use [stargzify](https://github.com/google/crfs/tree/master/stargz/stargzify) command to convert the image.
+Use optimize command to convert the image into stargz-formatted one as well as optimize the image for your workload. In this example, we optimize the image aming to speed up execution of `ls` command on `bash`.
 ```
-# stargzify -insecure ubuntu:18.04 http://registry2:5000/ubuntu:18.04
+# optimize -insecure -entrypoint='[ "/bin/bash", "-c" ]' -args='[ "ls" ]' \
+           ubuntu:18.04 http://registry2:5000/ubuntu:18.04
 ```
 The converted image is still __compatible with a normal docker image__ so you can still pull and run it with normal tools(e.g. docker).
 
@@ -106,5 +107,5 @@ Filesystems can be easily integrated with this snapshotter and containerd by imp
   - [x] Ensure all mounts are available on every Prepare() and report erros when unavailable.
   - [x] Deal with runtime problems(NW disconnection, authn failure and so on).
 - [x] Authn: Implement fundamental private repository authentication using `~/.docker/config.json`.
-- [ ] Performance: READ performance improvement
+- [x] Performance: READ performance improvement
 - [ ] Documentation: ([architecture.md](architecture.md)) is stale.

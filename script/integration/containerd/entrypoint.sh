@@ -94,7 +94,9 @@ check "Login to the registry"
 
 # Prepare images
 gcrane cp ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
-stargzify "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
+GO111MODULE=off PREFIX=/tmp/out/ make clean && \
+    GO111MODULE=off PREFIX=/tmp/out/ make optimize && \
+    /tmp/out/optimize -noopt "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
 check "Stargzifying images"
 
 # Wait for booting remote snapshotter
