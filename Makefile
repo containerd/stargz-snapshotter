@@ -20,7 +20,7 @@ GO111MODULE_VALUE=off
 PREFIX ?= out/
 
 PLUGINS=stargzfs-linux-amd64.so
-CMD=rsnapshotd optimize
+CMD=rsnapshotd optimize ctr
 
 PLUGIN_BINARIES=$(addprefix $(PREFIX),$(PLUGINS))
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
@@ -41,6 +41,9 @@ rsnapshotd: FORCE
 
 optimize: FORCE
 	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/optimize
+
+ctr: FORCE
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/ctr
 
 # TODO: git-validation
 check:

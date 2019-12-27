@@ -18,6 +18,7 @@ PLUGINS=(remote)
 REGISTRY_HOST=registry_integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
+CTR_PREFIX=/tmp/out/
 
 RETRYNUM=100
 RETRYINTERVAL=1
@@ -55,7 +56,9 @@ function isServedAsRemoteSnapshot {
         return 1
     fi
 
-    LAYER_LOG=$(cat "${LOG_PATH}" | grep "layer-sha256:")
+    RES=
+    RES=${RES}$(cat "${LOG_PATH}" | grep "application/vnd.oci.image.layer.")
+    RES=${RES}$(cat "${LOG_PATH}" | grep "application/vnd.docker.image.rootfs.")
     if [ "${LAYER_LOG}" != "" ] ; then
         echo "Some layer have been downloaded by containerd"
         return 1
@@ -99,6 +102,9 @@ GO111MODULE=off PREFIX=/tmp/out/ make clean && \
     /tmp/out/optimize -noopt "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
 check "Stargzifying images"
 
+# Make customized ctr
+PREFIX="${CTR_PREFIX}" make ctr -j2
+
 # Wait for booting remote snapshotter
 RETRYNUM=600 retry ls /run/rsnapshotd/rsnapshotd.sock
 mkdir -p /etc/containerd && \
@@ -109,7 +115,7 @@ mkdir -p /etc/containerd && \
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
 NOTFOUND=false
 for PLUGIN in ${PLUGINS[@]}; do
-    OK=$(ctr plugins ls \
+    OK=$("${CTR_PREFIX}ctr" plugins ls \
              | grep io.containerd.snapshotter \
              | sed -E 's/ +/ /g' \
              | cut -d ' ' -f 2,4 \
@@ -128,31 +134,31 @@ fi
 ############
 # Tests for stargz filesystem
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
-ctr images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:18.04"
+"${CTR_PREFIX}ctr" images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:18.04"
 check "Getting normal image with normal snapshotter"
-ctr run --rm "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr_normal_unstargz.tar
+"${CTR_PREFIX}ctr" run --rm "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr_normal_unstargz.tar
 
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
-ctr images pull --user "${DUMMYUSER}:${DUMMYPASS}" --skip-download --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:18.04"
+"${CTR_PREFIX}ctr" images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:18.04"
 check "Getting normal image with remote snapshotter"
-ctr run --rm --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr_remote_unstargz.tar
+"${CTR_PREFIX}ctr" run --rm --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr_remote_unstargz.tar
 
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
-ctr images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:stargz"
+"${CTR_PREFIX}ctr" images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:stargz"
 check "Getting stargz image with normal snapshotter"
-ctr run --rm "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr > /usr_normal_stargz.tar
+"${CTR_PREFIX}ctr" run --rm "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr > /usr_normal_stargz.tar
 
 PULL_LOG=$(mktemp)
 check "Preparing log file"
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
-ctr images pull --user "${DUMMYUSER}:${DUMMYPASS}" --skip-download --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:stargz" | tee "${PULL_LOG}"
+"${CTR_PREFIX}ctr" images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:stargz" | tee "${PULL_LOG}"
 check "Getting stargz image with remote snapshotter"
 if ! isServedAsRemoteSnapshot "${PULL_LOG}" ; then
     echo "Failed to serve all layers as remote snapshots: ${LAYER_LOG}"
     exit 1
 fi
 rm "${PULL_LOG}"
-ctr run --rm --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr > /usr_remote_stargz.tar
+"${CTR_PREFIX}ctr" run --rm --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr > /usr_remote_stargz.tar
 
 mkdir /usr_normal_unstargz /usr_remote_unstargz /usr_normal_stargz /usr_remote_stargz
 tar -xf /usr_normal_unstargz.tar -C /usr_normal_unstargz
