@@ -27,9 +27,9 @@ sys	0m0.008s
 To achive that we supports following [filesystems](filesystems):
 - Filesystem using [stargz formatted image introduced by CRFS](https://github.com/google/crfs), which is compatible with current docker image format.
 
-This snapshotter can be plugged into [patched version of containerd](https://github.com/ktock/containerd/tree/filter-by-snapshotter-test) but we are currently working on containerd side to make this work with containerd without patches.
+## Demo
 
-## demo
+You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr) for a quick tasting.
 
 __NOTICE:__
 
