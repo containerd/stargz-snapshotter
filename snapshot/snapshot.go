@@ -45,8 +45,8 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 
 	"github.com/containerd/containerd/errdefs"
@@ -64,6 +64,7 @@ import (
 
 const (
 	targetSnapshotLabel = "containerd.io/snapshot.ref"
+	filesystemIDLabel   = "containerd.io/snapshot/filesystem.id"
 )
 
 type Config struct {
@@ -167,12 +168,6 @@ type snapshotter struct {
 	//
 	// fsChain is filesystems that this snapshotter recognizes.
 	fsChain []fsplugin.FileSystem
-
-	// ==REMOTE SNAPSHOTTER SPECIFIC==
-	//
-	// Map from mountpoint to FileSystem used to mount it.
-	fsmounts map[string]fsplugin.FileSystem
-	mu       sync.Mutex
 }
 
 // NewSnapshotter returns a Snapshotter which can use unpacked remote layers
@@ -212,7 +207,6 @@ func NewSnapshotter(ctx context.Context, root string, fsChain []fsplugin.FileSys
 		ms:          ms,
 		asyncRemove: config.asyncRemove,
 		fsChain:     fsChain,
-		fsmounts:    make(map[string]fsplugin.FileSystem),
 	}, nil
 }
 
@@ -306,10 +300,15 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		}
 	}
 	if target, ok := base.Labels[targetSnapshotLabel]; ok {
-		if err := o.prepareRemoteSnapshot(ctx, key, base.Labels); err != nil {
+		fsid, err := o.prepareRemoteSnapshot(ctx, key, base.Labels)
+		if err != nil {
 			return m, nil // fallback to the normal behavior
 		}
-		if err := o.Commit(ctx, target, key, opts...); err != nil {
+		if base.Labels == nil {
+			base.Labels = make(map[string]string)
+		}
+		base.Labels[filesystemIDLabel] = fmt.Sprintf("%d", fsid)
+		if err := o.Commit(ctx, target, key, append(opts, snapshots.WithLabels(base.Labels))...); err != nil {
 			return m, nil // fallback to the normal behavior
 		}
 		return nil, errors.Wrapf(errdefs.ErrAlreadyExists, "target snapshot %q", target)
@@ -336,7 +335,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get active mount")
 	}
-	return o.mounts(ctx, s)
+	return o.mounts(ctx, s, key)
 }
 
 func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snapshots.Opt) error {
@@ -499,9 +498,6 @@ func (o *snapshotter) cleanupSnapshotDirectory(dir string) error {
 	// and we don't care the finalization explicitly at this stage.
 	mp := filepath.Join(dir, "fs")
 	_ = syscall.Unmount(mp, 0)
-	o.mu.Lock()
-	delete(o.fsmounts, mp)
-	o.mu.Unlock()
 	if err := os.RemoveAll(dir); err != nil {
 		return errors.Wrapf(err, "failed to remove directory %s", dir)
 	}
@@ -580,7 +576,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		return nil, errors.Wrap(err, "commit failed")
 	}
 
-	return o.mounts(ctx, s)
+	return o.mounts(ctx, s, parent)
 }
 
 func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, kind snapshots.Kind) (string, error) {
@@ -602,7 +598,14 @@ func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, 
 	return td, nil
 }
 
-func (o *snapshotter) mounts(ctx context.Context, s storage.Snapshot) ([]mount.Mount, error) {
+func (o *snapshotter) mounts(ctx context.Context, s storage.Snapshot, checkKey string) ([]mount.Mount, error) {
+	// ==REMOTE SNAPSHOTTER SPECIFIC==
+	//
+	// Make sure that all layers lower than the target layer are available
+	if checkKey != "" && !o.checkAvailability(ctx, checkKey) {
+		return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable", s.ID)
+	}
+
 	if len(s.ParentIDs) == 0 {
 		// if we only have one layer/no parents then just return a bind mount as overlay
 		// will not work
@@ -611,9 +614,6 @@ func (o *snapshotter) mounts(ctx context.Context, s storage.Snapshot) ([]mount.M
 			roFlag = "ro"
 		}
 
-		if err := o.checkAvailability(ctx, o.upperPath(s.ID)); err != nil {
-			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ID, err)
-		}
 		return []mount.Mount{
 			{
 				Source: o.upperPath(s.ID),
@@ -633,9 +633,6 @@ func (o *snapshotter) mounts(ctx context.Context, s storage.Snapshot) ([]mount.M
 			fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
 		)
 	} else if len(s.ParentIDs) == 1 {
-		if err := o.checkAvailability(ctx, o.upperPath(s.ParentIDs[0])); err != nil {
-			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ParentIDs[0], err)
-		}
 		return []mount.Mount{
 			{
 				Source: o.upperPath(s.ParentIDs[0]),
@@ -650,9 +647,6 @@ func (o *snapshotter) mounts(ctx context.Context, s storage.Snapshot) ([]mount.M
 
 	parentPaths := make([]string, len(s.ParentIDs))
 	for i := range s.ParentIDs {
-		if err := o.checkAvailability(ctx, o.upperPath(s.ParentIDs[i])); err != nil {
-			return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable: %q", s.ParentIDs[i], err)
-		}
 		parentPaths[i] = o.upperPath(s.ParentIDs[i])
 	}
 
@@ -685,40 +679,81 @@ func (o *snapshotter) Close() error {
 // prepareRemoteSnapshot tries to prepare the snapshot as a remote snapshot
 // using FileSystems registered in this snapshotter with the layer's basic
 // information(ref and the layer digest).
-func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, labels map[string]string) error {
+func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, labels map[string]string) (fsid int, err error) {
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
-		return err
+		return -1, err
 	}
 	defer t.Rollback()
 	id, _, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
-		return err
+		return -1, err
 	}
 
 	// Search a filesystem which can mount a remote snapshot for this layer.
-	for _, f := range o.fsChain {
+	for fsid, f := range o.fsChain {
 		if err := f.Mount(o.context, o.upperPath(id), labels); err == nil {
-			o.mu.Lock()
-			o.fsmounts[o.upperPath(id)] = f
-			o.mu.Unlock()
-			return nil
+			return fsid, nil
 		}
 	}
 
-	return errors.New("mountable remote layer not found")
+	return -1, errors.New("mountable remote layer not found")
 }
 
 // ==REMOTE SNAPSHOTTER SPECIFIC==
 //
-// checkAvailability checks the avaiability of specified mountpoint using
-// filesystem's checking functionality.
-func (o *snapshotter) checkAvailability(ctx context.Context, mountpoint string) error {
-	o.mu.Lock()
-	fs, ok := o.fsmounts[mountpoint]
-	o.mu.Unlock()
-	if !ok {
-		return nil
+// checkAvailability checks avaiability of the specified layer and all lower
+// layers using filesystem's checking functionality.
+func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
+	log.G(ctx).WithField("key", key).Debug("checking layer availability")
+	ctx, t, err := o.ms.TransactionContext(ctx, false)
+	if err != nil {
+		log.G(ctx).WithError(err).WithField("key", key).Warn("failed to get transaction")
+		return false
 	}
-	return fs.Check(o.context, mountpoint)
+	defer t.Rollback()
+	id, info, _, err := storage.GetInfo(ctx, key)
+	if err != nil {
+		log.G(ctx).WithError(err).WithField("key", key).Warn("failed to get info")
+		return false
+	}
+	if info.Parent != "" {
+		// Check lower layer in advance
+		if !o.checkAvailability(ctx, info.Parent) {
+			return false
+		}
+	}
+	fsidLabel, ok := info.Labels[filesystemIDLabel]
+	if !ok {
+		log.G(ctx).
+			WithField("key", key).
+			WithField("mount point", o.upperPath(id)).
+			Warn("layer is normal snapshot(overlayfs)")
+		return true // normal overlayfs layer
+	}
+	fsid, err := strconv.ParseInt(fsidLabel, 10, 64)
+	if err != nil {
+		log.G(ctx).WithError(err).
+			WithField("key", key).
+			WithField("mount point", o.upperPath(id)).
+			WithField("filesystem ID(label)", fsidLabel).
+			Warn("failed to parse filesystem ID")
+		return false
+	}
+	if fsid < 0 || fsid >= int64(len(o.fsChain)) {
+		log.G(ctx).WithError(err).
+			WithField("key", key).
+			WithField("mount point", o.upperPath(id)).
+			WithField("filesystem ID", fsid).
+			Warn("invalid filesystem ID")
+		return false
+	}
+	if err := o.fsChain[fsid].Check(o.context, o.upperPath(id)); err != nil {
+		log.G(ctx).WithError(err).
+			WithField("key", key).
+			WithField("mount point", o.upperPath(id)).
+			Warn("layer is unavailable")
+		return false
+	}
+	return true
 }

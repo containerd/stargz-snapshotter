@@ -35,20 +35,28 @@ import (
 )
 
 const (
-	testTarget               = "testTarget"
 	remoteSampleFile         = "foo"
 	remoteSampleFileContents = "remote layer"
+	brokenLabel              = "containerd.io/snapshot/broken"
 )
 
-func prepareTarget(t *testing.T, sn snapshots.Snapshotter) string {
-	pKey := "/tmp/prepareTarget"
+func prepareWithTarget(t *testing.T, sn snapshots.Snapshotter, target, key, parent string, labels map[string]string) string {
 	ctx := context.TODO()
-	if _, err := sn.Prepare(ctx, pKey, "", snapshots.WithLabels(map[string]string{
-		targetSnapshotLabel: testTarget,
-	})); !errdefs.IsAlreadyExists(err) {
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[targetSnapshotLabel] = target
+	if _, err := sn.Prepare(ctx, key, parent, snapshots.WithLabels(labels)); !errdefs.IsAlreadyExists(err) {
 		t.Fatalf("failed to prepare remote snapshot: %v", err)
 	}
-	return testTarget
+	info, err := sn.Stat(ctx, target)
+	if err != nil {
+		t.Fatalf("failed to stat prepared layer: %v", err)
+	}
+	if _, ok := info.Labels[filesystemIDLabel]; !ok {
+		t.Fatalf("filesystem label hasn't been assigned")
+	}
+	return target
 }
 
 func TestRemotePrepare(t *testing.T) {
@@ -65,7 +73,7 @@ func TestRemotePrepare(t *testing.T) {
 	}
 
 	// Prepare a remote snapshot.
-	target := prepareTarget(t, sn)
+	target := prepareWithTarget(t, sn, "testTarget", "/tmp/prepareTarget", "", nil)
 	defer sn.Remove(ctx, target)
 
 	// Get internally committed remote snapshot.
@@ -116,7 +124,7 @@ func TestRemoteOverlay(t *testing.T) {
 	}
 
 	// Prepare a remote snapshot.
-	target := prepareTarget(t, sn)
+	target := prepareWithTarget(t, sn, "testTarget", "/tmp/prepareTarget", "", nil)
 	defer sn.Remove(ctx, target)
 
 	// Prepare a new layer based on the remote snapshot.
@@ -161,50 +169,6 @@ func TestRemoteOverlay(t *testing.T) {
 	}
 }
 
-func TestFailureDetection(t *testing.T) {
-	testutil.RequiresRoot(t)
-	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "remote")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(root)
-	fi := bindFileSystem(t)
-	sn, err := NewSnapshotter(context.TODO(), root, []fsplugin.FileSystem{fi})
-	if err != nil {
-		t.Fatalf("failed to make new Snapshotter: %q", err)
-	}
-	fs, ok := fi.(*filesystem)
-	if !ok {
-		t.Fatalf("Invalid filesystem type(not *filesystem)")
-	}
-
-	// Prepare a base remote snapshot.
-	target := prepareTarget(t, sn)
-	defer sn.Remove(ctx, target)
-	pKey := "/tmp/test"
-
-	// Tests if we can detect layer unavailablity on Prepare().
-	fs.checkFailure = true
-	if _, err := sn.Prepare(ctx, pKey, target); !errdefs.IsUnavailable(err) {
-		t.Errorf("got %q; want ErrUnavailable", err)
-		return
-	}
-	sn.Remove(ctx, pKey)
-
-	// Tests if we can detect layer unavailablity on Mounts().
-	fs.checkFailure = false
-	if _, err := sn.Prepare(ctx, pKey, target); err != nil {
-		t.Fatalf("failed to prepare snapshot: %q", err)
-	}
-	fs.checkFailure = true
-	if _, err := sn.Mounts(ctx, pKey); !errdefs.IsUnavailable(err) {
-		t.Errorf("got %q; want ErrUnavailable", err)
-		return
-	}
-	sn.Remove(ctx, pKey)
-}
-
 func TestRemoteCommit(t *testing.T) {
 	testutil.RequiresRoot(t)
 	ctx := context.TODO()
@@ -219,7 +183,7 @@ func TestRemoteCommit(t *testing.T) {
 	}
 
 	// Prepare a remote snapshot.
-	target := prepareTarget(t, sn)
+	target := prepareWithTarget(t, sn, "testTarget", "/tmp/prepareTarget", "", nil)
 	defer sn.Remove(ctx, target)
 
 	// Prepare a new snapshot based on the remote snapshot
@@ -275,6 +239,148 @@ func TestRemoteCommit(t *testing.T) {
 	}
 }
 
+func TestFailureDetection(t *testing.T) {
+	testutil.RequiresRoot(t)
+	tests := []struct {
+		name    string
+		broken  []bool // top element is the lowest layer
+		overlay bool   // whether appending the topmost normal overlay snapshot or not
+		wantOK  bool
+	}{
+		{
+			name:   "flat_ok",
+			broken: []bool{false},
+			wantOK: true,
+		},
+		{
+			name:   "deep_ok",
+			broken: []bool{false, false, false},
+			wantOK: true,
+		},
+		{
+			name:    "flat_overlay_ok",
+			broken:  []bool{false},
+			overlay: true,
+			wantOK:  true,
+		},
+		{
+			name:    "deep_overlay_ok",
+			broken:  []bool{false, false, false},
+			overlay: true,
+			wantOK:  true,
+		},
+		{
+			name:   "flat_ng",
+			broken: []bool{true},
+			wantOK: false,
+		},
+		{
+			name:   "deep_ng",
+			broken: []bool{false, true, false},
+			wantOK: false,
+		},
+		{
+			name:    "flat_overlay_ng",
+			broken:  []bool{true},
+			overlay: true,
+			wantOK:  false,
+		},
+		{
+			name:    "deep_overlay_ng",
+			broken:  []bool{false, true, false},
+			overlay: true,
+			wantOK:  false,
+		},
+	}
+
+	check := func(t *testing.T, ok bool, err error) bool {
+		if err == nil {
+			if !ok {
+				t.Error("check all passed but wanted to be failed")
+				return false
+			}
+		} else if errdefs.IsUnavailable(err) {
+			if ok {
+				t.Error("got Unavailable but wanted to be non-error")
+				return false
+			}
+		} else {
+			t.Errorf("got unexpected error %q", err)
+			return false
+		}
+		return true
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.TODO()
+			root, err := ioutil.TempDir("", "remote")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(root)
+			fi := bindFileSystem(t)
+			sn, err := NewSnapshotter(context.TODO(), root, []fsplugin.FileSystem{fi})
+			if err != nil {
+				t.Fatalf("failed to make new Snapshotter: %q", err)
+			}
+			fs, ok := fi.(*filesystem)
+			if !ok {
+				t.Fatalf("Invalid filesystem type(not *filesystem)")
+			}
+
+			// Prepare snapshots
+			fs.checkFailure = false
+			pKey := ""
+			for i, broken := range tt.broken {
+				var (
+					targetName = fmt.Sprintf("/tmp/testTarget%d", i)
+					key        = fmt.Sprintf("/tmp/testKey%d", i)
+					labels     = make(map[string]string)
+				)
+				if broken {
+					labels[brokenLabel] = "true"
+				}
+				target := prepareWithTarget(t, sn, targetName, key, pKey, labels)
+				defer sn.Remove(ctx, target)
+				pKey = target
+			}
+
+			if tt.overlay {
+				key := "/tmp/test"
+				_, err := sn.Prepare(ctx, key, pKey)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cKey := "/tmp/layer"
+				if err := sn.Commit(ctx, cKey, key); err != nil {
+					t.Fatal(err)
+				}
+				defer sn.Remove(ctx, cKey)
+				pKey = cKey
+			}
+
+			// Tests if we can detect layer unavailablity
+			key := "/tmp/snapshot.test"
+			fs.checkFailure = true
+			defer sn.Remove(ctx, key)
+			if _, err := sn.Prepare(ctx, key, pKey); !check(t, tt.wantOK, err) {
+				return
+			}
+			fs.checkFailure = false
+			key2 := "/tmp/test2"
+			if _, err = sn.Prepare(ctx, key2, pKey); err != nil {
+				t.Fatal(err)
+			}
+			defer sn.Remove(ctx, key2)
+			fs.checkFailure = true
+			if _, err := sn.Mounts(ctx, key2); !check(t, tt.wantOK, err) {
+				return
+			}
+		})
+	}
+}
+
 func TestFallback(t *testing.T) {
 	testutil.RequiresRoot(t)
 	tests := []struct {
@@ -317,7 +423,7 @@ func TestFallback(t *testing.T) {
 			pKey := "/tmp/prepareTarget"
 			ctx := context.TODO()
 			_, err = sn.Prepare(ctx, pKey, "", snapshots.WithLabels(map[string]string{
-				targetSnapshotLabel: testTarget,
+				targetSnapshotLabel: "testTarget",
 			}))
 			defer sn.Remove(ctx, pKey)
 			if !(fs1.mountCalled == tt.fs1mountCalled && fs2.mountCalled == tt.fs2mountCalled) {
@@ -328,11 +434,11 @@ func TestFallback(t *testing.T) {
 			}
 			if tt.notFound {
 				if errdefs.IsAlreadyExists(err) {
-					t.Errorf("succeeded to preprare remote snapshot but want to fail")
+					t.Errorf("succeeded to prepare remote snapshot but want to fail")
 					return
 				}
 			} else if !errdefs.IsAlreadyExists(err) {
-				t.Errorf("fail to preprare snapshot but want to success")
+				t.Errorf("fail to prepare snapshot but want to success")
 				return
 			}
 		})
@@ -348,8 +454,9 @@ func bindFileSystem(t *testing.T) fsplugin.FileSystem {
 		t.Fatalf("failed to write sample file of bind filesystem: %q", err)
 	}
 	return &filesystem{
-		root: root,
-		t:    t,
+		root:   root,
+		t:      t,
+		broken: make(map[string]bool),
 	}
 }
 
@@ -357,14 +464,18 @@ type filesystem struct {
 	t            *testing.T
 	root         string
 	mountFailure bool
-	checkFailure bool
 	mountCalled  bool
+	checkFailure bool
+	broken       map[string]bool
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
 	fs.mountCalled = true
 	if fs.mountFailure {
 		return fmt.Errorf("failed")
+	}
+	if _, ok := labels[brokenLabel]; ok {
+		fs.broken[mountpoint] = true
 	}
 	if err := syscall.Mount(fs.root, mountpoint, "none", syscall.MS_BIND, ""); err != nil {
 		fs.t.Fatalf("failed to bind mount %q to %q: %v", fs.root, mountpoint, err)
@@ -374,7 +485,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 
 func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	if fs.checkFailure {
-		return fmt.Errorf("failed")
+		if broken, ok := fs.broken[mountpoint]; ok && broken {
+			return fmt.Errorf("broken")
+		}
 	}
 	return nil
 }
