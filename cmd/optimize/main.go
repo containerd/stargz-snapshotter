@@ -84,7 +84,7 @@ func main() {
 	flag.Var(&cEnvs, "env", "environment valulable to add or override to the image's default config")
 	flag.Parse()
 	if flag.NArg() < 2 {
-		fmt.Println("usage: $0 [OPTION]... INPUT_IMAGE OUTPUT_IMAGE")
+		fmt.Printf("usage: %s [OPTION]... INPUT_IMAGE OUTPUT_IMAGE\n", os.Args[0])
 		os.Exit(1)
 	}
 	args := flag.Args()
