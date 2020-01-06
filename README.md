@@ -2,7 +2,7 @@
 
 [![Tests Status](https://github.com/ktock/remote-snapshotter/workflows/Tests/badge.svg)](https://github.com/ktock/remote-snapshotter/actions)
 
-Pulling image is one of the major performance bottlenecks in container workload. Research shows that time for pulling accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Remote snapshotter* is a solution discussed in the containerd community and this implementation is based on it.
+Pulling image is one of the major performance bottlenecks in container workload. Research shows that time for pulling accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Remote snapshotter* is a solution discussed in containerd community and this implementation is based on it.
 
 Related discussion of the snapshotter in containerd community:
 - [Support remote snapshotter to speed up image pulling#3731@containerd](https://github.com/containerd/containerd/issues/3731)
@@ -57,7 +57,7 @@ Use optimize command to convert the image into stargz-formatted one as well as o
 ```
 The converted image is still __compatible with a normal docker image__ so you can still pull and run it with normal tools(e.g. docker).
 
-### Pull the image without downloading layers(it's sometimes called "lazypull") and run it
+### Run the container with remote snapshots
 Layer downloads don't occur. So this "pull" operation ends soon.
 ```
 # time /tmp/out/ctr images rpull --plain-http registry2:5000/ubuntu:18.04
@@ -75,7 +75,7 @@ bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  s
 ## Authentication
 
 We support private repository authentication powerd by [go-containerregistry](https://github.com/google/go-containerregistry) which supports `~/.docker/config.json`-based credential management.
-You can authenticate yourself with normal operations (i.e. `docker login` command) using `~/.docker/config.json`.
+You can authenticate yourself with normal operations (e.g. `docker login` command) using `~/.docker/config.json`.
 
 In the example showed above, you can pull images from your private repository on the DockerHub:
 ```
@@ -89,7 +89,7 @@ If you have no right to access the repository with credentials stored in `~/.doc
 
 ## Filesystem integration
 
-Filesystems can be easily integrated with this snapshotter and containerd by implementing a simple interface described [here](filesystems/plugin.go) without thinking about remote snapshotter protocol. See [the existing implementation](filesystems/stargz/fs.go).
+Filesystems can be easily integrated with this snapshotter and containerd by implementing a simple interface defined [here](filesystems/plugin.go) without thinking about remote snapshotter protocol. See [the existing implementation](filesystems/stargz/fs.go).
 
 # TODO
 
@@ -106,4 +106,4 @@ Filesystems can be easily integrated with this snapshotter and containerd by imp
   - [x] Deal with runtime problems(NW disconnection, authn failure and so on).
 - [x] Authn: Implement fundamental private repository authentication using `~/.docker/config.json`.
 - [x] Performance: READ performance improvement
-- [ ] Documentation: ([architecture.md](architecture.md)) is stale.
+- [x] Documentation: Add overview docs.

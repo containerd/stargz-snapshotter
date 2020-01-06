@@ -14,29 +14,6 @@
    limitations under the License.
 */
 
-// ~~~~~~
-//
-// The Overview of the Remote Snapshotter:
-// ----------------------------------------
-//
-// This is an example implementation of a "remote snapshotter" which can make
-// a snapshot which is backed by a remote unpacked layer. The client of this
-// snapshotter can get a snapshot WITHOUT downloading the layer contents and let
-// this snapshotter lazily downloading necessary data on each access on each
-// file in the snapshot (this is known as "lazy pull"), which leads to
-// dramatically shorten the container's startup time which includes image
-// pulling(when scaling nodes, first deployments, etc...).
-//
-// This implementation is based on containerd's "overlayfs snapshotter"
-// ("github.com/containerd/containerd/snapshots/storage/overlay") and most
-// parts are same as the overlay snapshotter.
-// The parts which is remote snapshotter specific is labeled by
-// "==REMOTE SNAPSHOTTER SPECIFIC==" label so you can relatively easily
-// understand the implementation with making sure the differences between
-// the remote snapshotter and the normal overlayfs snapshotter.
-//
-// ~~~~~~
-
 package snapshot
 
 import (
@@ -79,8 +56,7 @@ func init() {
 		Type:   plugin.SnapshotPlugin,
 		ID:     "remote",
 		Config: &Config{},
-		// ==REMOTE SNAPSHOTTER SPECIFIC==
-		//
+
 		// We use RemoteFileSystemPlugin to mount unpacked remote layers
 		// as remote snapshots.
 		// See "/filesystems/plugin.go" in this repo.
@@ -100,8 +76,6 @@ func init() {
 				return nil, fmt.Errorf("invalid stargz configuration")
 			}
 
-			// ==REMOTE SNAPSHOTTER SPECIFIC==
-			//
 			// register all FileSystems which we use to mount unpacked
 			// remote layers as remote snapshots.
 			fsMap := make(map[string]fsplugin.FileSystem)
@@ -164,8 +138,6 @@ type snapshotter struct {
 	ms          *storage.MetaStore
 	asyncRemove bool
 
-	// ==REMOTE SNAPSHOTTER SPECIFIC==
-	//
 	// fsChain is filesystems that this snapshotter recognizes.
 	fsChain []fsplugin.FileSystem
 }
@@ -289,8 +261,6 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		return nil, err
 	}
 
-	// ==REMOTE SNAPSHOTTER SPECIFIC==
-	//
 	// Try to prepare the remote snapshot. If succeeded, we commit the snapshot now
 	// and return ErrAlreadyExists.
 	var base snapshots.Info
@@ -358,8 +328,6 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		return err
 	}
 
-	// ==REMOTE SNAPSHOTTER SPECIFIC==
-	//
 	// Avoid walking through mounted remote snapshot.
 	var usage fs.Usage
 	if _, ok := info.Labels[targetSnapshotLabel]; !ok {
@@ -491,8 +459,6 @@ func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Trans
 
 func (o *snapshotter) cleanupSnapshotDirectory(dir string) error {
 
-	// ==REMOTE SNAPSHOTTER SPECIFIC==
-	//
 	// On a remote snapshot, the layer is mounted on the "fs" directory.
 	// Filesystem can do any finalization by detecting this "unmount" event
 	// and we don't care the finalization explicitly at this stage.
@@ -599,8 +565,6 @@ func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, 
 }
 
 func (o *snapshotter) mounts(ctx context.Context, s storage.Snapshot, checkKey string) ([]mount.Mount, error) {
-	// ==REMOTE SNAPSHOTTER SPECIFIC==
-	//
 	// Make sure that all layers lower than the target layer are available
 	if checkKey != "" && !o.checkAvailability(ctx, checkKey) {
 		return nil, errors.Wrapf(errdefs.ErrUnavailable, "layer %q unavailable", s.ID)
@@ -674,11 +638,8 @@ func (o *snapshotter) Close() error {
 	return o.ms.Close()
 }
 
-// ==REMOTE SNAPSHOTTER SPECIFIC==
-//
 // prepareRemoteSnapshot tries to prepare the snapshot as a remote snapshot
-// using FileSystems registered in this snapshotter with the layer's basic
-// information(ref and the layer digest).
+// using filesystems registered in this snapshotter.
 func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, labels map[string]string) (fsid int, err error) {
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
@@ -700,8 +661,6 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, lab
 	return -1, errors.New("mountable remote layer not found")
 }
 
-// ==REMOTE SNAPSHOTTER SPECIFIC==
-//
 // checkAvailability checks avaiability of the specified layer and all lower
 // layers using filesystem's checking functionality.
 func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
