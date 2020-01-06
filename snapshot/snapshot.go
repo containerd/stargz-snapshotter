@@ -73,7 +73,7 @@ func init() {
 
 			config, ok := ic.Config.(*Config)
 			if !ok {
-				return nil, fmt.Errorf("invalid stargz configuration")
+				return nil, fmt.Errorf("invalid remote snapshotter configuration")
 			}
 
 			// register all FileSystems which we use to mount unpacked
