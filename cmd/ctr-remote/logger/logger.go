@@ -28,7 +28,7 @@ import (
 
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
-	"github.com/ktock/remote-snapshotter/cmd/optimize/util"
+	"github.com/ktock/remote-snapshotter/cmd/ctr-remote/util"
 	"golang.org/x/sys/unix"
 )
 

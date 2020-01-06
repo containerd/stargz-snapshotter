@@ -17,7 +17,7 @@ By default, Remote Snapshotter supports standard compatible remote snapshots fun
 The image format that achieves it is _stargz_ by [CRFS](https://github.com/google/crfs).
 Stargz format is backwards-compatible to container standards so you can push stargz-formatted images to container registries and run them using container runtimes including Docker.
 When you run a container image and it is formatted as stargz image, Remote Snapshotter automatically prepares container's rootfs layers as remote snapshots.
-As an image converter command, you can use CRFS-official `stargzify` or our `optimize` which has additional optimization functionality.
+As an image converter command, you can use CRFS-official `stargzify` or our `ctr-remote` which has additional optimization functionality.
 
 Furthermore, Remote Snapshotter has a pluggable architecture so you can use any image formats and filesystems you want not only stargz.
 
@@ -41,12 +41,12 @@ You can also use `~/.docker/config.json`-based authentication for your private r
 
 Because file contents are fetched via NW on each access, read performance would be one of the major concerns.
 To mitigate it, Remote Snapshotter provides additional workload-oriented optimization.
-When you convert an image to stargz format using `optimize`, you can specify some options which describe your workload  (i.e. entrypoint commands, environment variables, etc.).
+When you convert an image to stargz format using `ctr-remote`, you can specify some options which describe your workload  (i.e. entrypoint commands, environment variables, etc.).
 For example, we can optimize `ubuntu:18.04` image for execution of `ls` command on `bash` as following,
 
 ```
-# optimize -insecure -entrypoint='[ "/bin/bash", "-c" ]' -args='[ "ls" ]' \
-           ubuntu:18.04 http://registry2:5000/ubuntu:18.04
+# ctr-remote image optimize --plain-http --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "ls" ]' \
+             ubuntu:18.04 http://registry2:5000/ubuntu:18.04
 ```
 
 Then it runs the workload in an isolated environment, monitor all file events, and marks accessed files, which are also likely accessed in your production environment too).
