@@ -14,20 +14,17 @@
    limitations under the License.
 */
 
-package main
+package commands
 
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/cmd/ctr/app"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	"github.com/containerd/containerd/cmd/ctr/commands/content"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/pkg/seed"
 	stargz "github.com/ktock/remote-snapshotter/filesystems/stargz/handler"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli"
@@ -37,25 +34,7 @@ const (
 	remoteSnapshotterName = "remote"
 )
 
-func init() {
-	seed.WithTimeAndRand()
-}
-
-func main() {
-	app := app.New()
-	for i := range app.Commands {
-		if app.Commands[i].Name == "images" {
-			app.Commands[i].Subcommands = append(app.Commands[i].Subcommands, rpullCommand)
-			break
-		}
-	}
-	if err := app.Run(os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "ctr: %s\n", err)
-		os.Exit(1)
-	}
-}
-
-var rpullCommand = cli.Command{
+var RpullCommand = cli.Command{
 	Name:      "rpull",
 	Usage:     "pull an image from a remote levaraging remote snapshotter",
 	ArgsUsage: "[flags] <ref>",

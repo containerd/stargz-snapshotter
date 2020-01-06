@@ -115,8 +115,8 @@ check "Build and push original image"
 WORKING_DIR=$(mktemp -d)
 check "Prepare tempdir for workspace"
 GO111MODULE=off PREFIX=/tmp/out/ make clean && \
-    GO111MODULE=off PREFIX=/tmp/out/ make optimize && \
-    /tmp/out/optimize -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
+    GO111MODULE=off PREFIX=/tmp/out/ make ctr-remote && \
+    /tmp/out/ctr-remote image optimize -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
 check "Optimize original image"
 
 # Validate optimized image
