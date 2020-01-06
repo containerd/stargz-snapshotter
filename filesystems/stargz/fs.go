@@ -51,6 +51,7 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/plugin"
+	"github.com/containerd/containerd/reference/docker"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -165,14 +166,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		log.G(ctx).Debug("stargz: digest hasn't been passed")
 		return fmt.Errorf("digest hasn't been passed")
 	}
-	host, url, err := fs.parseReference(ref, digest)
-	if err != nil {
-		log.G(ctx).WithError(err).WithField("ref", ref).WithField("digest", digest).Debug("stargz: failed to parse the reference")
-		return err
-	}
 
 	// authenticate to the registry using ~/.docker/config.json.
-	url, tr, err := fs.resolve(host, url, ref)
+	url, tr, err := fs.resolve(ctx, ref, digest)
 	if err != nil {
 		log.G(ctx).WithError(err).WithField("ref", ref).WithField("url", url).Debug("stargz: failed to resolve the reference")
 		return err
@@ -279,22 +275,6 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	return nil
 }
 
-// parseReference parses reference and digest then makes an URL of the blob.
-// "ref" must be formatted in <host>/<image>[:<tag>] (<tag> is optional).
-// "diegest" is an OCI's sha256 digest and must be prefixed by "sha256:".
-func (fs *filesystem) parseReference(ref, digest string) (host string, url string, err error) {
-	refs := strings.Split(ref, "/")
-	if len(refs) < 2 {
-		err = fmt.Errorf("reference must contain names of host and image but got %q", ref)
-		return
-	}
-	scheme, host, image := "https", refs[0], strings.Split(strings.Join(refs[1:], "/"), ":")[0]
-	if fs.isInsecure(host) {
-		scheme = "http"
-	}
-	return host, fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, image, digest), nil
-}
-
 // isInsecure checks if the specified host is registered as "insecure" registry
 // in this filesystem. If so, this filesystem treat the host in a proper way
 // e.g. using HTTP instead of HTTPS.
@@ -308,14 +288,29 @@ func (fs *filesystem) isInsecure(host string) bool {
 	return false
 }
 
-// resolve resolves specified url and ref by authenticating and dealing with
+// resolve resolves specified reference with authenticating and dealing with
 // redirection in a proper way. We use `~/.docker/config.json` for authn.
-func (fs *filesystem) resolve(host, url, ref string) (string, http.RoundTripper, error) {
-	var opts []name.Option
+func (fs *filesystem) resolve(ctx context.Context, ref string, digest string) (string, http.RoundTripper, error) {
+	// Parse reference in docker convention
+	named, err := docker.ParseDockerRef(ref)
+	if err != nil {
+		return "", nil, err
+	}
+	var (
+		scheme = "https"
+		host   = docker.Domain(named)
+		path   = docker.Path(named)
+		opts   []name.Option
+	)
+	if host == "docker.io" {
+		host = "registry-1.docker.io"
+	}
 	if fs.isInsecure(host) {
+		scheme = "http"
 		opts = append(opts, name.Insecure)
 	}
-	nameref, err := name.ParseReference(ref, opts...)
+	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, path, digest)
+	nameref, err := name.ParseReference(fmt.Sprintf("%s/%s", host, path), opts...)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to parse reference %q: %v", ref, err)
 	}
@@ -330,16 +325,14 @@ func (fs *filesystem) resolve(host, url, ref string) (string, http.RoundTripper,
 		return "", nil, fmt.Errorf("faild to get transport of %q: %v", ref, err)
 	}
 
-	// Redirect if necessary(GCR specific). GCR serves layer blobs with a redirect
-	// only on GET. So we get the destination Location of the layer using GET with
-	// Range to avoid fetching whole blob data.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Redirect if necessary. We use GET request for GCR.
+	rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to request to the registry of %q: %v", url, err)
 	}
-	req = req.WithContext(ctx)
+	req = req.WithContext(rCtx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	if res, err := tr.RoundTrip(req); err == nil && res.StatusCode < 400 {
