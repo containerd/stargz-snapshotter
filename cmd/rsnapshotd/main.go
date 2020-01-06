@@ -20,6 +20,8 @@ import (
 	"context"
 	"flag"
 	"net"
+	"os"
+	"path/filepath"
 
 	"google.golang.org/grpc"
 
@@ -129,6 +131,16 @@ func main() {
 
 	// Register the service with the gRPC server
 	snapshotsapi.RegisterSnapshotsServer(rpc, service)
+
+	// Prepare the directory for the socket
+	if err := os.MkdirAll(filepath.Dir(*address), 0700); err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to create directory %q", filepath.Dir(*address))
+	}
+
+	// Try to remove the socket file to avoid EADDRINUSE
+	if err := os.RemoveAll(*address); err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to remove %q", *address)
+	}
 
 	// Listen and serve
 	l, err := net.Listen("unix", *address)
