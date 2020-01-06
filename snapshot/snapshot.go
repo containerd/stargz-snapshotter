@@ -101,6 +101,9 @@ func init() {
 			if config.FileSystems != nil {
 				filesystems = config.FileSystems
 			}
+			if len(filesystems) == 0 {
+				return nil, errors.New("no filesystem plugin found, check the installation")
+			}
 			for prio, id := range filesystems {
 				log.G(ctx).WithField("priority", prio).Infof("Registering filesystem plugin %q...", id)
 				f, ok := fsMap[id]
