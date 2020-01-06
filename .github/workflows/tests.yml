@@ -35,5 +35,5 @@ jobs:
     name: Optimize
     steps:
     - uses: actions/checkout@v1
-    - name: Run test for optimize
+    - name: Run test for optimize subcommand of ctr-remote
       run: ./script/make.sh test-optimize

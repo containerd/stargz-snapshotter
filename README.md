@@ -11,15 +11,15 @@ Related discussion of the snapshotter in containerd community:
 
 By using this snapshotter, images(even if they are huge) can be pulled in lightning speed because this skips pulling layers but fetches the contents on demand at runtime.
 ```
-# time ctr images rpull --plain-http registry2:5000/fedora:30 > /dev/null 
+# time ctr-remote images rpull --plain-http registry2:5000/fedora:30 > /dev/null 
 real	0m0.447s
 user	0m0.081s
 sys	0m0.019s
-# time ctr images rpull --plain-http registry2:5000/python:3.7 > /dev/null 
+# time ctr-remote images rpull --plain-http registry2:5000/python:3.7 > /dev/null 
 real	0m1.041s
 user	0m0.073s
 sys	0m0.028s
-# time ctr images rpull --plain-http registry2:5000/jenkins:2.60.3 > /dev/null 
+# time ctr-remote images rpull --plain-http registry2:5000/jenkins:2.60.3 > /dev/null 
 real	0m1.231s
 user	0m0.112s
 sys	0m0.008s
@@ -29,7 +29,7 @@ To achive that we supports following [filesystems](filesystems):
 
 ## Demo
 
-You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr) for a quick tasting.
+You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr-remote) for a quick tasting.
 
 __NOTICE:__
 
@@ -50,24 +50,24 @@ $ docker exec -it containerd_demo /bin/bash
 
 ### Prepare stargz-formatted image on a registry
 
-Use optimize command to convert the image into stargz-formatted one as well as optimize the image for your workload. In this example, we optimize the image aming to speed up execution of `ls` command on `bash`.
+Use `optimize` subcommand to convert the image into stargz-formatted one as well as optimize the image for your workload. In this example, we optimize the image aming to speed up execution of `ls` command on `bash`.
 ```
-# optimize -insecure -entrypoint='[ "/bin/bash", "-c" ]' -args='[ "ls" ]' \
-           ubuntu:18.04 http://registry2:5000/ubuntu:18.04
+# ctr-remote image optimize --plain-http --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "ls" ]' \
+             ubuntu:18.04 http://registry2:5000/ubuntu:18.04
 ```
 The converted image is still __compatible with a normal docker image__ so you can still pull and run it with normal tools(e.g. docker).
 
 ### Run the container with remote snapshots
 Layer downloads don't occur. So this "pull" operation ends soon.
 ```
-# time /tmp/out/ctr images rpull --plain-http registry2:5000/ubuntu:18.04
+# time ctr-remote images rpull --plain-http registry2:5000/ubuntu:18.04
 fetching sha256:728332a6... application/vnd.docker.distribution.manifest.v2+json
 fetching sha256:80026893... application/vnd.docker.container.image.v1+json
 
 real	0m0.176s
 user	0m0.025s
 sys	0m0.005s
-# /tmp/out/ctr run --rm -t --snapshotter=remote registry2:5000/ubuntu:18.04 test /bin/bash
+# ctr-remote run --rm -t --snapshotter=remote registry2:5000/ubuntu:18.04 test /bin/bash
 root@8dab301bd68d:/# ls
 bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
 ```
@@ -81,7 +81,7 @@ In the example showed above, you can pull images from your private repository on
 ```
 # docker login
 (Enter username and password)
-# /tmp/out/ctr image rpull --user <username>:<password> index.docker.io/<your-repository>/ubuntu:18.04
+# ctr-remote image rpull --user <username>:<password> index.docker.io/<your-repository>/ubuntu:18.04
 ```
 The `--user` option is just for containerd's side which doesn't recognize `~/.docker/config.json`.
 We doesn't use credentials specified by this option but uses `~/.docker/config.json` instead.

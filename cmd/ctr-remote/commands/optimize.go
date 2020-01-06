@@ -14,19 +14,17 @@
    limitations under the License.
 */
 
-package main
+package commands
 
 import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"hash"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 	"syscall"
@@ -41,117 +39,137 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/stream"
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/ktock/remote-snapshotter/cmd/optimize/logger"
-	"github.com/ktock/remote-snapshotter/cmd/optimize/sampler"
-	"github.com/ktock/remote-snapshotter/cmd/optimize/sorter"
+	"github.com/ktock/remote-snapshotter/cmd/ctr-remote/logger"
+	"github.com/ktock/remote-snapshotter/cmd/ctr-remote/sampler"
+	"github.com/ktock/remote-snapshotter/cmd/ctr-remote/sorter"
 	imgpkg "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 )
 
-var (
-	insecure   = flag.Bool("insecure", false, "allow HTTP connections to the registry which has the prefix \"http://\"")
-	noopt      = flag.Bool("noopt", false, "only stargzify and do not optimize layers")
-	period     = flag.Int("period", 10, "time period to monitor access log")
-	username   = flag.String("user", "", "user name to override image's default config")
-	cwd        = flag.String("cwd", "", "working dir to override image's default config")
-	cArgs      = flag.String("args", "", "command arguments to override image's default config(in JSON array)")
-	entrypoint = flag.String("entrypoint", "", "entrypoint to override image's default config(in JSON array)")
-	terminal   = flag.Bool("t", false, "enable terminal for sample container")
-	cEnvs      envs
-)
+const defaultPeriod = 10
 
-type envs struct {
-	list []string
-}
+var OptimizeCommand = cli.Command{
+	Name:      "optimize",
+	Usage:     "optimize an image with user-specified workload",
+	ArgsUsage: "[flags] <input-ref> <output-ref>",
+	Flags: []cli.Flag{
+		cli.BoolFlag{
+			Name:  "plain-http",
+			Usage: "allow HTTP connections to the registry which has the prefix \"http://\"",
+		},
+		cli.BoolFlag{
+			Name:  "stargz-only",
+			Usage: "only stargzify and do not optimize layers",
+		},
+		cli.BoolFlag{
+			Name:  "t",
+			Usage: "only stargzify and do not optimize layers",
+		},
+		cli.IntFlag{
+			Name:  "period",
+			Usage: "time period to monitor access log",
+			Value: defaultPeriod,
+		},
+		cli.StringFlag{
+			Name:  "user",
+			Usage: "user name to override image's default config",
+		},
+		cli.StringFlag{
+			Name:  "cwd",
+			Usage: "working dir to override image's default config",
+		},
+		cli.StringFlag{
+			Name:  "args",
+			Usage: "command arguments to override image's default config(in JSON array)",
+		},
+		cli.StringFlag{
+			Name:  "entrypoint",
+			Usage: "entrypoint to override image's default config(in JSON array)",
+		},
+		cli.StringSliceFlag{
+			Name:  "env",
+			Usage: "environment valulable to add or override to the image's default config",
+		},
+	},
+	Action: func(context *cli.Context) error {
 
-func (e *envs) String() string {
-	return strings.Join(e.list, ", ")
-}
+		// Set up logs package to get useful messages e.g. progress.
+		logs.Warn.SetOutput(os.Stderr)
+		logs.Progress.SetOutput(os.Stderr)
 
-func (e *envs) Set(value string) error {
-	e.list = append(e.list, value)
-	return nil
-}
-
-func main() {
-
-	// Set up logs package to get useful messages i.e. progress.
-	logs.Warn.SetOutput(os.Stderr)
-	logs.Progress.SetOutput(os.Stderr)
-
-	// Parse arguments
-	flag.Var(&cEnvs, "env", "environment valulable to add or override to the image's default config")
-	flag.Parse()
-	if flag.NArg() < 2 {
-		fmt.Printf("usage: %s [OPTION]... INPUT_IMAGE OUTPUT_IMAGE\n", os.Args[0])
-		os.Exit(1)
-	}
-	args := flag.Args()
-	src, dst, opts, err := parseArgs(args)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Convert and push image
-	srcRef, err := parseReference(src)
-	if err != nil {
-		log.Fatal(err)
-	}
-	dstRef, err := parseReference(dst)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = convert(srcRef, dstRef, opts...)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func parseArgs(args []string) (src string, dst string, opts []sampler.Option, err error) {
-	src = args[0]
-	dst = args[1]
-
-	if len(cEnvs.list) > 0 {
-		opts = append(opts, sampler.WithEnvs(cEnvs.list))
-	}
-	if *cArgs != "" {
-		var as []string
-		err = json.Unmarshal([]byte(*cArgs), &as)
+		// Parse arguments
+		var (
+			src = context.Args().Get(0)
+			dst = context.Args().Get(1)
+		)
+		if src == "" || dst == "" {
+			return fmt.Errorf("source and destination of the target image must be specified")
+		}
+		opts, err := parseArgs(context)
 		if err != nil {
-			return "", "", nil, errors.Wrapf(err, "invalid option \"args\"")
+			return err
+		}
+
+		// Convert and push image
+		srcRef, err := parseReference(src, context)
+		if err != nil {
+			return err
+		}
+		dstRef, err := parseReference(dst, context)
+		if err != nil {
+			return err
+		}
+		err = convert(context, srcRef, dstRef, opts...)
+		if err != nil {
+			return err
+		}
+		return nil
+	},
+}
+
+func parseArgs(clicontext *cli.Context) (opts []sampler.Option, err error) {
+	if env := clicontext.StringSlice("env"); len(env) > 0 {
+		opts = append(opts, sampler.WithEnvs(env))
+	}
+	if args := clicontext.String("args"); args != "" {
+		var as []string
+		err = json.Unmarshal([]byte(args), &as)
+		if err != nil {
+			return nil, errors.Wrapf(err, "invalid option \"args\"")
 		}
 		opts = append(opts, sampler.WithArgs(as))
 	}
-	if *entrypoint != "" {
+	if entrypoint := clicontext.String("entrypoint"); entrypoint != "" {
 		var es []string
-		err = json.Unmarshal([]byte(*entrypoint), &es)
+		err = json.Unmarshal([]byte(entrypoint), &es)
 		if err != nil {
-			return "", "", nil, errors.Wrapf(err, "invalid option \"entrypoint\"")
+			return nil, errors.Wrapf(err, "invalid option \"entrypoint\"")
 		}
 		opts = append(opts, sampler.WithEntrypoint(es))
 	}
-	if *username != "" {
-		opts = append(opts, sampler.WithUser(*username))
+	if username := clicontext.String("user"); username != "" {
+		opts = append(opts, sampler.WithUser(username))
 	}
-	if *cwd != "" {
-		opts = append(opts, sampler.WithWorkingDir(*cwd))
+	if cwd := clicontext.String("cwd"); cwd != "" {
+		opts = append(opts, sampler.WithWorkingDir(cwd))
 	}
-	if *terminal {
+	if clicontext.Bool("t") {
 		opts = append(opts, sampler.WithTerminal())
 	}
 
 	return
 }
 
-func parseReference(path string) (name.Reference, error) {
+func parseReference(path string, clicontext *cli.Context) (name.Reference, error) {
 	var opts []name.Option
 	if strings.HasPrefix(path, "http://") {
 		path = strings.TrimPrefix(path, "http://")
-		if *insecure {
+		if clicontext.Bool("plain-http") {
 			opts = append(opts, name.Insecure)
 		} else {
-			return nil, fmt.Errorf("\"-insecure\" option must be specified to connect to %q using HTTP", path)
+			return nil, fmt.Errorf("\"--plain-http\" option must be specified to connect to %q using HTTP", path)
 		}
 	}
 	ref, err := name.ParseReference(path, opts...)
@@ -162,7 +180,7 @@ func parseReference(path string) (name.Reference, error) {
 	return ref, nil
 }
 
-func convert(srcRef, dstRef name.Reference, runopts ...sampler.Option) error {
+func convert(clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...sampler.Option) error {
 	// Pull source image
 	srcImg, err := remote.Image(srcRef, remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if err != nil {
@@ -175,7 +193,7 @@ func convert(srcRef, dstRef name.Reference, runopts ...sampler.Option) error {
 	if err != nil {
 		return err
 	}
-	if !*noopt {
+	if !clicontext.Bool("stargz-only") {
 		configData, err := srcImg.RawConfigFile()
 		if err != nil {
 			return err
@@ -184,7 +202,7 @@ func convert(srcRef, dstRef name.Reference, runopts ...sampler.Option) error {
 		if err := json.Unmarshal(configData, &config); err != nil {
 			return fmt.Errorf("failed to parse image config file: %v", err)
 		}
-		layers, err = optimize(layers, config, runopts...)
+		layers, err = optimize(clicontext, layers, config, runopts...)
 		if err != nil {
 			return err
 		}
@@ -221,7 +239,7 @@ func convert(srcRef, dstRef name.Reference, runopts ...sampler.Option) error {
 }
 
 // The order of the "in" list must be base layer first, top layer last.
-func optimize(in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (out []regpkg.Layer, err error) {
+func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (out []regpkg.Layer, err error) {
 	root := ""
 	mktemp := func() (path string, err error) {
 		if path, err = ioutil.TempDir(root, "optimize"); err != nil {
@@ -313,7 +331,7 @@ func optimize(in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (o
 	defer syscall.Unmount(rootfs, syscall.MNT_FORCE)
 
 	// run workload
-	if err = sampler.Run(bundle, config, *period, opts...); err != nil {
+	if err = sampler.Run(bundle, config, clicontext.Int("period"), opts...); err != nil {
 		return nil, errors.Wrap(err, "failed to run the sampler")
 	}
 
