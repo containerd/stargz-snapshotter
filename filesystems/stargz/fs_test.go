@@ -319,7 +319,7 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 		Node: nodefs.NewDefaultNode(),
 		gr:   gr,
 		e:    root,
-		s:    newState(testStateID),
+		s:    newState(testStateID, nil),
 	}
 	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -552,7 +552,7 @@ func hasStateFile(id string) fsCheck {
 			t.Errorf("failed to lookup node %q in %q: %v", id, stateDirName, status)
 			return
 		}
-		n, ok := inode.Node().(*errFile)
+		n, ok := inode.Node().(*statFile)
 		if !ok {
 			t.Errorf("entry %q isn't a normal node", id)
 			return

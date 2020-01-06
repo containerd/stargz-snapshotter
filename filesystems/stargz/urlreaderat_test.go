@@ -25,6 +25,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -394,5 +395,42 @@ func brokenHeaderRoundTripper(t *testing.T, contents []byte) RoundTripFunc {
 		res := tr(req)
 		res.Header = make(http.Header)
 		return res
+	}
+}
+
+func TestRegionSet(t *testing.T) {
+	tests := []struct {
+		input    []region
+		expected []region
+	}{
+		{
+			input:    []region{region{1, 3}, region{2, 4}},
+			expected: []region{region{1, 4}},
+		},
+		{
+			input:    []region{region{1, 5}, region{2, 4}},
+			expected: []region{region{1, 5}},
+		},
+		{
+			input:    []region{region{2, 4}, region{1, 5}},
+			expected: []region{region{1, 5}},
+		},
+		{
+			input:    []region{region{2, 4}, region{6, 8}, region{1, 5}},
+			expected: []region{region{1, 5}, region{6, 8}},
+		},
+		{
+			input:    []region{region{1, 2}, region{1, 2}},
+			expected: []region{region{1, 2}},
+		},
+	}
+	for i, tt := range tests {
+		var rs regionSet
+		for _, f := range tt.input {
+			rs.add(f)
+		}
+		if !reflect.DeepEqual(tt.expected, rs.rs) {
+			t.Errorf("#%d: expected %v, got %v", i, tt.expected, rs.rs)
+		}
 	}
 }

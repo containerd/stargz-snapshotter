@@ -33,7 +33,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -185,13 +185,14 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	}
 
 	// Construct filesystem from the remote stargz layer.
-	sr := io.NewSectionReader(&urlReaderAt{
+	ur := &urlReaderAt{
 		url:       url,
 		t:         tr,
 		size:      size,
 		chunkSize: fs.cacheChunkSize,
 		cache:     fs.httpCache,
-	}, 0, size)
+	}
+	sr := io.NewSectionReader(ur, 0, size)
 	r, err := stargz.Open(sr)
 	if err != nil {
 		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to parse stargz")
@@ -222,7 +223,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		fs:   fs,
 		gr:   gr,
 		e:    root,
-		s:    newState(fmt.Sprintf("%x", sha256.Sum256([]byte(mountpoint)))),
+		s:    newState(digest, ur),
 		root: mountpoint,
 	}, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -608,13 +609,19 @@ func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Conte
 }
 
 // newState provides new state directory node.
-// It creates errFile at the same time to give it stable inode number.
-func newState(id string) *state {
+// It creates statFile at the same time to give it stable inode number.
+func newState(digest string, ur *urlReaderAt) *state {
 	return &state{
 		Node: nodefs.NewDefaultNode(),
-		id:   id,
-		err: &errFile{
+		ur:   ur,
+		statFile: &statFile{
 			Node: nodefs.NewDefaultNode(),
+			name: digest + ".json",
+			statJSON: statJSON{
+				Digest: digest,
+				Size:   ur.size,
+			},
+			ur: ur,
 		},
 	}
 }
@@ -625,20 +632,20 @@ func newState(id string) *state {
 // This directory has mode "dr-x------ root root".
 type state struct {
 	nodefs.Node
-	id  string
-	err *errFile
+	ur       *urlReaderAt
+	statFile *statFile
 }
 
 func (s *state) report(err error) {
-	s.err.report(err)
+	s.statFile.report(err)
 }
 
 func (s *state) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	return []fuse.DirEntry{
 		{
-			Mode: syscall.S_IFREG | s.err.mode(),
-			Name: s.id,
-			Ino:  s.err.ino(),
+			Mode: syscall.S_IFREG | s.statFile.mode(),
+			Name: s.statFile.name,
+			Ino:  s.statFile.ino(),
 		},
 	}, fuse.OK
 }
@@ -651,10 +658,10 @@ func (s *state) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*nod
 		return c, fuse.OK
 	}
 
-	if name != s.id {
+	if name != s.statFile.name {
 		return nil, fuse.ENOENT
 	}
-	return s.Inode().NewChild(name, false, s.err), s.err.attr(out)
+	return s.Inode().NewChild(name, false, s.statFile), s.statFile.attr(out)
 }
 
 func (s *state) Access(mode uint32, context *fuse.Context) fuse.Status {
@@ -706,23 +713,45 @@ func (s *state) attr(out *fuse.Attr) fuse.Status {
 	return fuse.OK
 }
 
-// errFile is a file which contain something to be reported from this layer.
-// This filesystem uses errFile.report() to report something(e.g. error) to
+type statJSON struct {
+	Error  []byte
+	Digest string
+	// URL is excluded for potential security reason
+	Size           int64
+	FetchedSize    int64
+	FetchedPercent float64 // Fetched / Size * 100.0
+}
+
+// statFile is a file which contain something to be reported from this layer.
+// This filesystem uses statFile.report() to report something(e.g. error) to
 // the clients(e.g. Kubernetes's livenessProbe).
 // This directory has mode "-r-------- root root".
-type errFile struct {
+type statFile struct {
 	nodefs.Node
-	err []byte
-	mu  sync.Mutex
+	name     string
+	ur       *urlReaderAt
+	statJSON statJSON
+	mu       sync.Mutex
 }
 
-func (e *errFile) report(err error) {
+func (e *statFile) report(err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.err = []byte(fmt.Sprintf("%v", err))
+	e.statJSON.Error = []byte(fmt.Sprintf("%v", err))
 }
 
-func (e *errFile) Access(mode uint32, context *fuse.Context) fuse.Status {
+func (e *statFile) updateStatUnlocked() ([]byte, error) {
+	e.statJSON.FetchedSize = e.ur.getFetchedSize()
+	e.statJSON.FetchedPercent = float64(e.statJSON.FetchedSize) / float64(e.statJSON.Size) * 100.0
+	j, err := json.Marshal(&e.statJSON)
+	if err != nil {
+		return nil, err
+	}
+	j = append(j, []byte("\n")...)
+	return j, nil
+}
+
+func (e *statFile) Access(mode uint32, context *fuse.Context) fuse.Status {
 	if mode == 0 {
 		// Requires nothing.
 		return fuse.OK
@@ -735,45 +764,53 @@ func (e *errFile) Access(mode uint32, context *fuse.Context) fuse.Status {
 	return fuse.EPERM
 }
 
-func (e *errFile) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Status) {
+func (e *statFile) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Status) {
 	return nil, fuse.OK
 }
 
-func (e *errFile) Read(file nodefs.File, dest []byte, off int64, context *fuse.Context) (fuse.ReadResult, fuse.Status) {
+func (e *statFile) Read(file nodefs.File, dest []byte, off int64, context *fuse.Context) (fuse.ReadResult, fuse.Status) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	n, err := bytes.NewReader(e.err).ReadAt(dest, off)
+	st, err := e.updateStatUnlocked()
+	if err != nil {
+		return nil, fuse.EIO
+	}
+	n, err := bytes.NewReader(st).ReadAt(dest, off)
 	if err != nil && err != io.EOF {
 		return nil, fuse.EIO
 	}
 	return fuse.ReadResultData(dest[:n]), fuse.OK
 }
 
-func (e *errFile) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) fuse.Status {
+func (e *statFile) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) fuse.Status {
 	return e.attr(out)
 }
 
-func (e *errFile) StatFs() *fuse.StatfsOut {
+func (e *statFile) StatFs() *fuse.StatfsOut {
 	return defaultStatfs()
 }
 
-func (e *errFile) ino() uint64 {
+func (e *statFile) ino() uint64 {
 	// calculates the inode number which is one-to-one conresspondence
 	// with this state file node inscance.
 	return uint64(uintptr(unsafe.Pointer(e)))
 }
 
-func (e *errFile) mode() uint32 {
+func (e *statFile) mode() uint32 {
 	return 0400
 }
 
-func (e *errFile) attr(out *fuse.Attr) fuse.Status {
+func (e *statFile) attr(out *fuse.Attr) fuse.Status {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	st, err := e.updateStatUnlocked()
+	if err != nil {
+		return fuse.EIO
+	}
+
 	out.Ino = e.ino()
-	out.Size = uint64(len(e.err))
+	out.Size = uint64(len(st))
 	out.Blksize = blockSize
 	out.Blocks = out.Size / uint64(out.Blksize)
 	out.Mode = syscall.S_IFREG | e.mode()

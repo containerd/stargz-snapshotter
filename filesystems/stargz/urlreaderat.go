@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ktock/remote-snapshotter/cache"
@@ -36,11 +37,48 @@ import (
 var contentRangeRegexp = regexp.MustCompile(`bytes ([0-9]+)-([0-9]+)/([0-9]+|\\*)`)
 
 type urlReaderAt struct {
-	url       string
-	t         http.RoundTripper
-	size      int64
-	chunkSize int64
-	cache     cache.BlobCache
+	url                string
+	t                  http.RoundTripper
+	size               int64
+	chunkSize          int64
+	cache              cache.BlobCache
+	fetchedRegionSet   regionSet
+	fetchedRegionSetMu sync.Mutex
+}
+
+type regionSet struct {
+	rs []region
+}
+
+// add attempts to merge r to rs.rs
+func (rs *regionSet) add(r region) {
+	for i := range rs.rs {
+		f := &rs.rs[i]
+		if r.b <= f.b && f.b <= r.e && r.e <= f.e {
+			f.b = r.b
+			return
+		}
+		if f.b <= r.b && r.e <= f.e {
+			return
+		}
+		if f.b <= r.b && r.b <= f.e && f.e <= r.e {
+			f.e = r.e
+			return
+		}
+		if r.b <= f.b && f.e <= r.e {
+			f.b = r.b
+			f.e = r.e
+			return
+		}
+	}
+	rs.rs = append(rs.rs, r)
+}
+func (rs *regionSet) totalSize() int64 {
+	var sz int64
+	for _, f := range rs.rs {
+		sz += f.size()
+	}
+	return sz
 }
 
 // region is HTTP-range-request-compliant range.
@@ -82,6 +120,11 @@ func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 	if err := r.appendFromRemote(allData, remotes); err != nil {
 		return 0, err
 	}
+	r.fetchedRegionSetMu.Lock()
+	for reg := range allData {
+		r.fetchedRegionSet.add(reg)
+	}
+	r.fetchedRegionSetMu.Unlock()
 
 	// Write all chunks to the result buffer.
 	var regionData []byte
@@ -235,4 +278,11 @@ func floor(n int64, unit int64) int64 {
 
 func ceil(n int64, unit int64) int64 {
 	return (n/unit + 1) * unit
+}
+
+func (r *urlReaderAt) getFetchedSize() int64 {
+	r.fetchedRegionSetMu.Lock()
+	sz := r.fetchedRegionSet.totalSize()
+	r.fetchedRegionSetMu.Unlock()
+	return sz
 }
