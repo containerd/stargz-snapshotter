@@ -1,6 +1,0 @@
-.dockerignore
-.git
-.gitignore
-appveyor.yml
-build
-circle.yml
