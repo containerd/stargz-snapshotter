@@ -47,6 +47,7 @@ check:
 	@echo "$@"
 	@GO111MODULE=$(GO111MODULE_VALUE) golangci-lint run
 	@$(GOPATH)/src/github.com/containerd/project/script/validate/fileheader $(GOPATH)/src/github.com/containerd/project/
+	@git-validation -q -run DCO
 
 install-check-tools:
 	@curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.19.1
