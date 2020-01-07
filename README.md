@@ -29,7 +29,7 @@ To achive that we supports following [filesystems](filesystems):
 
 ## Demo
 
-You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr-remote) for a quick tasting.
+You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr-remote) for a quick tasting. For an overview of remote-snapshotter, please check [this doc](./overview.md).
 
 __NOTICE:__
 
