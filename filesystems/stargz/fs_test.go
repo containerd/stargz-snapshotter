@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -272,7 +273,7 @@ func TestExistence(t *testing.T) {
 			),
 			want: checks(
 				hasFileDigest("test", digestFor("test")),
-				hasStateFile(testStateID),
+				hasStateFile(testStateLayerDigest+".json"),
 			),
 		},
 	}
@@ -303,7 +304,7 @@ func TestExistence(t *testing.T) {
 	}
 }
 
-const testStateID = "teststate"
+const testStateLayerDigest = "sha256:deadbeef"
 
 func getRootNode(t *testing.T, r *stargz.Reader) *node {
 	root, ok := r.Lookup("")
@@ -311,15 +312,21 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 		t.Fatalf("failed to find root in stargz")
 	}
 	gr := &stargzReader{
-		digest: "test",
+		digest: testStateLayerDigest,
 		r:      r,
 		cache:  &testCache{membuf: map[string]string{}, t: t},
+	}
+	ur := &urlReaderAt{
+		url:       "http://example.com/dummy/blobs/sha256/deadbeef",
+		size:      64,
+		chunkSize: 1024,
+		cache:     &testCache{membuf: map[string]string{}, t: t},
 	}
 	rootNode := &node{
 		Node: nodefs.NewDefaultNode(),
 		gr:   gr,
 		e:    root,
-		s:    newState(testStateID),
+		s:    newState(testStateLayerDigest, ur),
 	}
 	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -552,7 +559,7 @@ func hasStateFile(id string) fsCheck {
 			t.Errorf("failed to lookup node %q in %q: %v", id, stateDirName, status)
 			return
 		}
-		n, ok := inode.Node().(*errFile)
+		n, ok := inode.Node().(*statFile)
 		if !ok {
 			t.Errorf("entry %q isn't a normal node", id)
 			return
@@ -561,24 +568,19 @@ func hasStateFile(id string) fsCheck {
 		// wanted data
 		rand.Seed(time.Now().UnixNano())
 		wantErr := fmt.Errorf("test-%d", rand.Int63())
-		wantData := fmt.Sprintf("%v", wantErr)
 
 		// report the data
 		root.s.report(wantErr)
 
-		// check file size
+		// obtain file size (check later)
 		status = n.GetAttr(&attr, nil, nil)
 		if status != fuse.OK {
 			t.Errorf("failed to get attr of state file: %v", status)
 			return
 		}
-		if attr.Size != uint64(len(wantData)) {
-			t.Errorf("size %d; want %d", attr.Size, len(wantData))
-			return
-		}
 
 		// get data via state file
-		tmp := make([]byte, len(wantData))
+		tmp := make([]byte, 4096)
 		res, status := n.Read(nil, tmp, 0, nil)
 		if status != fuse.OK {
 			t.Errorf("failed to read state file: %v", status)
@@ -589,8 +591,18 @@ func hasStateFile(id string) fsCheck {
 			t.Errorf("failed to get result bytes of state file: %v", status)
 			return
 		}
-		if string(gotState) != wantData {
-			t.Errorf("got %q; want %q", string(gotState), wantData)
+		if attr.Size != uint64(len(string(gotState))) {
+			t.Errorf("size %d; want %d", attr.Size, len(string(gotState)))
+			return
+		}
+
+		var j statJSON
+		if err := json.Unmarshal(gotState, &j); err != nil {
+			t.Errorf("failed to unmarshal %q: %v", string(gotState), err)
+			return
+		}
+		if wantErr.Error() != j.Error {
+			t.Errorf("expected error %q, got %q", wantErr.Error(), j.Error)
 			return
 		}
 	})
