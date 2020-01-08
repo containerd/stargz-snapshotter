@@ -369,7 +369,8 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 
 	if !o.asyncRemove {
 		var removals []string
-		removals, err = o.getCleanupDirectories(ctx, t)
+		const cleanupCommitted = false
+		removals, err = o.getCleanupDirectories(ctx, t, cleanupCommitted)
 		if err != nil {
 			return errors.Wrap(err, "unable to get directories for removal")
 		}
@@ -404,11 +405,17 @@ func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...str
 
 // Cleanup cleans up disk resources from removed or abandoned snapshots
 func (o *snapshotter) Cleanup(ctx context.Context) error {
-	cleanup, err := o.cleanupDirectories(ctx)
+	const cleanupCommitted = false
+	return o.cleanup(ctx, cleanupCommitted)
+}
+
+func (o *snapshotter) cleanup(ctx context.Context, cleanupCommitted bool) error {
+	cleanup, err := o.cleanupDirectories(ctx, cleanupCommitted)
 	if err != nil {
 		return err
 	}
 
+	log.G(ctx).Debugf("cleanup: dirs=%v", cleanup)
 	for _, dir := range cleanup {
 		if err := o.cleanupSnapshotDirectory(dir); err != nil {
 			log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
@@ -418,7 +425,7 @@ func (o *snapshotter) Cleanup(ctx context.Context) error {
 	return nil
 }
 
-func (o *snapshotter) cleanupDirectories(ctx context.Context) ([]string, error) {
+func (o *snapshotter) cleanupDirectories(ctx context.Context, cleanupCommitted bool) ([]string, error) {
 	// Get a write transaction to ensure no other write transaction can be entered
 	// while the cleanup is scanning.
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
@@ -427,10 +434,10 @@ func (o *snapshotter) cleanupDirectories(ctx context.Context) ([]string, error) 
 	}
 
 	defer t.Rollback()
-	return o.getCleanupDirectories(ctx, t)
+	return o.getCleanupDirectories(ctx, t, cleanupCommitted)
 }
 
-func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Transactor) ([]string, error) {
+func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Transactor, cleanupCommitted bool) ([]string, error) {
 	ids, err := storage.IDMap(ctx)
 	if err != nil {
 		return nil, err
@@ -450,8 +457,10 @@ func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Trans
 
 	cleanup := []string{}
 	for _, d := range dirs {
-		if _, ok := ids[d]; ok {
-			continue
+		if !cleanupCommitted {
+			if _, ok := ids[d]; ok {
+				continue
+			}
 		}
 
 		cleanup = append(cleanup, filepath.Join(snapshotDir, d))
@@ -638,6 +647,12 @@ func (o *snapshotter) workPath(id string) string {
 
 // Close closes the snapshotter
 func (o *snapshotter) Close() error {
+	// unmount all mounts including Committed
+	const cleanupCommitted = true
+	ctx := context.Background()
+	if err := o.cleanup(ctx, cleanupCommitted); err != nil {
+		log.G(ctx).WithError(err).Warn("failed to cleanup")
+	}
 	return o.ms.Close()
 }
 
