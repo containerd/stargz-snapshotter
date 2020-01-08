@@ -21,6 +21,7 @@ import (
 	"flag"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 
 	"google.golang.org/grpc"
@@ -123,6 +124,12 @@ func main() {
 		log.G(ctx).Fatalf("failed to register snapshotter")
 	}
 
+	defer func() {
+		log.G(ctx).Debug("Closing the snapshotter")
+		rs.Close()
+		log.G(ctx).Info("Exiting")
+	}()
+
 	// Create a gRPC server
 	rpc := grpc.NewServer()
 
@@ -147,7 +154,17 @@ func main() {
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("error on listen socket %q", *address)
 	}
-	if err := rpc.Serve(l); err != nil {
-		log.G(ctx).WithError(err).Fatalf("error on serving via socket %q", *address)
-	}
+	go func() {
+		if err := rpc.Serve(l); err != nil {
+			log.G(ctx).WithError(err).Fatalf("error on serving via socket %q", *address)
+		}
+	}()
+	waitForSIGINT()
+	log.G(ctx).Info("Got SIGINT")
+}
+
+func waitForSIGINT() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	<-c
 }
