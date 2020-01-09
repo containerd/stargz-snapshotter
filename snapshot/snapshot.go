@@ -381,7 +381,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		defer func() {
 			if err == nil {
 				for _, dir := range removals {
-					if err := o.cleanupSnapshotDirectory(dir); err != nil {
+					if err := o.cleanupSnapshotDirectory(ctx, dir); err != nil {
 						log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
 					}
 				}
@@ -417,7 +417,7 @@ func (o *snapshotter) cleanup(ctx context.Context, cleanupCommitted bool) error 
 
 	log.G(ctx).Debugf("cleanup: dirs=%v", cleanup)
 	for _, dir := range cleanup {
-		if err := o.cleanupSnapshotDirectory(dir); err != nil {
+		if err := o.cleanupSnapshotDirectory(ctx, dir); err != nil {
 			log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
 		}
 	}
@@ -469,13 +469,15 @@ func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Trans
 	return cleanup, nil
 }
 
-func (o *snapshotter) cleanupSnapshotDirectory(dir string) error {
+func (o *snapshotter) cleanupSnapshotDirectory(ctx context.Context, dir string) error {
 
 	// On a remote snapshot, the layer is mounted on the "fs" directory.
 	// Filesystem can do any finalization by detecting this "unmount" event
 	// and we don't care the finalization explicitly at this stage.
 	mp := filepath.Join(dir, "fs")
-	_ = syscall.Unmount(mp, 0)
+	if err := syscall.Unmount(mp, 0); err != nil {
+		log.G(ctx).WithError(err).WithField("dir", mp).Warn("failed to unmount remote snapshot")
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		return errors.Wrapf(err, "failed to remove directory %s", dir)
 	}
@@ -492,12 +494,12 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 	defer func() {
 		if err != nil {
 			if td != "" {
-				if err1 := o.cleanupSnapshotDirectory(td); err1 != nil {
+				if err1 := o.cleanupSnapshotDirectory(ctx, td); err1 != nil {
 					log.G(ctx).WithError(err1).Warn("failed to cleanup temp snapshot directory")
 				}
 			}
 			if path != "" {
-				if err1 := o.cleanupSnapshotDirectory(path); err1 != nil {
+				if err1 := o.cleanupSnapshotDirectory(ctx, path); err1 != nil {
 					log.G(ctx).WithError(err1).WithField("path", path).Error("failed to reclaim snapshot directory, directory may need removal")
 					err = errors.Wrapf(err, "failed to remove path: %v", err1)
 				}
