@@ -326,17 +326,14 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	}()
 
 	// grab the existing id
-	id, info, _, err := storage.GetInfo(ctx, key)
+	id, _, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
 		return err
 	}
 
-	// Avoid walking through mounted remote snapshot.
-	var usage fs.Usage
-	if _, ok := info.Labels[targetSnapshotLabel]; !ok {
-		if usage, err = fs.DiskUsage(ctx, o.upperPath(id)); err != nil {
-			return err
-		}
+	usage, err := fs.DiskUsage(ctx, o.upperPath(id))
+	if err != nil {
+		return err
 	}
 
 	if _, err = storage.CommitActive(ctx, key, name, snapshots.Usage(usage), opts...); err != nil {
