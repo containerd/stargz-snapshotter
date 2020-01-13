@@ -64,10 +64,10 @@ func NewFilesystem(root string, config *Config) (fsplugin.FileSystem, error) {
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
-	digest, ok := labels["containerd.io/snapshot/target.digest"]
+	digest, ok := labels[handler.TargetDigestLabel]
 	if !ok {
-		err := fmt.Errorf("digest hasn't be passed")
-		log.G(ctx).Debug("cvmfs: %s", err)
+		err := fmt.Errorf("cvmfs: digest hasn't be passed")
+		log.G(ctx).Debug(err.Error())
 		return err
 	}
 	digest = strings.Split(digest, ":")[1]
