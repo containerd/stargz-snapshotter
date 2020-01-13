@@ -27,6 +27,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/plugin"
 	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
+	"github.com/ktock/remote-snapshotter/filesystems/handler"
 )
 
 func init() {

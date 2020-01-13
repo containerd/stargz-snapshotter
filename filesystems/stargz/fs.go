@@ -60,7 +60,7 @@ import (
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"github.com/ktock/remote-snapshotter/cache"
 	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
-	"github.com/ktock/remote-snapshotter/filesystems/stargz/handler"
+	"github.com/ktock/remote-snapshotter/filesystems/handler"
 	"golang.org/x/sys/unix"
 )
 
