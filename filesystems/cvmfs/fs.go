@@ -63,7 +63,13 @@ func NewFilesystem(root string, config *Config) (fsplugin.FileSystem, error) {
 	return &filesystem{repository: repository, mountedLayers: make(map[string]string)}, nil
 }
 
-func (fs *filesystem) Mount(ctx context.Context, ref, digest, mountpoint string) error {
+func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
+	digest, ok := labels["containerd.io/snapshot/target.digest"]
+	if !ok {
+		err := fmt.Errorf("digest hasn't be passed")
+		log.G(ctx).Debug("cvmfs: %s", err)
+		return err
+	}
 	digest = strings.Split(digest, ":")[1]
 	firstTwo := digest[0:2]
 	path := filepath.Join("/", "cvmfs", fs.repository, ".layers", firstTwo, digest, "layerfs")
