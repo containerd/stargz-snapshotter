@@ -97,10 +97,10 @@ func TestFileReadAt(t *testing.T) {
 							}
 
 							// data we get through a file.
-							f := makeFileReaderAt(t, []byte(sampleData1)[:filesize], sampleChunkSize)
+							f, digest := makeFileReaderAt(t, []byte(sampleData1)[:filesize], sampleChunkSize)
 							f.ra = newExceptSectionReader(t, f.ra, cacheExcept...)
 							for _, reg := range cacheExcept {
-								f.gr.cache.Add(f.gr.genID(f.name, reg.b, reg.e-reg.b+1), []byte(sampleData1[reg.b:reg.e+1]))
+								f.gr.cache.Add(f.gr.genID(digest, reg.b, reg.e-reg.b+1), []byte(sampleData1[reg.b:reg.e+1]))
 							}
 							respData := make([]byte, size)
 							n, err := f.ReadAt(respData, offset)
@@ -124,7 +124,7 @@ func TestFileReadAt(t *testing.T) {
 								if !ok {
 									break
 								}
-								data, err := f.gr.cache.Fetch(f.gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize))
+								data, err := f.gr.cache.Fetch(f.gr.genID(digest, ce.ChunkOffset, ce.ChunkSize))
 								if err != nil || len(data) != int(ce.ChunkSize) {
 									t.Errorf("missed cache of offset=%d, size=%d: %v(got size=%d)", ce.ChunkOffset, ce.ChunkSize, err, n)
 									return
@@ -162,7 +162,7 @@ func (er *exceptSectionReader) ReadAt(p []byte, offset int64) (int, error) {
 	return er.ra.ReadAt(p, offset)
 }
 
-func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) *fileReaderAt {
+func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) (*fileReaderAt, string) {
 	testName := "test"
 	r, err := stargz.Open(makeStargz(t, []regEntry{
 		{
@@ -175,15 +175,21 @@ func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) *fileReade
 		t.Fatalf("Failed to open stargz file: %v", err)
 	}
 	f, err := (&stargzReader{
-		digest: "dummy",
-		r:      r,
-		cache:  &testCache{membuf: map[string]string{}, t: t},
+		r:     r,
+		cache: &testCache{membuf: map[string]string{}, t: t},
 	}).openFile(testName)
 	if err != nil {
 		t.Fatalf("Failed to open testing file: %v", err)
 	}
+	e, ok := r.Lookup(testName)
+	if !ok {
+		t.Fatalf("Failed to get TOCEntry %q", testName)
+	}
+	if e.Digest == "" {
+		t.Fatalf("digest is empty for TOCEntry %q", testName)
+	}
 
-	return f.(*fileReaderAt)
+	return f.(*fileReaderAt), e.Digest
 }
 
 // Tests prefetch method of each stargz file.
@@ -233,9 +239,8 @@ func TestPrefetch(t *testing.T) {
 				t.Fatalf("Failed to open stargz file: %v", err)
 			}
 			gr := &stargzReader{
-				digest: "test",
-				r:      r,
-				cache:  &testCache{membuf: map[string]string{}, t: t},
+				r:     r,
+				cache: &testCache{membuf: map[string]string{}, t: t},
 			}
 			done, err := gr.prefetch(sr)
 			if err != nil {
@@ -252,13 +257,17 @@ func TestPrefetch(t *testing.T) {
 				if err != nil {
 					t.Fatalf("failed to open file %q: %v", file, err)
 				}
+				fe, ok := gr.r.Lookup(file)
+				if !ok {
+					t.Fatalf("failed to get TOCEntry of %q", file)
+				}
 				var nr int64
 				for {
 					ce, ok := gr.r.ChunkEntryForOffset(file, nr)
 					if !ok {
 						break
 					}
-					data, err := gr.cache.Fetch(gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize))
+					data, err := gr.cache.Fetch(gr.genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize))
 					if err != nil {
 						t.Errorf("failed to read cache data of %q: %v", file, err)
 						return
@@ -312,9 +321,8 @@ func TestFailStargzReader(t *testing.T) {
 		t.Fatalf("Failed to open stargz file: %v", err)
 	}
 	gr := &stargzReader{
-		digest: "dummy",
-		r:      r,
-		cache:  &nopCache{},
+		r:     r,
+		cache: &nopCache{},
 	}
 
 	// tests for opening file

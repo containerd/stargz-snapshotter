@@ -204,9 +204,8 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		return err
 	}
 	gr := &stargzReader{
-		digest: digest,
-		r:      r,
-		cache:  fs.fsCache,
+		r:     r,
+		cache: fs.fsCache,
 	}
 	if !fs.noprefetch {
 		// TODO: make sync/async switchable

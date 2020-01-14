@@ -30,9 +30,10 @@ import (
 )
 
 type fileReaderAt struct {
-	name string
-	gr   *stargzReader
-	ra   io.ReaderAt
+	name   string
+	digest string
+	gr     *stargzReader
+	ra     io.ReaderAt
 }
 
 // ReadAt reads chunks from the stargz file with trying to fetch as many chunks
@@ -44,7 +45,7 @@ func (fr *fileReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 		if !ok {
 			break
 		}
-		id := fr.gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize)
+		id := fr.gr.genID(fr.digest, ce.ChunkOffset, ce.ChunkSize)
 		data, err := fr.gr.cache.Fetch(id)
 		if err != nil || len(data) != int(ce.ChunkSize) {
 			data = make([]byte, int(ce.ChunkSize))
@@ -64,9 +65,8 @@ func (fr *fileReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 }
 
 type stargzReader struct {
-	digest string
-	r      *stargz.Reader
-	cache  cache.BlobCache
+	r     *stargz.Reader
+	cache cache.BlobCache
 }
 
 func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
@@ -74,10 +74,15 @@ func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
 	if err != nil {
 		return nil, err
 	}
+	e, ok := gr.r.Lookup(name)
+	if !ok {
+		return nil, fmt.Errorf("failed to get TOCEntry %q", name)
+	}
 	return &fileReaderAt{
-		name: name,
-		gr:   gr,
-		ra:   sr,
+		name:   name,
+		digest: e.Digest,
+		gr:     gr,
+		ra:     sr,
 	}, nil
 }
 
@@ -114,6 +119,10 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader) (<-chan struct{}, erro
 			if err != nil {
 				break
 			}
+			fe, ok := gr.r.Lookup(h.Name)
+			if !ok {
+				break
+			}
 			payload, err := ioutil.ReadAll(tr)
 			if err != nil {
 				break
@@ -124,7 +133,7 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader) (<-chan struct{}, erro
 				if !ok {
 					break
 				}
-				gr.cache.Add(gr.genID(ce.Name, ce.ChunkOffset, ce.ChunkSize),
+				gr.cache.Add(gr.genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize),
 					payload[ce.ChunkOffset:ce.ChunkOffset+ce.ChunkSize])
 				nr += ce.ChunkSize
 			}
@@ -134,8 +143,7 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader) (<-chan struct{}, erro
 	return done, nil
 }
 
-func (gr *stargzReader) genID(name string, offset, size int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%s-%d-%d",
-		gr.digest, name, offset, size)))
+func (gr *stargzReader) genID(digest string, offset, size int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", digest, offset, size)))
 	return fmt.Sprintf("%x", sum)
 }

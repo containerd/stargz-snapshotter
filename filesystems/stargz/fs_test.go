@@ -312,9 +312,8 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 		t.Fatalf("failed to find root in stargz")
 	}
 	gr := &stargzReader{
-		digest: testStateLayerDigest,
-		r:      r,
-		cache:  &testCache{membuf: map[string]string{}, t: t},
+		r:     r,
+		cache: &testCache{membuf: map[string]string{}, t: t},
 	}
 	ur := &urlReaderAt{
 		url:       "http://example.com/dummy/blobs/sha256/deadbeef",
