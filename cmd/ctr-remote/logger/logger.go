@@ -48,7 +48,7 @@ func Mount(mountPoint string, tarfile io.ReaderAt, monitor Monitor) (func() erro
 		EntryTimeout:    time.Second,
 		Owner:           nil, // preserve owners.
 	})
-	server, err := fuse.NewServer(conn.RawFS(), mountPoint, &fuse.MountOptions{})
+	server, err := fuse.NewServer(conn.RawFS(), mountPoint, &fuse.MountOptions{AllowOther: true})
 	if err != nil {
 		return nil, fmt.Errorf("Error: Failed failed: %v", err)
 	}

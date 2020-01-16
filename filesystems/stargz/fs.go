@@ -230,7 +230,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		EntryTimeout:    time.Second,
 		Owner:           nil, // preserve owners.
 	})
-	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{})
+	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{AllowOther: true})
 	if err != nil {
 		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to make server")
 		return err
