@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"strings"
 
 	"github.com/google/crfs/stargz"
 	"github.com/ktock/remote-snapshotter/cache"
@@ -119,7 +120,7 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader) (<-chan struct{}, erro
 			if err != nil {
 				break
 			}
-			fe, ok := gr.r.Lookup(h.Name)
+			fe, ok := gr.r.Lookup(strings.TrimSuffix(h.Name, "/"))
 			if !ok {
 				break
 			}

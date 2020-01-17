@@ -161,12 +161,9 @@ func TestNodeRead(t *testing.T) {
 
 func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 	testName := "test"
-	r, err := stargz.Open(makeStargz(t, []regEntry{
-		{
-			name:     testName,
-			contents: string(contents),
-		},
-	}, chunkSize))
+	r, err := stargz.Open(buildStargz(t, tarOf(
+		regfile(testName, string(contents)),
+	), chunkSizeInfo(chunkSize)))
 	if err != nil {
 		t.Fatal("failed to make stargz")
 	}
@@ -280,19 +277,7 @@ func TestExistence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr, cancel := buildTarGz(t, tt.in)
-			defer cancel()
-			var stargzBuf bytes.Buffer
-			w := stargz.NewWriter(&stargzBuf)
-			if err := w.AppendTar(tr); err != nil {
-				t.Fatalf("Append: %v", err)
-			}
-			if err := w.Close(); err != nil {
-				t.Fatalf("Writer.Close: %v", err)
-			}
-			b := stargzBuf.Bytes()
-
-			r, err := stargz.Open(io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b))))
+			r, err := stargz.Open(buildStargz(t, tt.in))
 			if err != nil {
 				t.Fatalf("stargz.Open: %v", err)
 			}
@@ -337,7 +322,18 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 	return rootNode
 }
 
-func buildTarGz(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
+type chunkSizeInfo int
+
+func buildStargz(t *testing.T, ents []tarEntry, opts ...interface{}) *io.SectionReader {
+	var chunkSize chunkSizeInfo
+	for _, opt := range opts {
+		if v, ok := opt.(chunkSizeInfo); ok {
+			chunkSize = v
+		} else {
+			t.Fatalf("unsupported opt")
+		}
+	}
+
 	pr, pw := io.Pipe()
 	go func() {
 		tw := tar.NewWriter(pw)
@@ -353,7 +349,21 @@ func buildTarGz(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
 		}
 		pw.Close()
 	}()
-	return pr, func() { go pr.Close(); go pw.Close() }
+	defer func() { go pr.Close(); go pw.Close() }()
+
+	var stargzBuf bytes.Buffer
+	w := stargz.NewWriter(&stargzBuf)
+	if chunkSize > 0 {
+		w.ChunkSize = int(chunkSize)
+	}
+	if err := w.AppendTar(pr); err != nil {
+		t.Fatalf("failed to append tar file to stargz: %q", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close stargz writer: %q", err)
+	}
+	b := stargzBuf.Bytes()
+	return io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b)))
 }
 
 func tarOf(s ...tarEntry) []tarEntry { return s }

@@ -17,11 +17,9 @@
 package main
 
 import (
-	"archive/tar"
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"strings"
 	"sync"
 	"testing"
@@ -164,12 +162,9 @@ func (er *exceptSectionReader) ReadAt(p []byte, offset int64) (int, error) {
 
 func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) (*fileReaderAt, string) {
 	testName := "test"
-	r, err := stargz.Open(makeStargz(t, []regEntry{
-		{
-			name:     testName,
-			contents: string(contents),
-		},
-	}, chunkSize))
+	r, err := stargz.Open(buildStargz(t, tarOf(
+		regfile(testName, string(contents)),
+	), chunkSizeInfo(chunkSize)))
 	t.Logf("single entry stargz; contents=%q", string(contents))
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
@@ -194,46 +189,47 @@ func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) (*fileRead
 
 // Tests prefetch method of each stargz file.
 func TestPrefetch(t *testing.T) {
+	prefetchLandmarkFile := regfile(prefetchLandmark, string([]byte{1}))
 	tests := []struct {
 		name    string
-		in      []regEntry
+		in      []tarEntry
 		wantNum int      // number of chunks wanted in the cache
 		wants   []string // filenames to compare
 	}{
 		{
 			name: "no_prefetch",
-			in: []regEntry{
-				{
-					name:     "foo.txt",
-					contents: sampleData1,
-				},
-			},
+			in: tarOf(
+				regfile("foo.txt", sampleData1),
+			),
 			wantNum: 0,
 		},
 		{
 			name: "prefetch",
-			in: []regEntry{
-				{
-					name:     "foo.txt",
-					contents: sampleData1,
-				},
-				{
-					name:     prefetchLandmark,
-					contents: string([]byte{1}),
-				},
-				{
-					name:     "bar.txt",
-					contents: sampleData2,
-				},
-			},
+			in: tarOf(
+				regfile("foo.txt", sampleData1),
+				prefetchLandmarkFile,
+				regfile("bar.txt", sampleData2),
+			),
 			wantNum: chunkNum(sampleData1),
 			wants:   []string{"foo.txt"},
+		},
+		{
+			name: "with_dir",
+			in: tarOf(
+				dir("foo/"),
+				regfile("foo/bar.txt", sampleData1),
+				prefetchLandmarkFile,
+				dir("buz/"),
+				regfile("buz/buzbuz.txt", sampleData2),
+			),
+			wantNum: chunkNum(sampleData1),
+			wants:   []string{"foo/bar.txt"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sr := makeStargz(t, tt.in, sampleChunkSize)
+			sr := buildStargz(t, tt.in, chunkSizeInfo(sampleChunkSize))
 			r, err := stargz.Open(sr)
 			if err != nil {
 				t.Fatalf("Failed to open stargz file: %v", err)
@@ -301,16 +297,10 @@ func chunkNum(data string) int {
 // Tests stargzReader for failure cases.
 func TestFailStargzReader(t *testing.T) {
 	testFileName := "test"
-	stargzFile := makeStargz(t, []regEntry{
-		{
-			name:     testFileName,
-			contents: string(sampleData1),
-		},
-		{
-			name:     prefetchLandmark,
-			contents: string([]byte{1}),
-		},
-	}, sampleChunkSize)
+	stargzFile := buildStargz(t, tarOf(
+		regfile(testFileName, sampleData1),
+		regfile(prefetchLandmark, string([]byte{1})),
+	), chunkSizeInfo(sampleChunkSize))
 	br := &breakReaderAt{
 		ReaderAt: stargzFile,
 		success:  true,
@@ -399,62 +389,6 @@ func (nc *nopCache) Fetch(blobHash string) ([]byte, error) {
 }
 
 func (nc *nopCache) Add(blobHash string, p []byte) {}
-
-type regEntry struct {
-	name     string
-	contents string
-}
-
-func makeStargz(t *testing.T, ents []regEntry, chunkSize int64) *io.SectionReader {
-	// builds a sample stargz
-	tr, cancel := buildTar(t, ents)
-	defer cancel()
-	var stargzBuf bytes.Buffer
-	w := stargz.NewWriter(&stargzBuf)
-	w.ChunkSize = int(chunkSize)
-	if err := w.AppendTar(tr); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Writer.Close: %v", err)
-	}
-	stargzData, err := ioutil.ReadAll(&stargzBuf)
-	if err != nil {
-		t.Fatalf("Read all stargz data: %v", err)
-	}
-
-	// opens the sample stargz
-	return io.NewSectionReader(bytes.NewReader(stargzData), 0, int64(len(stargzData)))
-}
-
-func buildTar(t *testing.T, ents []regEntry) (r io.Reader, cancel func()) {
-	pr, pw := io.Pipe()
-	go func() {
-		tw := tar.NewWriter(pw)
-		for _, ent := range ents {
-			if err := tw.WriteHeader(&tar.Header{
-				Typeflag: tar.TypeReg,
-				Name:     ent.name,
-				Mode:     0644,
-				Size:     int64(len(ent.contents)),
-			}); err != nil {
-				t.Errorf("writing header to the input tar: %v", err)
-				pw.Close()
-				return
-			}
-			if _, err := tw.Write([]byte(ent.contents)); err != nil {
-				t.Errorf("writing contents to the input tar: %v", err)
-				pw.Close()
-				return
-			}
-		}
-		if err := tw.Close(); err != nil {
-			t.Errorf("closing write of input tar: %v", err)
-		}
-		pw.Close()
-	}()
-	return pr, func() { go pr.Close(); go pw.Close() }
-}
 
 type testCache struct {
 	membuf map[string]string
