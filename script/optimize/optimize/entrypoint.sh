@@ -14,6 +14,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+set -euo pipefail
+
 REGISTRY_HOST=registry-optimize
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
@@ -40,18 +42,8 @@ function retry {
     fi
 }
 
-function check {
-    if [ ${?} = 0 ] ; then
-        echo "Completed: ${1}"
-    else
-        echo "Failed: ${1}"
-        exit 1
-    fi
-}
-
 function prepare_context {
     CONTEXT_DIR=$(mktemp -d)
-    check "Prepare tempdir for context"
     cat <<EOF > "${CONTEXT_DIR}/Dockerfile"
 FROM scratch
 
@@ -86,51 +78,36 @@ EOF
     go build -ldflags '-extldflags "-static"' -o "${CONTEXT_DIR}/accessor" "${GOPATH}/src/test/test"
 }
 
-# Connect to the docker server
+echo "Connecting to the docker server..."
 retry ls /docker/client/cert.pem /docker/client/ca.pem
-check "Get certs"
 mkdir -p /root/.docker/ && cp /docker/client/* /root/.docker/
 retry docker version
-check "connect to docker"
 
-# Log into the registry
+echo "Logging into the registry..."
 cp /auth/certs/domain.crt /usr/local/share/ca-certificates
-check "Importing cert"
 update-ca-certificates
-check "Installing cert"
 retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
-check "Login to the registry"
 
-# Build sample image for testing
+echo "Building sample image for testing..."
 prepare_context
-check "Prepare context"
 
-# Prepare sample image
+echo "Preparing sample image..."
 tar zcv -C "${CONTEXT_DIR}" . \
     | docker build -t "${ORG_IMAGE_TAG}" - \
     && docker push "${ORG_IMAGE_TAG}"
-check "Build and push original image"
 
-# Optimize image
+echo "Optimizing image..."
 WORKING_DIR=$(mktemp -d)
-check "Prepare tempdir for workspace"
 GO111MODULE=off PREFIX=/tmp/out/ make clean && \
     GO111MODULE=off PREFIX=/tmp/out/ make ctr-remote && \
     /tmp/out/ctr-remote image optimize -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
-check "Optimize original image"
 
-# Validate optimized image
+echo "Downloading optimized image..."
 docker pull "${OPT_IMAGE_TAG}" && docker save "${OPT_IMAGE_TAG}" | tar xv -C "${WORKING_DIR}"
-check "Pull optimized image"
-
-# Model list of files in the optimized layer
 BASE_LAYER="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[0]')"
-check "Get path of base layer tarball"
 UPPER_LAYER="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[1]')"
-check "Get path of upper layer tarball"
 tar --list -f "${BASE_LAYER}" | tee "${WORKING_DIR}/base-got" && \
     tar --list -f "${UPPER_LAYER}" | tee "${WORKING_DIR}/upper-got"
-check "Get list of each layer"
 cat <<EOF > "${WORKING_DIR}/base-want"
 accessor
 a.txt
@@ -144,9 +121,9 @@ c.txt
 d.txt
 stargz.index.json
 EOF
+echo "Validating tarball contents of base layer..."
 diff "${WORKING_DIR}/base-got" "${WORKING_DIR}/base-want"
-check "Validate tarball contents of base layer"
+echo "Validating tarball contents of upper layer..."
 diff "${WORKING_DIR}/upper-got" "${WORKING_DIR}/upper-want"
-check "Validate tarball contents of upper layer"
 
 exit 0

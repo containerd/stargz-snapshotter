@@ -14,6 +14,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+set -euo pipefail
+
 REPO=$GOPATH/src/github.com/ktock/remote-snapshotter
 SNAPSHOT_NAME=remote
 CONTAINERD_CONFIG_DIR=/etc/containerd/
@@ -21,13 +23,6 @@ CONTAINERD_ROOT=/var/lib/containerd/
 REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/rsnapshotd/
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/rsnapshotd/
 REMOTE_SNAPSHOTTER_SOCKET=/run/rsnapshotd/rsnapshotd.sock
-
-function check {
-    if [ $? -ne 0 ] ; then
-        (>&2 echo "Failed: ${1}")
-        exit 1
-    fi
-}
 
 RETRYNUM=30
 RETRYINTERVAL=1
@@ -51,14 +46,19 @@ function retry {
 
 function kill_all {
     if [ "${1}" != "" ] ; then
-        ps aux | grep "${1}" | grep -v grep | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {}
+        ps aux | grep "${1}" | grep -v grep | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {} || true
     fi
 }
 
 function cleanup {
     rm -rf "${CONTAINERD_ROOT}"*
-    rm "${REMOTE_SNAPSHOTTER_SOCKET}"
-    ls -1d "${REMOTE_SNAPSHOTTER_ROOT}io.containerd.snapshotter.v1.${SNAPSHOT_NAME}/snapshots/"* | xargs -I{} echo "{}/fs" | xargs -I{} umount {}
+    if [ -f "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
+        rm "${REMOTE_SNAPSHOTTER_SOCKET}"
+    fi
+    if [ -d "${REMOTE_SNAPSHOTTER_ROOT}io.containerd.snapshotter.v1.${SNAPSHOT_NAME}/snapshots/" ] ; then 
+        find "${REMOTE_SNAPSHOTTER_ROOT}io.containerd.snapshotter.v1.remote/snapshots/" \
+             -maxdepth 1 -mindepth 1 -type d -exec umount "{}/fs" \;
+    fi
     rm -rf "${REMOTE_SNAPSHOTTER_ROOT}"*
 }
 
@@ -76,7 +76,6 @@ echo "preparing plugins..."
 ( cd "${REPO}" && PREFIX=/tmp/out/ make clean && \
       PREFIX=/tmp/out/ make -j2 && \
       PREFIX=/tmp/out/ make install )
-check "Preparing plugins"
 
 echo "running remote snaphsotter..."
 rsnapshotd --log-level=debug --address="${REMOTE_SNAPSHOTTER_SOCKET}" --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.rsnapshotd.toml" &
