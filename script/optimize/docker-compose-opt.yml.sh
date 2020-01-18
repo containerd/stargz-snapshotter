@@ -14,6 +14,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+set -euo pipefail
+
 REGISTRY_HOST=registry-optimize
 REPO_PATH=/go/src/github.com/ktock/remote-snapshotter
 

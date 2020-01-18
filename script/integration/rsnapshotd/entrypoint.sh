@@ -14,18 +14,11 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-REGISTRY_HOST=registry_integration
+set -euo pipefail
+
+REGISTRY_HOST=registry-integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
-
-function check {
-    if [ ${?} = 0 ] ; then
-        echo "Completed: ${1}"
-    else
-        echo "Failed: ${1}"
-        exit 1
-    fi
-}
 
 RETRYNUM=100
 RETRYINTERVAL=1
@@ -47,24 +40,18 @@ function retry {
     fi
 }
 
-# Log into the registry
+echo "Logging into the registry..."
 cp /auth/certs/domain.crt /usr/local/share/ca-certificates
-check "Importing cert"
-
 update-ca-certificates
-check "Installing cert"
-
 retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
-check "Login to the registry"
 
-# Install remote snapshotter and filesystem plugins
+echo "Installing remote snapshotter and filesystem plugins..."
 mkdir -p /tmp/out
 GO111MODULE=off PREFIX=/tmp/out/ make clean && \
     GO111MODULE=off PREFIX=/tmp/out/ make -j2 && \
     GO111MODULE=off PREFIX=/tmp/out/ make install
-check "Installing remote snapshotter"
 
-# Run remote snapshotter
+echo "Running remote snapshotter..."
 mkdir -p /etc/rsnapshotd && \
     cp ./script/integration/rsnapshotd/config.stargz.toml /etc/rsnapshotd/config.stargz.toml
 rsnapshotd --log-level=debug --config=/etc/rsnapshotd/config.stargz.toml
