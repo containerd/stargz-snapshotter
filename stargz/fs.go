@@ -28,7 +28,7 @@
 // But in the near future, we intend to integrate it with CRFS.
 //
 
-package main
+package stargz
 
 import (
 	"bytes"
@@ -50,7 +50,6 @@ import (
 	"unsafe"
 
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/plugin"
 	"github.com/containerd/containerd/reference/docker"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -59,48 +58,35 @@ import (
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"github.com/ktock/remote-snapshotter/cache"
-	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
-	"github.com/ktock/remote-snapshotter/filesystems/stargz/handler"
+	snbase "github.com/ktock/remote-snapshotter/snapshot"
+	"github.com/ktock/remote-snapshotter/stargz/handler"
 	"golang.org/x/sys/unix"
 )
 
 const (
-	blockSize             = 512
+	blockSize          = 512
+	directoryCacheType = "directory"
+	memoryCacheType    = "memory"
+	whiteoutPrefix     = ".wh."
+	whiteoutOpaqueDir  = whiteoutPrefix + whiteoutPrefix + ".opq"
+	opaqueXattr        = "trusted.overlay.opaque"
+	opaqueXattrValue   = "y"
+	prefetchLandmark   = ".prefetch.landmark"
+	stateDirName       = ".remote-snapshotter"
+
 	defaultCacheChunkSize = 50000
-	directoryCacheType    = "directory"
-	memoryCacheType       = "memory"
-	whiteoutPrefix        = ".wh."
-	whiteoutOpaqueDir     = whiteoutPrefix + whiteoutPrefix + ".opq"
-	opaqueXattr           = "trusted.overlay.opaque"
-	opaqueXattrValue      = "y"
-	prefetchLandmark      = ".prefetch.landmark"
-	stateDirName          = ".remote-snapshotter"
+	defaultLRUCacheEntry  = 5000
 )
 
 type Config struct {
-	Insecure       []string `toml:"insecure"`
-	CacheChunkSize int64    `toml:"cache_chunk_size"`
-	NoPrefetch     bool     `toml:"noprefetch"`
-	LRUCacheEntry  int      `toml:"lru_max_entry"`
-	HTTPCacheType  string   `toml:"http_cache_type"`
-	FSCacheType    string   `toml:"filesystem_cache_type"`
-}
+	CacheChunkSize int64  `toml:"cache_chunk_size"`
+	LRUCacheEntry  int    `toml:"lru_max_entry"`
+	HTTPCacheType  string `toml:"http_cache_type"`
+	FSCacheType    string `toml:"filesystem_cache_type"`
 
-func init() {
-	plugin.Register(&plugin.Registration{
-		Type:   fsplugin.RemoteFileSystemPlugin,
-		Config: &Config{},
-		ID:     "stargz",
-		InitFn: func(ic *plugin.InitContext) (interface{}, error) {
-			config, ok := ic.Config.(*Config)
-			if !ok {
-				return nil, fmt.Errorf("invalid stargz configuration")
-			}
-			ic.Meta.Exports["root"] = ic.Root
-
-			return NewFilesystem(ic.Root, config)
-		},
-	})
+	Insecure   []string `toml:"insecure"`
+	NoPrefetch bool     `toml:"noprefetch"`
+	Debug      bool     `toml:"debug"`
 }
 
 // getCache gets a cache corresponding to specified type.
@@ -115,23 +101,28 @@ func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
 	}
 }
 
-func NewFilesystem(root string, config *Config) (fsplugin.FileSystem, error) {
+func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 	var err error
 	fs := &filesystem{
-		insecure:       config.Insecure,
 		cacheChunkSize: config.CacheChunkSize,
 		noprefetch:     config.NoPrefetch,
+		insecure:       config.Insecure,
 		transport:      http.DefaultTransport,
 		conn:           make(map[string]*connection),
+		debug:          config.Debug,
 	}
 	if fs.cacheChunkSize == 0 {
 		fs.cacheChunkSize = defaultCacheChunkSize
 	}
-	fs.httpCache, err = getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"), config.LRUCacheEntry)
+	maxEntry := config.LRUCacheEntry
+	if maxEntry == 0 {
+		maxEntry = defaultLRUCacheEntry
+	}
+	fs.httpCache, err = getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"), maxEntry)
 	if err != nil {
 		return nil, err
 	}
-	fs.fsCache, err = getCache(config.FSCacheType, filepath.Join(root, "fscache"), config.LRUCacheEntry)
+	fs.fsCache, err = getCache(config.FSCacheType, filepath.Join(root, "fscache"), maxEntry)
 	if err != nil {
 		return nil, err
 	}
@@ -140,14 +131,15 @@ func NewFilesystem(root string, config *Config) (fsplugin.FileSystem, error) {
 }
 
 type filesystem struct {
-	insecure       []string
 	cacheChunkSize int64
-	noprefetch     bool
 	httpCache      cache.BlobCache
 	fsCache        cache.BlobCache
+	noprefetch     bool
+	insecure       []string
 	transport      http.RoundTripper
 	conn           map[string]*connection
 	mu             sync.Mutex
+	debug          bool
 }
 
 type connection struct {
@@ -235,7 +227,8 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to make server")
 		return err
 	}
-	// server.SetDebug(true) // TODO: make configurable with /etc/containerd/config.toml
+
+	server.SetDebug(fs.debug)
 	go server.Serve()
 	return server.WaitMount()
 }

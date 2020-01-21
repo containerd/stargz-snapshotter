@@ -18,8 +18,8 @@ services:
     - GOPATH=/go
     tmpfs:
     - /var/lib/containerd
-    - /var/lib/rsnapshotd
-    - /run/rsnapshotd
+    - /var/lib/containerd-stargz-grpc
+    - /run/containerd-stargz-grpc
     - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse

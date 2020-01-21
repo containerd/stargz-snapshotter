@@ -1,4 +1,4 @@
 [proxy_plugins]
   [proxy_plugins.remote]
     type = "snapshot"
-    address = "/run/rsnapshotd/rsnapshotd.sock"
+    address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"

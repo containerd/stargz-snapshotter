@@ -64,15 +64,15 @@ function reboot_containerd {
     retry ctr version
 }
 
-RSNAPSHOTD_ROOT=/var/lib/rsnapshotd/
+SSNAPSHOTD_ROOT=/var/lib/containerd-stargz-grpc/
 function cleanup {
     ORG_EXIT_CODE="${1}"
-    echo "Cleaning up /var/lib/rsnapshotd..."
-    if [ -d "${RSNAPSHOTD_ROOT}io.containerd.snapshotter.v1.remote/snapshots/" ] ; then 
-        find "${RSNAPSHOTD_ROOT}io.containerd.snapshotter.v1.remote/snapshots/" \
+    echo "Cleaning up /var/lib/containerd-stargz-grpc..."
+    if [ -d "${SSNAPSHOTD_ROOT}snapshotter/snapshots/" ] ; then 
+        find "${SSNAPSHOTD_ROOT}snapshotter/snapshots/" \
              -maxdepth 1 -mindepth 1 -type d -exec umount "{}/fs" \;
     fi
-    rm -rf "${RSNAPSHOTD_ROOT}"*
+    rm -rf "${SSNAPSHOTD_ROOT}"*
     echo "Exit with code: ${ORG_EXIT_CODE}"
     exit "${ORG_EXIT_CODE}"
 }
@@ -91,13 +91,13 @@ GO111MODULE=off PREFIX=/tmp/ctr/ make clean && \
     install /tmp/ctr/ctr-remote /usr/local/bin && \
     ctr-remote image optimize --stargz-only "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
 
-echo "Waiting for booting remote snapshotter..."
-RETRYNUM=600 retry ls /run/rsnapshotd/rsnapshotd.sock
+echo "Waiting for booting stargz snapshotter..."
+RETRYNUM=600 retry ls /run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 mkdir -p /etc/containerd && \
     cp ./script/integration/containerd/config.toml /etc/containerd/config.toml
 
 ############
-# Tests for remote snapshotter
+# Tests for stargz snapshotter
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
 NOTFOUND=false
 for PLUGIN in ${PLUGINS[@]}; do
@@ -125,7 +125,7 @@ ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000
 ctr-remote run --rm "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr_normal_unstargz.tar
 
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
-echo "Getting normal image with remote snapshotter..."
+echo "Getting normal image with stargz snapshotter..."
 ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:18.04"
 ctr-remote run --rm --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr_remote_unstargz.tar
 
@@ -136,7 +136,7 @@ ctr-remote run --rm "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr > /us
 
 PULL_LOG=$(mktemp)
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
-echo "Getting stargz image with remote snapshotter..."
+echo "Getting stargz image with stargz snapshotter..."
 ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:stargz" | tee "${PULL_LOG}"
 if ! isServedAsRemoteSnapshot "${PULL_LOG}" ; then
     echo "Failed to serve all layers as remote snapshots"
@@ -152,10 +152,10 @@ tar -xf /usr_remote_unstargz.tar -C /usr_remote_unstargz
 tar -xf /usr_normal_stargz.tar -C /usr_normal_stargz
 tar -xf /usr_remote_stargz.tar -C /usr_remote_stargz
 
-echo "Diffing bitween two root filesystems(normal vs remote snapshotter, normal rootfs)"
+echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, normal rootfs)"
 diff --no-dereference -qr /usr_normal_unstargz/ /usr_remote_unstargz/
 
-echo "Diffing bitween two root filesystems(normal vs remote snapshotter, stargzified rootfs)"
+echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, stargzified rootfs)"
 diff --no-dereference -qr /usr_normal_stargz/ /usr_remote_stargz/
 
 exit 0

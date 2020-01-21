@@ -45,13 +45,13 @@ cp /auth/certs/domain.crt /usr/local/share/ca-certificates
 update-ca-certificates
 retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 
-echo "Installing remote snapshotter and filesystem plugins..."
+echo "Installing remote snapshotter..."
 mkdir -p /tmp/out
 GO111MODULE=off PREFIX=/tmp/out/ make clean && \
     GO111MODULE=off PREFIX=/tmp/out/ make -j2 && \
     GO111MODULE=off PREFIX=/tmp/out/ make install
 
 echo "Running remote snapshotter..."
-mkdir -p /etc/rsnapshotd && \
-    cp ./script/integration/rsnapshotd/config.stargz.toml /etc/rsnapshotd/config.stargz.toml
-rsnapshotd --log-level=debug --config=/etc/rsnapshotd/config.stargz.toml
+mkdir -p /etc/containerd-stargz-grpc && \
+    cp ./script/integration/containerd-stargz-grpc/config.stargz.toml /etc/containerd-stargz-grpc/config.stargz.toml
+containerd-stargz-grpc --log-level=debug --config=/etc/containerd-stargz-grpc/config.stargz.toml
