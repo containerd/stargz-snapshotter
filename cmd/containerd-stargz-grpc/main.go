@@ -30,8 +30,8 @@ import (
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/log"
-	snbase "github.com/ktock/remote-snapshotter/snapshot"
-	stargz "github.com/ktock/remote-snapshotter/stargz"
+	snbase "github.com/ktock/stargz-snapshotter/snapshot"
+	stargz "github.com/ktock/stargz-snapshotter/stargz"
 	"github.com/sirupsen/logrus"
 )
 
@@ -42,7 +42,7 @@ const (
 )
 
 var (
-	address    = flag.String("address", defaultAddress, "address for remote-snapshotter's GRPC server")
+	address    = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
 	configPath = flag.String("config", "", "path to the configuration file")
 	logLevel   = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
 	rootDir    = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")

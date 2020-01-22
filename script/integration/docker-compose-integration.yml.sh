@@ -46,7 +46,7 @@ services:
       dockerfile: Dockerfile
     container_name: testenv_integration
     privileged: true
-    working_dir: /go/src/github.com/ktock/remote-snapshotter
+    working_dir: /go/src/github.com/ktock/stargz-snapshotter
     entrypoint: ./script/integration/containerd/entrypoint.sh
     environment:
     - GO111MODULE=off
@@ -59,7 +59,7 @@ services:
     - /var/lib/containerd
     - /tmp:exec,mode=777
     volumes:
-    - "${REPO}:/go/src/github.com/ktock/remote-snapshotter:ro"
+    - "${REPO}:/go/src/github.com/ktock/stargz-snapshotter:ro"
     - ${AUTH}:/auth
     - "${SS_ROOT_DIR}:/var/lib/containerd-stargz-grpc:rshared"
     - ssstate:/run/containerd-stargz-grpc
@@ -84,7 +84,7 @@ services:
       dockerfile: Dockerfile
     container_name: remote_snapshotter_integration
     privileged: true
-    working_dir: /go/src/github.com/ktock/remote-snapshotter
+    working_dir: /go/src/github.com/ktock/stargz-snapshotter
     entrypoint: ./script/integration/containerd-stargz-grpc/entrypoint.sh
     environment:
     - GO111MODULE=off
@@ -96,7 +96,7 @@ services:
     tmpfs:
     - /tmp:exec,mode=777
     volumes:
-    - "${REPO}:/go/src/github.com/ktock/remote-snapshotter:ro"
+    - "${REPO}:/go/src/github.com/ktock/stargz-snapshotter:ro"
     - "${AUTH}:/auth"
     - "${SS_ROOT_DIR}:/var/lib/containerd-stargz-grpc:rshared"
     - ssstate:/run/containerd-stargz-grpc

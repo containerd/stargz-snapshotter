@@ -57,9 +57,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
-	"github.com/ktock/remote-snapshotter/cache"
-	snbase "github.com/ktock/remote-snapshotter/snapshot"
-	"github.com/ktock/remote-snapshotter/stargz/handler"
+	"github.com/ktock/stargz-snapshotter/cache"
+	snbase "github.com/ktock/stargz-snapshotter/snapshot"
+	"github.com/ktock/stargz-snapshotter/stargz/handler"
 	"golang.org/x/sys/unix"
 )
 
@@ -72,7 +72,7 @@ const (
 	opaqueXattr        = "trusted.overlay.opaque"
 	opaqueXattrValue   = "y"
 	prefetchLandmark   = ".prefetch.landmark"
-	stateDirName       = ".remote-snapshotter"
+	stateDirName       = ".stargz-snapshotter"
 
 	defaultCacheChunkSize = 50000
 	defaultLRUCacheEntry  = 5000
