@@ -24,7 +24,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/ktock/remote-snapshotter/cmd/ctr-remote/util"
+	"github.com/ktock/stargz-snapshotter/cmd/ctr-remote/util"
 )
 
 const (

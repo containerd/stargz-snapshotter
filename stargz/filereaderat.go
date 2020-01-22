@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package main
+package stargz
 
 import (
 	"archive/tar"
@@ -27,7 +27,7 @@ import (
 	"strings"
 
 	"github.com/google/crfs/stargz"
-	"github.com/ktock/remote-snapshotter/cache"
+	"github.com/ktock/stargz-snapshotter/cache"
 )
 
 type fileReaderAt struct {

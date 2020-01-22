@@ -25,7 +25,7 @@ import (
 	"github.com/containerd/containerd/cmd/ctr/commands/content"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
-	stargz "github.com/ktock/remote-snapshotter/filesystems/stargz/handler"
+	stargz "github.com/ktock/stargz-snapshotter/stargz/handler"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli"
 )

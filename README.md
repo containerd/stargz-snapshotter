@@ -1,8 +1,8 @@
-# Remote Snapshotter
+# Stargz Snapshotter
 
-[![Tests Status](https://github.com/ktock/remote-snapshotter/workflows/Tests/badge.svg)](https://github.com/ktock/remote-snapshotter/actions)
+[![Tests Status](https://github.com/ktock/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/ktock/stargz-snapshotter/actions)
 
-Pulling image is one of the major performance bottlenecks in container workload. Research shows that time for pulling accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Remote snapshotter* is a solution discussed in containerd community and this implementation is based on it.
+Pulling image is one of the major performance bottlenecks in container workload. Research shows that time for pulling accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Remote snapshotter* is a solution discussed in containerd community. *Stargz Snapshotter* is an implementation of the remote snapshotter which aims to standard-compatible remote snapshots leveraging [stargz image format by CRFS](https://github.com/google/crfs).
 
 Related discussion of the snapshotter in containerd community:
 - [Support remote snapshotter to speed up image pulling#3731@containerd](https://github.com/containerd/containerd/issues/3731)
@@ -24,20 +24,18 @@ real	0m1.231s
 user	0m0.112s
 sys	0m0.008s
 ```
-To achive that we supports following [filesystems](filesystems):
-- Filesystem using [stargz formatted image introduced by CRFS](https://github.com/google/crfs), which is compatible with current docker image format.
 
 ## Demo
 
-You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr-remote) for a quick tasting. For an overview of remote-snapshotter, please check [this doc](./overview.md).
+You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr-remote) for a quick tasting. For an overview of the snapshotter, please check [this doc](./overview.md).
 
 __NOTICE:__
 
-- Put this repo on your GOPATH(${GOPATH}/src/github.com/ktock/remote-snapshotter).
+- Put this repo on your `GOPATH`(`${GOPATH}/src/github.com/ktock/stargz-snapshotter`).
 
 ### Build and run the environment
 ```
-$ cd ${GOPATH}/src/github.com/ktock/remote-snapshotter/script/demo
+$ cd ${GOPATH}/src/github.com/ktock/stargz-snapshotter/script/demo
 $ docker-compose build --build-arg HTTP_PROXY=$HTTP_PROXY \
                        --build-arg HTTPS_PROXY=$HTTP_PROXY \
                        --build-arg http_proxy=$HTTP_PROXY \
@@ -50,14 +48,14 @@ $ docker exec -it containerd_demo /bin/bash
 
 ### Prepare stargz-formatted image on a registry
 
-Use `optimize` subcommand to convert the image into stargz-formatted one as well as optimize the image for your workload. In this example, we optimize the image aming to speed up execution of `ls` command on `bash`.
+To make and push a stargz image, you can use CRFS-official `stargzify` or our `ctr-remote` which has additional optimization functionality. In this example, we use `ctr-remote` to convert the image into stargz-formatted one as well as optimize the image for your workload. We optimize the image aming to speed up the execution of `ls` command on `bash`.
 ```
 # ctr-remote image optimize --plain-http --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "ls" ]' \
              ubuntu:18.04 http://registry2:5000/ubuntu:18.04
 ```
 The converted image is still __compatible with a normal docker image__ so you can still pull and run it with normal tools(e.g. docker).
 
-### Run the container with remote snapshots
+### Run the container with stargz snapshots
 Layer downloads don't occur. So this "pull" operation ends soon.
 ```
 # time ctr-remote images rpull --plain-http registry2:5000/ubuntu:18.04
@@ -79,17 +77,17 @@ You can authenticate yourself with normal operations (e.g. `docker login` comman
 
 In the example showed above, you can pull images from your private repository on the DockerHub:
 ```
-# docker login
+# docker login registry-1.docker.io
 (Enter username and password)
-# ctr-remote image rpull --user <username>:<password> index.docker.io/<your-repository>/ubuntu:18.04
+# ctr-remote image rpull --user <username>:<password> docker.io/<your-repository>/ubuntu:18.04
 ```
 The `--user` option is just for containerd's side which doesn't recognize `~/.docker/config.json`.
 We doesn't use credentials specified by this option but uses `~/.docker/config.json` instead.
 If you have no right to access the repository with credentials stored in `~/.docker/config.json`, this pull optration fallbacks to the normal one(i.e. overlayfs).
 
-## Filesystem integration
+## Make your remote snapshotter
 
-Filesystems can be easily integrated with this snapshotter and containerd by implementing a simple interface defined [here](filesystems/plugin.go) without thinking about remote snapshotter protocol. See [the existing implementation](filesystems/stargz/fs.go).
+It is easy for you to implement your remote snapshotter using [our general snapshotter package](/snapshot) without considering the protocol between that and containerd. You can configure the remote snapshotter with your `FileSystem` structure which you want to use as a backend filesystem. [Our snapshotter command](/cmd/containerd-stargz-grpc/main.go) is a good example for the integration.
 
 # TODO
 

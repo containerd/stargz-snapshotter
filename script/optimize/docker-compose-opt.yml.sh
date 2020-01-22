@@ -17,7 +17,7 @@
 set -euo pipefail
 
 REGISTRY_HOST=registry-optimize
-REPO_PATH=/go/src/github.com/ktock/remote-snapshotter
+REPO_PATH=/go/src/github.com/ktock/stargz-snapshotter
 
 if [ "${1}" == "" ]; then
     echo "Repository path must be provided."

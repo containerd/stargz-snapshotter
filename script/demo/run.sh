@@ -16,13 +16,13 @@
 
 set -euo pipefail
 
-REPO=$GOPATH/src/github.com/ktock/remote-snapshotter
+REPO=$GOPATH/src/github.com/ktock/stargz-snapshotter
 SNAPSHOT_NAME=remote
 CONTAINERD_CONFIG_DIR=/etc/containerd/
 CONTAINERD_ROOT=/var/lib/containerd/
-REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/rsnapshotd/
-REMOTE_SNAPSHOTTER_ROOT=/var/lib/rsnapshotd/
-REMOTE_SNAPSHOTTER_SOCKET=/run/rsnapshotd/rsnapshotd.sock
+REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/containerd-stargz-grpc/
+REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
+REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
 RETRYNUM=30
 RETRYINTERVAL=1
@@ -55,30 +55,32 @@ function cleanup {
     if [ -f "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
         rm "${REMOTE_SNAPSHOTTER_SOCKET}"
     fi
-    if [ -d "${REMOTE_SNAPSHOTTER_ROOT}io.containerd.snapshotter.v1.${SNAPSHOT_NAME}/snapshots/" ] ; then 
-        find "${REMOTE_SNAPSHOTTER_ROOT}io.containerd.snapshotter.v1.remote/snapshots/" \
+    if [ -d "${REMOTE_SNAPSHOTTER_ROOT}snapshotter/snapshots/" ] ; then 
+        find "${REMOTE_SNAPSHOTTER_ROOT}snapshotter/snapshots/" \
              -maxdepth 1 -mindepth 1 -type d -exec umount "{}/fs" \;
     fi
     rm -rf "${REMOTE_SNAPSHOTTER_ROOT}"*
 }
 
 echo "copying config from repo..."
-mkdir -p /etc/containerd /etc/rsnapshotd && \
+mkdir -p /etc/containerd /etc/containerd-stargz-grpc && \
     cp "${REPO}/script/demo/config.containerd.toml" "${CONTAINERD_CONFIG_DIR}" && \
-    cp "${REPO}/script/demo/config.rsnapshotd.toml" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}"
+    cp "${REPO}/script/demo/config.stargz.toml" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}"
 
 echo "cleaning up the environment..."
 kill_all "containerd"
-kill_all "rsnapshotd"
+kill_all "containerd-stargz-grpc"
 cleanup
 
-echo "preparing plugins..."
+echo "preparing commands..."
 ( cd "${REPO}" && PREFIX=/tmp/out/ make clean && \
       PREFIX=/tmp/out/ make -j2 && \
       PREFIX=/tmp/out/ make install )
 
 echo "running remote snaphsotter..."
-rsnapshotd --log-level=debug --address="${REMOTE_SNAPSHOTTER_SOCKET}" --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.rsnapshotd.toml" &
+containerd-stargz-grpc --log-level=debug \
+                       --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
+                       --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.stargz.toml" &
 retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
 
 echo "running containerd..."

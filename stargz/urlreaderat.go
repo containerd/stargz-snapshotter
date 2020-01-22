@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package main
+package stargz
 
 import (
 	"context"
@@ -31,7 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ktock/remote-snapshotter/cache"
+	"github.com/ktock/stargz-snapshotter/cache"
 )
 
 var contentRangeRegexp = regexp.MustCompile(`bytes ([0-9]+)-([0-9]+)/([0-9]+|\\*)`)

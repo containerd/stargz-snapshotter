@@ -6,7 +6,7 @@ services:
     privileged: true
     stdin_open: true
     tty: true
-    working_dir: /go/src/github.com/ktock/remote-snapshotter
+    working_dir: /go/src/github.com/ktock/stargz-snapshotter
     entrypoint: /bin/bash
     environment:
     - GO111MODULE=off
@@ -18,12 +18,12 @@ services:
     - GOPATH=/go
     tmpfs:
     - /var/lib/containerd
-    - /var/lib/rsnapshotd
-    - /run/rsnapshotd
+    - /var/lib/containerd-stargz-grpc
+    - /run/containerd-stargz-grpc
     - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse
-    - "${GOPATH}/src/github.com/ktock/remote-snapshotter:/go/src/github.com/ktock/remote-snapshotter:ro"
+    - "${GOPATH}/src/github.com/ktock/stargz-snapshotter:/go/src/github.com/ktock/stargz-snapshotter:ro"
   registry2:
     image: registry:2
     container_name: registry2

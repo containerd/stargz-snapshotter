@@ -14,30 +14,24 @@
 
 
 # Base path used to install.
-PLUGIN_DESTDIR ?= /opt/rsnapshotd
 CMD_DESTDIR ?= /usr/local
 GO111MODULE_VALUE=off
 PREFIX ?= out/
 
-PLUGINS=stargzfs-linux-amd64.so
-CMD=rsnapshotd ctr-remote
+CMD=containerd-stargz-grpc ctr-remote
 
-PLUGIN_BINARIES=$(addprefix $(PREFIX),$(PLUGINS))
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
 
 .PHONY: check build
 
 all: build
 
-build: $(PLUGINS) $(CMD)
+build: $(CMD)
 
 FORCE:
 
-stargzfs-linux-amd64.so: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -buildmode=plugin -o $(PREFIX)$@ -v ./filesystems/stargz
-
-rsnapshotd: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/rsnapshotd
+containerd-stargz-grpc: FORCE
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/containerd-stargz-grpc
 
 ctr-remote: FORCE
 	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/ctr-remote
@@ -57,19 +51,15 @@ install-check-tools:
 
 install:
 	@echo "$@"
-	@mkdir -p $(PLUGIN_DESTDIR)/plugins
 	@mkdir -p $(CMD_DESTDIR)/bin
-	@install $(PLUGIN_BINARIES) $(PLUGIN_DESTDIR)/plugins
 	@install $(CMD_BINARIES) $(CMD_DESTDIR)/bin
 
 uninstall:
 	@echo "$@"
-	@rm -f $(addprefix $(PLUGIN_DESTDIR)/plugins/,$(notdir $(PLUGIN_BINARIES)))
 	@rm -f $(addprefix $(CMD_DESTDIR)/bin/,$(notdir $(CMD_BINARIES)))
 
 clean:
 	@echo "$@"
-	@rm -f $(PLUGIN_BINARIES)
 	@rm -f $(CMD_BINARIES)
 
 test:

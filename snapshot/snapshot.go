@@ -22,100 +22,33 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/plugin"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
 	"github.com/pkg/errors"
-
-	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
 )
 
 const (
 	targetSnapshotLabel = "containerd.io/snapshot.ref"
-	filesystemIDLabel   = "containerd.io/snapshot/filesystem.id"
+	remoteLabel         = "containerd.io/snapshot/remote"
 )
 
-type Config struct {
-	// FileSystems config option enables us to specify filesystems that this
-	// snapshotter recognizes and the priority of these filesystems. The first
-	// element of the slice has the highest priority.
-	FileSystems []string `toml:"filesystems"`
-}
-
-func init() {
-	plugin.Register(&plugin.Registration{
-		Type:   plugin.SnapshotPlugin,
-		ID:     "remote",
-		Config: &Config{},
-
-		// We use RemoteFileSystemPlugin to mount unpacked remote layers
-		// as remote snapshots.
-		// See "/filesystems/plugin.go" in this repo.
-		Requires: []plugin.Type{
-			fsplugin.RemoteFileSystemPlugin,
-		},
-		InitFn: func(ic *plugin.InitContext) (interface{}, error) {
-			ic.Meta.Platforms = append(ic.Meta.Platforms, platforms.DefaultSpec())
-			ic.Meta.Exports["root"] = ic.Root
-			ctx := ic.Context
-			if ctx == nil {
-				ctx = log.WithLogger(context.Background(), log.L)
-			}
-
-			config, ok := ic.Config.(*Config)
-			if !ok {
-				return nil, fmt.Errorf("invalid remote snapshotter configuration")
-			}
-
-			// register all FileSystems which we use to mount unpacked
-			// remote layers as remote snapshots.
-			fsMap := make(map[string]fsplugin.FileSystem)
-			var filesystems []string
-			if ps, err := ic.GetByType(fsplugin.RemoteFileSystemPlugin); ps != nil && err == nil {
-				for id, p := range ps {
-					i, err := p.Instance()
-					if err != nil {
-						log.G(ctx).WithError(err).Warnf("failed to initialize filesystem plugin %q", id)
-						continue
-					}
-					f, ok := i.(fsplugin.FileSystem)
-					if !ok {
-						log.G(ctx).WithError(err).Warnf("filesystem plugin %q has invalid API", id)
-						continue
-					}
-					fsMap[id] = f
-					filesystems = append(filesystems, id)
-				}
-			}
-
-			var fsChain []fsplugin.FileSystem
-			if config.FileSystems != nil {
-				filesystems = config.FileSystems
-			}
-			if len(filesystems) == 0 {
-				return nil, errors.New("no filesystem plugin found, check the installation")
-			}
-			for prio, id := range filesystems {
-				log.G(ctx).WithField("priority", prio).Infof("Registering filesystem plugin %q...", id)
-				f, ok := fsMap[id]
-				if !ok {
-					return nil, fmt.Errorf("required filesystem %q not found", id)
-				}
-				fsChain = append(fsChain, f)
-			}
-
-			return NewSnapshotter(ctx, ic.Root, fsChain, AsynchronousRemove)
-		},
-	})
+// FileSystem is a backing filesystem abstraction.
+//
+// Mount() tries to mount a remote snapshot to the specified mount point
+// directory. If succeed, the mountpoint directory will be treated as a layer
+// snapshot.
+// Check() is called to check the connectibity of the existing layer snapshot
+// every time the layer is used by containerd.
+type FileSystem interface {
+	Mount(ctx context.Context, mountpoint string, labels map[string]string) error
+	Check(ctx context.Context, mountpoint string) error
 }
 
 // SnapshotterConfig is used to configure the remote snapshotter instance
@@ -141,15 +74,19 @@ type snapshotter struct {
 	ms          *storage.MetaStore
 	asyncRemove bool
 
-	// fsChain is filesystems that this snapshotter recognizes.
-	fsChain []fsplugin.FileSystem
+	// fs is a filesystem that this snapshotter recognizes.
+	fs FileSystem
 }
 
 // NewSnapshotter returns a Snapshotter which can use unpacked remote layers
 // as snapshots. This is implemented based on the overlayfs snapshotter, so
 // diffs are stored under the provided root and a metadata file is stored under
 // the root as same as overlayfs snapshotter.
-func NewSnapshotter(ctx context.Context, root string, fsChain []fsplugin.FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
+func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
+	if targetFs == nil {
+		return nil, fmt.Errorf("Specify filesystem to use")
+	}
+
 	var config SnapshotterConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -181,7 +118,7 @@ func NewSnapshotter(ctx context.Context, root string, fsChain []fsplugin.FileSys
 		root:        root,
 		ms:          ms,
 		asyncRemove: config.asyncRemove,
-		fsChain:     fsChain,
+		fs:          targetFs,
 	}, nil
 }
 
@@ -273,14 +210,13 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		}
 	}
 	if target, ok := base.Labels[targetSnapshotLabel]; ok {
-		fsid, err := o.prepareRemoteSnapshot(ctx, key, base.Labels)
-		if err != nil {
+		if err := o.prepareRemoteSnapshot(ctx, key, base.Labels); err != nil {
 			return m, nil // fallback to the normal behavior
 		}
 		if base.Labels == nil {
 			base.Labels = make(map[string]string)
 		}
-		base.Labels[filesystemIDLabel] = fmt.Sprintf("%d", fsid)
+		base.Labels[remoteLabel] = fmt.Sprintf("remote snapshot") // Mark this snapshot as remote
 		if err := o.Commit(ctx, target, key, append(opts, snapshots.WithLabels(base.Labels))...); err != nil {
 			return m, nil // fallback to the normal behavior
 		}
@@ -657,25 +593,22 @@ func (o *snapshotter) Close() error {
 
 // prepareRemoteSnapshot tries to prepare the snapshot as a remote snapshot
 // using filesystems registered in this snapshotter.
-func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, labels map[string]string) (fsid int, err error) {
+func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, labels map[string]string) error {
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
-		return -1, err
+		return err
 	}
 	defer t.Rollback()
 	id, _, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
-		return -1, err
+		return err
 	}
 
-	// Search a filesystem which can mount a remote snapshot for this layer.
-	for fsid, f := range o.fsChain {
-		if err := f.Mount(o.context, o.upperPath(id), labels); err == nil {
-			return fsid, nil
-		}
+	if err := o.fs.Mount(o.context, o.upperPath(id), labels); err != nil {
+		return err
 	}
 
-	return -1, errors.New("mountable remote layer not found")
+	return nil
 }
 
 // checkAvailability checks avaiability of the specified layer and all lower
@@ -699,32 +632,14 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 			return false
 		}
 	}
-	fsidLabel, ok := info.Labels[filesystemIDLabel]
-	if !ok {
+	if _, ok := info.Labels[remoteLabel]; !ok {
 		log.G(ctx).
 			WithField("key", key).
 			WithField("mount point", o.upperPath(id)).
 			Warn("layer is normal snapshot(overlayfs)")
 		return true // normal overlayfs layer
 	}
-	fsid, err := strconv.ParseInt(fsidLabel, 10, 64)
-	if err != nil {
-		log.G(ctx).WithError(err).
-			WithField("key", key).
-			WithField("mount point", o.upperPath(id)).
-			WithField("filesystem ID(label)", fsidLabel).
-			Warn("failed to parse filesystem ID")
-		return false
-	}
-	if fsid < 0 || fsid >= int64(len(o.fsChain)) {
-		log.G(ctx).WithError(err).
-			WithField("key", key).
-			WithField("mount point", o.upperPath(id)).
-			WithField("filesystem ID", fsid).
-			Warn("invalid filesystem ID")
-		return false
-	}
-	if err := o.fsChain[fsid].Check(o.context, o.upperPath(id)); err != nil {
+	if err := o.fs.Check(o.context, o.upperPath(id)); err != nil {
 		log.G(ctx).WithError(err).
 			WithField("key", key).
 			WithField("mount point", o.upperPath(id)).

@@ -26,33 +26,26 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/BurntSushi/toml"
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/plugin"
-	srvconfig "github.com/containerd/containerd/services/server/config"
-	snplugin "github.com/containerd/containerd/snapshots"
-	fsplugin "github.com/ktock/remote-snapshotter/filesystems"
-	_ "github.com/ktock/remote-snapshotter/snapshot"
+	snbase "github.com/ktock/stargz-snapshotter/snapshot"
+	stargz "github.com/ktock/stargz-snapshotter/stargz"
 	"github.com/sirupsen/logrus"
 )
 
 const (
-	defaultStateDir   = "/run/rsnapshotd"
-	defaultRootDir    = "/var/lib/rsnapshotd"
-	defaultConfigPath = "/etc/rsnapshotd/config.toml"
-	defaultAddress    = "/run/rsnapshotd/rsnapshotd.sock"
-	defaultPluginsDir = "/opt/rsnapshotd/plugins"
-	defaultLogLevel   = logrus.InfoLevel
+	defaultAddress  = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+	defaultLogLevel = logrus.InfoLevel
+	defaultRootDir  = "/var/lib/containerd-stargz-grpc"
 )
 
 var (
-	configPath = flag.String("config", defaultConfigPath, "path to the configuration file")
+	address    = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
+	configPath = flag.String("config", "", "path to the configuration file")
 	logLevel   = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
-	address    = flag.String("address", defaultAddress, "address for remote-snapshotter's GRPC server")
 	rootDir    = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
-	stateDir   = flag.String("state", defaultStateDir, "path to the state directory for this snapshotter")
-	pluginsDir = flag.String("plugins", defaultPluginsDir, "path to the plugins directory")
 )
 
 func main() {
@@ -67,63 +60,27 @@ func main() {
 		FullTimestamp:   true,
 	})
 
-	ctx := log.WithLogger(context.Background(), log.L)
-	config := &srvconfig.Config{
-		Version: 1,
-		Root:    *rootDir,
-		State:   *stateDir,
-	}
+	var (
+		ctx    = log.WithLogger(context.Background(), log.L)
+		config = &stargz.Config{}
+	)
+
+	// Get configuration from specified file
 	if *configPath != "" {
-		if err := srvconfig.LoadConfig(*configPath, config); err != nil {
+		if _, err := toml.DecodeFile(*configPath, &config); err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
 		}
 	}
-	var rs snplugin.Snapshotter
-	if *pluginsDir != "" {
-		if err := plugin.Load(*pluginsDir); err != nil {
-			log.G(ctx).WithError(err).Fatalf("failed to load plugin from %q", *pluginsDir)
-		}
-	}
-	plugins := plugin.Graph(func(r *plugin.Registration) bool {
-		if r.Type == fsplugin.RemoteFileSystemPlugin || r.ID == "remote" {
-			return false
-		}
-		return true
-	})
-	initialized := plugin.NewPluginSet()
-	for _, p := range plugins {
-		initContext := plugin.NewContext(
-			ctx,
-			p,
-			initialized,
-			config.Root,
-			config.State,
-		)
-		if p.Config != nil {
-			pc, err := config.Decode(p)
-			if err != nil {
-				log.G(ctx).WithError(err).Fatal("failed to parse config file")
-			}
-			initContext.Config = pc
-		}
-		result := p.Init(initContext)
-		if err := initialized.Add(result); err != nil {
-			log.G(ctx).WithError(err).Fatalf("failed to add plugin %q to plugin set", p.ID)
-		}
-		i, err := result.Instance()
-		if err != nil {
-			log.G(ctx).WithError(err).Fatalf("failed to load plugin %q", p.ID)
-		}
-		if sn, ok := i.(snplugin.Snapshotter); ok {
-			log.G(ctx).Infof("Registering snapshotter plugin %q...", p.ID)
-			rs = sn
-		}
-	}
 
-	if rs == nil {
-		log.G(ctx).Fatalf("failed to register snapshotter")
+	// Configure filesystem and snapshotter
+	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"), config)
+	if err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
 	}
-
+	rs, err := snbase.NewSnapshotter(ctx, filepath.Join(*rootDir, "snapshotter"), fs, snbase.AsynchronousRemove)
+	if err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
+	}
 	defer func() {
 		log.G(ctx).Debug("Closing the snapshotter")
 		rs.Close()
