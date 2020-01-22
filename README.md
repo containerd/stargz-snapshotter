@@ -65,7 +65,7 @@ fetching sha256:80026893... application/vnd.docker.container.image.v1+json
 real	0m0.176s
 user	0m0.025s
 sys	0m0.005s
-# ctr-remote run --rm -t --snapshotter=remote registry2:5000/ubuntu:18.04 test /bin/bash
+# ctr-remote run --rm -t --snapshotter=stargz registry2:5000/ubuntu:18.04 test /bin/bash
 root@8dab301bd68d:/# ls
 bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
 ```

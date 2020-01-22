@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-PLUGINS=(remote)
+PLUGIN=stargz
 REGISTRY_HOST=registry-integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
@@ -100,20 +100,14 @@ mkdir -p /etc/containerd && \
 # Tests for stargz snapshotter
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
 NOTFOUND=false
-for PLUGIN in ${PLUGINS[@]}; do
-    OK=$(ctr-remote plugins ls \
-             | grep io.containerd.snapshotter \
-             | sed -E 's/ +/ /g' \
-             | cut -d ' ' -f 2,4 \
-             | grep "${PLUGIN}" \
-             | cut -d ' ' -f 2)
-    if [ "${OK}" != "ok" ] ; then
-        echo "Plugin ${PLUGIN} not found" 1>&2
-        NOTFOUND=true
-    fi
-done
-
-if [ "${NOTFOUND}" != "false" ] ; then
+OK=$(ctr-remote plugins ls \
+         | grep io.containerd.snapshotter \
+         | sed -E 's/ +/ /g' \
+         | cut -d ' ' -f 2,4 \
+         | grep "${PLUGIN}" \
+         | cut -d ' ' -f 2)
+if [ "${OK}" != "ok" ] ; then
+    echo "Plugin ${PLUGIN} not found" 1>&2
     exit 1
 fi
 
@@ -127,7 +121,7 @@ ctr-remote run --rm "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
 echo "Getting normal image with stargz snapshotter..."
 ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:18.04"
-ctr-remote run --rm --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr_remote_unstargz.tar
+ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/ubuntu:18.04" test tar -c /usr > /usr_remote_unstargz.tar
 
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
 echo "Getting stargz image with normal snapshotter..."
@@ -143,7 +137,7 @@ if ! isServedAsRemoteSnapshot "${PULL_LOG}" ; then
     exit 1
 fi
 rm "${PULL_LOG}"
-ctr-remote run --rm --snapshotter=remote "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr > /usr_remote_stargz.tar
+ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr > /usr_remote_stargz.tar
 
 echo "Extracting sample files..."
 mkdir /usr_normal_unstargz /usr_remote_unstargz /usr_normal_stargz /usr_remote_stargz

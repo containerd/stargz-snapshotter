@@ -31,14 +31,14 @@ import (
 )
 
 const (
-	remoteSnapshotterName = "remote"
+	remoteSnapshotterName = "stargz"
 )
 
 var RpullCommand = cli.Command{
 	Name:      "rpull",
-	Usage:     "pull an image from a remote levaraging remote snapshotter",
+	Usage:     "pull an image from a registry levaraging stargz snapshotter",
 	ArgsUsage: "[flags] <ref>",
-	Description: `Fetch and prepare an image for use in containerd levaraging remote snapshotter.
+	Description: `Fetch and prepare an image for use in containerd levaraging stargz snapshotter.
 
 After pulling an image, it should be ready to use the same reference in a run
 command. 
