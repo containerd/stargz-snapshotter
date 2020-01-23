@@ -14,7 +14,7 @@
 
 FROM golang:1.12
 
-# Install FUSE for rs filesystems and Docker client for logging into the registry
+# Install FUSE for filesystems and Docker client for logging into the registry
 RUN apt-get update -y && \
     apt-get install -y fuse apt-transport-https gnupg2 software-properties-common && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \

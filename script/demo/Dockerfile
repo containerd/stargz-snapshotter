@@ -14,6 +14,9 @@
 
 FROM golang:1.12
 
+# basic packages
+# docker-ce-cli is used only for users to log into registries (e.g. DockerHub)
+# with ~/.docker/config.json
 RUN apt-get update -y && \
     apt-get install -y libbtrfs-dev libseccomp-dev fuse \
                        apt-transport-https gnupg2 software-properties-common && \

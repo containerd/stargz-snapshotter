@@ -15,6 +15,7 @@
 FROM golang:1.12
 
 # basic tools
+# docker-ce-cli is used only to log into registry with ~/.docker/config.json
 RUN apt-get update -y && \
     apt-get install -y fuse apt-transport-https gnupg2 software-properties-common jq && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \

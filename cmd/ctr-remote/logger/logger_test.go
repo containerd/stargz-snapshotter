@@ -44,67 +44,67 @@ func TestExistence(t *testing.T) {
 	tests := []struct {
 		name string
 		in   []tarent
-		want []fsCheck
+		want []check
 	}{
 		{
 			name: "1_whiteout_with_sibling",
-			in: tarfile(
+			in: []tarent{
 				directory("foo/"),
 				regfile("foo/bar.txt", ""),
 				regfile("foo/.wh.foo.txt", ""),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasValidWhiteout("foo/foo.txt"),
 				fileNotExist("foo/.wh.foo.txt"),
-			),
+			},
 		},
 		{
 			name: "1_whiteout_with_duplicated_name",
-			in: tarfile(
+			in: []tarent{
 				directory("foo/"),
 				regfile("foo/bar.txt", "test"),
 				regfile("foo/.wh.bar.txt", ""),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasFileContents("foo/bar.txt", "test"),
 				fileNotExist("foo/.wh.bar.txt"),
-			),
+			},
 		},
 		{
 			name: "1_opaque",
-			in: tarfile(
+			in: []tarent{
 				directory("foo/"),
 				regfile("foo/.wh..wh..opq", ""),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
 				fileNotExist("foo/.wh..wh..opq"),
-			),
+			},
 		},
 		{
 			name: "1_opaque_with_sibling",
-			in: tarfile(
+			in: []tarent{
 				directory("foo/"),
 				regfile("foo/.wh..wh..opq", ""),
 				regfile("foo/bar.txt", "test"),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
 				hasFileContents("foo/bar.txt", "test"),
 				fileNotExist("foo/.wh..wh..opq"),
-			),
+			},
 		},
 		{
 			name: "1_opaque_with_xattr",
-			in: tarfile(
+			in: []tarent{
 				directory("foo/", xAttr{"foo": "bar"}),
 				regfile("foo/.wh..wh..opq", ""),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
 				hasNodeXattrs("foo/", "foo", "bar"),
 				fileNotExist("foo/.wh..wh..opq"),
-			),
+			},
 		},
 	}
 
@@ -127,33 +127,25 @@ func TestExistence(t *testing.T) {
 				t.Fatalf("failed to initialize nodes: %v", err)
 			}
 			for _, want := range tt.want {
-				want.check(t, root)
+				want(t, root)
 			}
 		})
 	}
 }
 
-type fsCheck interface {
-	check(t *testing.T, root *node)
-}
+type check func(*testing.T, *node)
 
-func checks(s ...fsCheck) []fsCheck { return s }
-
-type fsCheckFn func(*testing.T, *node)
-
-func (f fsCheckFn) check(t *testing.T, root *node) { f(t, root) }
-
-func fileNotExist(file string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func fileNotExist(file string) check {
+	return func(t *testing.T, root *node) {
 		ent, inode, err := getDirentAndNode(root, file)
 		if err == nil || ent != nil || inode != nil {
 			t.Errorf("Node %q exists", file)
 		}
-	})
+	}
 }
 
-func hasFileContents(file string, want string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func hasFileContents(file string, want string) check {
+	return func(t *testing.T, root *node) {
 		_, inode, err := getDirentAndNode(root, file)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", file, err)
@@ -173,11 +165,11 @@ func hasFileContents(file string, want string) fsCheck {
 		if string(data) != want {
 			t.Errorf("Contents(%q) = %q, want %q", file, data, want)
 		}
-	})
+	}
 }
 
-func hasValidWhiteout(name string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func hasValidWhiteout(name string) check {
+	return func(t *testing.T, root *node) {
 		ent, inode, err := getDirentAndNode(root, name)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", name, err)
@@ -213,11 +205,11 @@ func hasValidWhiteout(name string) fsCheck {
 				name, unix.Major(uint64(a.Rdev)), unix.Minor(uint64(a.Rdev)))
 			return
 		}
-	})
+	}
 }
 
-func hasNodeXattrs(entry, name, value string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func hasNodeXattrs(entry, name, value string) check {
+	return func(t *testing.T, root *node) {
 		_, inode, err := getDirentAndNode(root, entry)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", entry, err)
@@ -252,7 +244,7 @@ func hasNodeXattrs(entry, name, value string) fsCheck {
 			t.Errorf("node %q has an invalid xattr %q; want %q", entry, v, value)
 			return
 		}
-	})
+	}
 }
 
 // getDirentAndNode gets dirent and node at the specified path at once and makes
@@ -315,25 +307,25 @@ func TestOpenRead(t *testing.T) {
 	}{
 		{
 			name: "noopt",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/baz.txt", "baz"),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
-			),
+			},
 			do:   doAccess(),
 			want: []string{},
 		},
 		{
 			name: "open_and_read",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/baz.txt", "baz"),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
-			),
+			},
 			do: doAccess(
 				openFile("bar/baa.txt"),
 				readFile("bar/baz.txt", make([]byte, 3)),
@@ -346,12 +338,12 @@ func TestOpenRead(t *testing.T) {
 		},
 		{
 			name: "hardlink",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				regfile("baz.txt", "baz"),
 				hardlink("bar.txt", "baz.txt"),
 				regfile("baa.txt", "baa"),
-			),
+			},
 			do: doAccess(
 				readFile("bar.txt", make([]byte, 3)),
 			),
@@ -362,12 +354,12 @@ func TestOpenRead(t *testing.T) {
 		},
 		{
 			name: "symlink",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				regfile("baz.txt", "baz"),
 				symlink("bar.txt", "baz.txt"),
 				regfile("baa.txt", "baa"),
-			),
+			},
 			do: doAccess(
 				readFile("bar.txt", make([]byte, 3)),
 			),
@@ -450,6 +442,70 @@ func buildTar(t *testing.T, ents []tarent) (r io.Reader, cancel func()) {
 	return pr, func() { go pr.Close(); go pw.Close() }
 }
 
+type tarent struct {
+	header   *tar.Header
+	contents []byte
+}
+
+func regfile(name string, contents string) tarent {
+	if strings.HasSuffix(name, "/") {
+		panic(fmt.Sprintf("file %q has suffix /", name))
+	}
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     name,
+			Mode:     0644,
+			Size:     int64(len(contents)),
+		},
+		contents: []byte(contents),
+	}
+}
+
+type xAttr map[string]string
+
+func directory(name string, opts ...interface{}) tarent {
+	if !strings.HasSuffix(name, "/") {
+		panic(fmt.Sprintf("dir %q hasn't suffix /", name))
+	}
+	var xattrs xAttr
+	for _, opt := range opts {
+		if v, ok := opt.(xAttr); ok {
+			xattrs = v
+		}
+	}
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeDir,
+			Name:     name,
+			Mode:     0755,
+			Xattrs:   xattrs,
+		},
+	}
+}
+
+func hardlink(name string, linkname string) tarent {
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeLink,
+			Name:     name,
+			Mode:     0644,
+			Linkname: linkname,
+		},
+	}
+}
+
+func symlink(name string, linkname string) tarent {
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeSymlink,
+			Name:     name,
+			Mode:     0644,
+			Linkname: linkname,
+		},
+	}
+}
+
 type accessFunc func(basepath string) error
 
 func doAccess(ac ...accessFunc) accessFunc {
@@ -487,84 +543,5 @@ func readFile(filename string, b []byte) accessFunc {
 			}
 		}
 		return nil
-	}
-}
-
-type tarent struct {
-	header   *tar.Header
-	contents []byte
-}
-
-func tarfile(es ...entry) (res []tarent) {
-	for _, e := range es {
-		res = e(res)
-	}
-
-	return
-}
-
-type entry func([]tarent) []tarent
-
-func regfile(name string, contents string) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeReg,
-				Name:     name,
-				Mode:     0644,
-				Size:     int64(len(contents)),
-			},
-			contents: []byte(contents),
-		})
-	}
-}
-
-type xAttr map[string]string
-
-func directory(name string, opts ...interface{}) entry {
-	if !strings.HasSuffix(name, "/") {
-		panic(fmt.Sprintf("dir %q hasn't suffix /", name))
-	}
-	var xattrs xAttr
-	for _, opt := range opts {
-		if v, ok := opt.(xAttr); ok {
-			xattrs = v
-		}
-	}
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeDir,
-				Name:     name,
-				Mode:     0644,
-				Xattrs:   xattrs,
-			},
-		})
-	}
-}
-
-func hardlink(name string, linkname string) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeLink,
-				Name:     name,
-				Mode:     0644,
-				Linkname: linkname,
-			},
-		})
-	}
-}
-
-func symlink(name string, linkname string) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeSymlink,
-				Name:     name,
-				Mode:     0644,
-				Linkname: linkname,
-			},
-		})
 	}
 }

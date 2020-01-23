@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	TargetRefLabel    = "containerd.io/snapshot/target.reference"
-	TargetDigestLabel = "containerd.io/snapshot/target.digest"
+	TargetRefLabel    = "containerd.io/snapshot/remote/stargz.reference"
+	TargetDigestLabel = "containerd.io/snapshot/remote/stargz.digest"
 )
 
 // AppendInfoHandlerWrapper makes a handler which appends image's basic

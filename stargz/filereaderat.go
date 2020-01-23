@@ -87,22 +87,23 @@ func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *stargzReader) prefetch(layer *io.SectionReader) (<-chan struct{}, error) {
+func (gr *stargzReader) prefetch(layer *io.SectionReader) (wait func(), err error) {
 	done := make(chan struct{})
-	e, ok := gr.r.Lookup(prefetchLandmark)
+	wait = func() { <-done }
+	e, ok := gr.r.Lookup(PrefetchLandmark)
 	if !ok {
 		close(done)
-		return done, nil
+		return wait, nil
 	}
 	size := e.Offset
 
 	// Prefetch specified range at once
 	raw := make([]byte, size)
-	_, err := layer.ReadAt(raw, 0)
+	_, err = layer.ReadAt(raw, 0)
 	if err != nil {
 		if err != io.EOF {
 			close(done)
-			return done, fmt.Errorf("failed to get raw data: %v", err)
+			return wait, fmt.Errorf("failed to get raw data: %v", err)
 		}
 	}
 
@@ -141,7 +142,7 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader) (<-chan struct{}, erro
 		}
 	}()
 
-	return done, nil
+	return wait, nil
 }
 
 func (gr *stargzReader) genID(digest string, offset, size int64) string {

@@ -64,6 +64,8 @@ import (
 )
 
 const (
+	PrefetchLandmark = ".prefetch.landmark"
+
 	blockSize          = 512
 	directoryCacheType = "directory"
 	memoryCacheType    = "memory"
@@ -71,18 +73,17 @@ const (
 	whiteoutOpaqueDir  = whiteoutPrefix + whiteoutPrefix + ".opq"
 	opaqueXattr        = "trusted.overlay.opaque"
 	opaqueXattrValue   = "y"
-	prefetchLandmark   = ".prefetch.landmark"
 	stateDirName       = ".stargz-snapshotter"
 
-	defaultCacheChunkSize = 50000
-	defaultLRUCacheEntry  = 5000
+	defaultHTTPCacheChunkSize = 50000
+	defaultLRUCacheEntry      = 5000
 )
 
 type Config struct {
-	CacheChunkSize int64  `toml:"cache_chunk_size"`
-	LRUCacheEntry  int    `toml:"lru_max_entry"`
-	HTTPCacheType  string `toml:"http_cache_type"`
-	FSCacheType    string `toml:"filesystem_cache_type"`
+	LRUCacheEntry      int    `toml:"lru_max_entry"`
+	HTTPCacheChunkSize int64  `toml:"http_chunk_size"`
+	HTTPCacheType      string `toml:"http_cache_type"`
+	FSCacheType        string `toml:"filesystem_cache_type"`
 
 	Insecure   []string `toml:"insecure"`
 	NoPrefetch bool     `toml:"noprefetch"`
@@ -104,15 +105,15 @@ func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
 func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 	var err error
 	fs := &filesystem{
-		cacheChunkSize: config.CacheChunkSize,
-		noprefetch:     config.NoPrefetch,
-		insecure:       config.Insecure,
-		transport:      http.DefaultTransport,
-		conn:           make(map[string]*connection),
-		debug:          config.Debug,
+		httpCacheChunkSize: config.HTTPCacheChunkSize,
+		noprefetch:         config.NoPrefetch,
+		insecure:           config.Insecure,
+		transport:          http.DefaultTransport,
+		conn:               make(map[string]*connection),
+		debug:              config.Debug,
 	}
-	if fs.cacheChunkSize == 0 {
-		fs.cacheChunkSize = defaultCacheChunkSize
+	if fs.httpCacheChunkSize == 0 {
+		fs.httpCacheChunkSize = defaultHTTPCacheChunkSize
 	}
 	maxEntry := config.LRUCacheEntry
 	if maxEntry == 0 {
@@ -131,15 +132,15 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 }
 
 type filesystem struct {
-	cacheChunkSize int64
-	httpCache      cache.BlobCache
-	fsCache        cache.BlobCache
-	noprefetch     bool
-	insecure       []string
-	transport      http.RoundTripper
-	conn           map[string]*connection
-	mu             sync.Mutex
-	debug          bool
+	httpCacheChunkSize int64
+	httpCache          cache.BlobCache
+	fsCache            cache.BlobCache
+	noprefetch         bool
+	insecure           []string
+	transport          http.RoundTripper
+	conn               map[string]*connection
+	mu                 sync.Mutex
+	debug              bool
 }
 
 type connection struct {
@@ -181,7 +182,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		url:       url,
 		t:         tr,
 		size:      size,
-		chunkSize: fs.cacheChunkSize,
+		chunkSize: fs.httpCacheChunkSize,
 		cache:     fs.httpCache,
 	}
 	sr := io.NewSectionReader(ur, 0, size)
@@ -386,7 +387,7 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	n.e.ForeachChild(func(baseName string, ent *stargz.TOCEntry) bool {
 
 		// We don't want to show prefetch landmark in "/".
-		if n.e.Name == "" && baseName == prefetchLandmark {
+		if n.e.Name == "" && baseName == PrefetchLandmark {
 			return true
 		}
 
@@ -446,7 +447,7 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 	}
 
 	// We don't want to show prefetch landmark in "/".
-	if n.e.Name == "" && name == prefetchLandmark {
+	if n.e.Name == "" && name == PrefetchLandmark {
 		return nil, fuse.ENOENT
 	}
 

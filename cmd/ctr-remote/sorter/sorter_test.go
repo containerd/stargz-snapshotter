@@ -25,6 +25,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ktock/stargz-snapshotter/stargz"
 )
 
 func TestSort(t *testing.T) {
@@ -39,58 +41,58 @@ func TestSort(t *testing.T) {
 	}{
 		{
 			name: "nolog",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/baz.txt", "baz"),
 				regfile("bar/bar.txt", "bar"),
-			),
-			want: tarfile(
+			},
+			want: []tarent{
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/baz.txt", "baz"),
 				regfile("bar/bar.txt", "bar"),
-			),
+			},
 		},
 		{
 			name: "identical",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/baz.txt", "baz"),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
-			),
+			},
 			log: []string{"foo.txt", "bar/baz.txt"},
-			want: tarfile(
+			want: []tarent{
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/baz.txt", "baz"),
 				landmark(),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
-			),
+			},
 		},
 		{
 			name: "shuffle_regfile",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				regfile("baz.txt", "baz"),
 				regfile("bar.txt", "bar"),
 				regfile("baa.txt", "baa"),
-			),
+			},
 			log: []string{"baa.txt", "bar.txt", "baz.txt"},
-			want: tarfile(
+			want: []tarent{
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				regfile("baz.txt", "baz"),
 				landmark(),
 				regfile("foo.txt", "foo"),
-			),
+			},
 		},
 		{
 			name: "shuffle_directory",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/bar.txt", "bar"),
@@ -101,9 +103,9 @@ func TestSort(t *testing.T) {
 				directory("baz/bazbaz/"),
 				regfile("baz/bazbaz/bazbaz_b.txt", "baz"),
 				regfile("baz/bazbaz/bazbaz_a.txt", "baz"),
-			),
+			},
 			log: []string{"baz/bazbaz/bazbaz_a.txt", "baz/baz2.txt", "foo.txt"},
-			want: tarfile(
+			want: []tarent{
 				directory("baz/"),
 				directory("baz/bazbaz/"),
 				regfile("baz/bazbaz/bazbaz_a.txt", "baz"),
@@ -115,37 +117,37 @@ func TestSort(t *testing.T) {
 				regfile("bar/baa.txt", "baa"),
 				regfile("baz/baz1.txt", "baz"),
 				regfile("baz/bazbaz/bazbaz_b.txt", "baz"),
-			),
+			},
 		},
 		{
 			name: "shuffle_link",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				regfile("baz.txt", "baz"),
 				hardlink("bar.txt", "baz.txt"),
 				regfile("baa.txt", "baa"),
-			),
+			},
 			log: []string{"baz.txt"},
-			want: tarfile(
+			want: []tarent{
 				regfile("baz.txt", "baz"),
 				landmark(),
 				regfile("foo.txt", "foo"),
 				hardlink("bar.txt", "baz.txt"),
 				regfile("baa.txt", "baa"),
-			),
+			},
 		},
 		{
 			name: "longname",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				regfile(longname1, "test"),
 				directory("bar/"),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
 				regfile(fmt.Sprintf("bar/%s", longname2), "test2"),
-			),
+			},
 			log: []string{fmt.Sprintf("bar/%s", longname2), longname1},
-			want: tarfile(
+			want: []tarent{
 				directory("bar/"),
 				regfile(fmt.Sprintf("bar/%s", longname2), "test2"),
 				regfile(longname1, "test"),
@@ -153,77 +155,77 @@ func TestSort(t *testing.T) {
 				regfile("foo.txt", "foo"),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
-			),
+			},
 		},
 		{
 			name: "various_types",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				symlink("foo2", "foo.txt"),
 				devchar("foochar", 10, 50),
 				devblock("fooblock", 15, 20),
 				fifo("fifoo"),
-			),
+			},
 			log: []string{"fifoo", "foo2", "foo.txt", "fooblock"},
-			want: tarfile(
+			want: []tarent{
 				fifo("fifoo"),
 				symlink("foo2", "foo.txt"),
 				regfile("foo.txt", "foo"),
 				devblock("fooblock", 15, 20),
 				landmark(),
 				devchar("foochar", 10, 50),
-			),
+			},
 		},
 		{
 			name: "existing_landmark",
-			in: tarfile(
+			in: []tarent{
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				regfile("baz.txt", "baz"),
 				landmark(),
 				regfile("foo.txt", "foo"),
-			),
+			},
 			log: []string{"foo.txt", "bar.txt"},
-			want: tarfile(
+			want: []tarent{
 				regfile("foo.txt", "foo"),
 				regfile("bar.txt", "bar"),
 				landmark(),
 				regfile("baa.txt", "baa"),
 				regfile("baz.txt", "baz"),
-			),
+			},
 		},
 		{
 			name: "existing_landmark_nolog",
-			in: tarfile(
+			in: []tarent{
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				regfile("baz.txt", "baz"),
 				landmark(),
 				regfile("foo.txt", "foo"),
-			),
-			want: tarfile(
+			},
+			want: []tarent{
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				regfile("baz.txt", "baz"),
 				regfile("foo.txt", "foo"),
-			),
+			},
 		},
 		{
 			name: "not_existing_file",
-			in: tarfile(
+			in: []tarent{
 				regfile("foo.txt", "foo"),
 				regfile("baz.txt", "baz"),
 				regfile("bar.txt", "bar"),
 				regfile("baa.txt", "baa"),
-			),
+			},
 			log: []string{"baa.txt", "bar.txt", "dummy"},
-			want: tarfile(
+			want: []tarent{
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				landmark(),
 				regfile("foo.txt", "foo"),
 				regfile("baz.txt", "baz"),
-			),
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -363,120 +365,94 @@ type tarent struct {
 	contents []byte
 }
 
-func tarfile(es ...entry) (res []tarent) {
-	for _, e := range es {
-		res = e(res)
-	}
-
-	return
-}
-
-type entry func([]tarent) []tarent
-
-func landmark() entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Name:     prefetchLandmark,
-				Typeflag: tar.TypeReg,
-				Size:     int64(len([]byte{prefetchLandmarkContents})),
-			},
-			contents: []byte{prefetchLandmarkContents},
-		})
+func landmark() tarent {
+	return tarent{
+		header: &tar.Header{
+			Name:     stargz.PrefetchLandmark,
+			Typeflag: tar.TypeReg,
+			Size:     int64(len([]byte{prefetchLandmarkContents})),
+		},
+		contents: []byte{prefetchLandmarkContents},
 	}
 }
 
-func regfile(name string, contents string) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeReg,
-				Name:     name,
-				Mode:     0644,
-				Size:     int64(len(contents)),
-			},
-			contents: []byte(contents),
-		})
+func regfile(name string, contents string) tarent {
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     name,
+			Mode:     0644,
+			Size:     int64(len(contents)),
+		},
+		contents: []byte(contents),
 	}
 }
 
-func directory(name string) entry {
+func directory(name string) tarent {
 	if !strings.HasSuffix(name, "/") {
 		panic(fmt.Sprintf("dir %q hasn't suffix /", name))
 	}
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeDir,
-				Name:     name,
-				Mode:     0644,
-			},
-		})
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeDir,
+			Name:     name,
+			Mode:     0755,
+		},
 	}
 }
 
-func hardlink(name string, linkname string) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeLink,
-				Name:     name,
-				Mode:     0644,
-				Linkname: linkname,
-			},
-		})
+func hardlink(name string, linkname string) tarent {
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeLink,
+			Name:     name,
+			Mode:     0644,
+			Linkname: linkname,
+		},
 	}
 }
 
-func symlink(name string, linkname string) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeSymlink,
-				Name:     name,
-				Mode:     0644,
-				Linkname: linkname,
-			},
-		})
+func symlink(name string, linkname string) tarent {
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeSymlink,
+			Name:     name,
+			Mode:     0644,
+			Linkname: linkname,
+		},
 	}
 }
 
-func devchar(name string, major int64, minor int64) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeChar,
-				Name:     name,
-				Mode:     0644,
-				Devmajor: major,
-				Devminor: minor,
-			},
-		})
+func devchar(name string, major int64, minor int64) tarent {
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeChar,
+			Name:     name,
+			Mode:     0644,
+			Devmajor: major,
+			Devminor: minor,
+		},
 	}
 }
 
-func devblock(name string, major int64, minor int64) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeBlock,
-				Name:     name,
-				Mode:     0644,
-				Devmajor: major,
-				Devminor: minor,
-			},
-		})
+func devblock(name string, major int64, minor int64) tarent {
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeBlock,
+			Name:     name,
+			Mode:     0644,
+			Devmajor: major,
+			Devminor: minor,
+		},
 	}
 }
 
-func fifo(name string) entry {
-	return func(in []tarent) []tarent {
-		return append(in, tarent{
-			header: &tar.Header{
-				Typeflag: tar.TypeFifo,
-				Name:     name,
-				Mode:     0644,
-			},
-		})
+func fifo(name string) tarent {
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeFifo,
+			Name:     name,
+			Mode:     0644,
+		},
 	}
 }

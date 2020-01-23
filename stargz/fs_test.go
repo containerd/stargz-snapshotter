@@ -161,9 +161,9 @@ func TestNodeRead(t *testing.T) {
 
 func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 	testName := "test"
-	r, err := stargz.Open(buildStargz(t, tarOf(
+	r, err := stargz.Open(buildStargz(t, []tarent{
 		regfile(testName, string(contents)),
-	), chunkSizeInfo(chunkSize)))
+	}, chunkSizeInfo(chunkSize)))
 	if err != nil {
 		t.Fatal("failed to make stargz")
 	}
@@ -188,90 +188,90 @@ func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 func TestExistence(t *testing.T) {
 	tests := []struct {
 		name string
-		in   []tarEntry
-		want []fsCheck
+		in   []tarent
+		want []check
 	}{
 		{
 			name: "1_whiteout_with_sibling",
-			in: tarOf(
-				dir("foo/"),
+			in: []tarent{
+				directory("foo/"),
 				regfile("foo/bar.txt", ""),
 				regfile("foo/.wh.foo.txt", ""),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasValidWhiteout("foo/foo.txt"),
 				fileNotExist("foo/.wh.foo.txt"),
-			),
+			},
 		},
 		{
 			name: "1_whiteout_with_duplicated_name",
-			in: tarOf(
-				dir("foo/"),
+			in: []tarent{
+				directory("foo/"),
 				regfile("foo/bar.txt", "test"),
 				regfile("foo/.wh.bar.txt", ""),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasFileDigest("foo/bar.txt", digestFor("test")),
 				fileNotExist("foo/.wh.bar.txt"),
-			),
+			},
 		},
 		{
 			name: "1_opaque",
-			in: tarOf(
-				dir("foo/"),
+			in: []tarent{
+				directory("foo/"),
 				regfile("foo/.wh..wh..opq", ""),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
 				fileNotExist("foo/.wh..wh..opq"),
-			),
+			},
 		},
 		{
 			name: "1_opaque_with_sibling",
-			in: tarOf(
-				dir("foo/"),
+			in: []tarent{
+				directory("foo/"),
 				regfile("foo/.wh..wh..opq", ""),
 				regfile("foo/bar.txt", "test"),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
 				hasFileDigest("foo/bar.txt", digestFor("test")),
 				fileNotExist("foo/.wh..wh..opq"),
-			),
+			},
 		},
 		{
 			name: "1_opaque_with_xattr",
-			in: tarOf(
-				dir("foo/", xAttr{"foo": "bar"}),
+			in: []tarent{
+				directory("foo/", xAttr{"foo": "bar"}),
 				regfile("foo/.wh..wh..opq", ""),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
 				hasNodeXattrs("foo/", "foo", "bar"),
 				fileNotExist("foo/.wh..wh..opq"),
-			),
+			},
 		},
 		{
 			name: "prefetch_landmark",
-			in: tarOf(
-				regfile(prefetchLandmark, "test"),
-				dir("foo/"),
-				regfile(fmt.Sprintf("foo/%s", prefetchLandmark), "test"),
-			),
-			want: checks(
-				fileNotExist(prefetchLandmark),
-				hasFileDigest(fmt.Sprintf("foo/%s", prefetchLandmark), digestFor("test")),
-			),
+			in: []tarent{
+				regfile(PrefetchLandmark, "test"),
+				directory("foo/"),
+				regfile(fmt.Sprintf("foo/%s", PrefetchLandmark), "test"),
+			},
+			want: []check{
+				fileNotExist(PrefetchLandmark),
+				hasFileDigest(fmt.Sprintf("foo/%s", PrefetchLandmark), digestFor("test")),
+			},
 		},
 		{
 			name: "state_file",
-			in: tarOf(
+			in: []tarent{
 				regfile("test", "test"),
-			),
-			want: checks(
+			},
+			want: []check{
 				hasFileDigest("test", digestFor("test")),
-				hasStateFile(testStateLayerDigest+".json"),
-			),
+				hasStateFile(testStateLayerDigest + ".json"),
+			},
 		},
 	}
 
@@ -283,7 +283,7 @@ func TestExistence(t *testing.T) {
 			}
 			rootNode := getRootNode(t, r)
 			for _, want := range tt.want {
-				want.check(t, rootNode)
+				want(t, rootNode)
 			}
 		})
 	}
@@ -324,7 +324,7 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 
 type chunkSizeInfo int
 
-func buildStargz(t *testing.T, ents []tarEntry, opts ...interface{}) *io.SectionReader {
+func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) *io.SectionReader {
 	var chunkSize chunkSizeInfo
 	for _, opt := range opts {
 		if v, ok := opt.(chunkSizeInfo); ok {
@@ -338,8 +338,13 @@ func buildStargz(t *testing.T, ents []tarEntry, opts ...interface{}) *io.Section
 	go func() {
 		tw := tar.NewWriter(pw)
 		for _, ent := range ents {
-			if err := ent.appendTar(tw); err != nil {
-				t.Errorf("building input tar: %v", err)
+			if err := tw.WriteHeader(ent.header); err != nil {
+				t.Errorf("writing header to the input tar: %v", err)
+				pw.Close()
+				return
+			}
+			if _, err := tw.Write(ent.contents); err != nil {
+				t.Errorf("writing contents to the input tar: %v", err)
 				pw.Close()
 				return
 			}
@@ -366,79 +371,61 @@ func buildStargz(t *testing.T, ents []tarEntry, opts ...interface{}) *io.Section
 	return io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b)))
 }
 
-func tarOf(s ...tarEntry) []tarEntry { return s }
-
-func checks(s ...fsCheck) []fsCheck { return s }
-
-type tarEntry interface {
-	appendTar(*tar.Writer) error
+type tarent struct {
+	header   *tar.Header
+	contents []byte
 }
 
-type tarEntryFunc func(*tar.Writer) error
-
-func (f tarEntryFunc) appendTar(tw *tar.Writer) error { return f(tw) }
-
-func regfile(name, contents string) tarEntry {
-	return tarEntryFunc(func(tw *tar.Writer) error {
-		if strings.HasSuffix(name, "/") {
-			return fmt.Errorf("bogus trailing slash in file %q", name)
-		}
-		if err := tw.WriteHeader(&tar.Header{
+func regfile(name string, contents string) tarent {
+	if strings.HasSuffix(name, "/") {
+		panic(fmt.Sprintf("file %q has suffix /", name))
+	}
+	return tarent{
+		header: &tar.Header{
 			Typeflag: tar.TypeReg,
 			Name:     name,
 			Mode:     0644,
 			Size:     int64(len(contents)),
-		}); err != nil {
-			return err
-		}
-		_, err := io.WriteString(tw, contents)
-		return err
-	})
-}
-
-func dir(d string, opts ...interface{}) tarEntry {
-	return tarEntryFunc(func(tw *tar.Writer) error {
-		var xattrs xAttr
-		for _, opt := range opts {
-			if v, ok := opt.(xAttr); ok {
-				xattrs = v
-			} else {
-				return fmt.Errorf("unsupported opt")
-			}
-		}
-		if !strings.HasSuffix(d, "/") {
-			panic(fmt.Sprintf("missing trailing slash in dir %q ", d))
-		}
-		return tw.WriteHeader(&tar.Header{
-			Typeflag: tar.TypeDir,
-			Name:     d,
-			Mode:     0755,
-			Xattrs:   xattrs,
-		})
-	})
+		},
+		contents: []byte(contents),
+	}
 }
 
 type xAttr map[string]string
 
-type fsCheck interface {
-	check(t *testing.T, root *node)
+func directory(name string, opts ...interface{}) tarent {
+	if !strings.HasSuffix(name, "/") {
+		panic(fmt.Sprintf("dir %q hasn't suffix /", name))
+	}
+	var xattrs xAttr
+	for _, opt := range opts {
+		if v, ok := opt.(xAttr); ok {
+			xattrs = v
+		}
+	}
+	return tarent{
+		header: &tar.Header{
+			Typeflag: tar.TypeDir,
+			Name:     name,
+			Mode:     0755,
+			Xattrs:   xattrs,
+		},
+	}
 }
 
-type fsCheckFn func(*testing.T, *node)
+type check func(*testing.T, *node)
 
-func (f fsCheckFn) check(t *testing.T, root *node) { f(t, root) }
-
-func fileNotExist(file string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func fileNotExist(file string) check {
+	return func(t *testing.T, root *node) {
 		ent, inode, err := getDirentAndNode(root, file)
 		if err == nil || ent != nil || inode != nil {
 			t.Errorf("Node %q exists", file)
 		}
-	})
+	}
 }
 
-func hasFileDigest(file string, digest string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func hasFileDigest(file string, digest string) check {
+	return func(t *testing.T, root *node) {
 		_, inode, err := getDirentAndNode(root, file)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", file, err)
@@ -450,11 +437,11 @@ func hasFileDigest(file string, digest string) fsCheck {
 		if n.e.Digest != digest {
 			t.Fatalf("Digest(%q) = %q, want %q", file, n.e.Digest, digest)
 		}
-	})
+	}
 }
 
-func hasValidWhiteout(name string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func hasValidWhiteout(name string) check {
+	return func(t *testing.T, root *node) {
 		ent, inode, err := getDirentAndNode(root, name)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", name, err)
@@ -489,11 +476,11 @@ func hasValidWhiteout(name string) fsCheck {
 				name, unix.Major(uint64(a.Rdev)), unix.Minor(uint64(a.Rdev)))
 			return
 		}
-	})
+	}
 }
 
-func hasNodeXattrs(entry, name, value string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func hasNodeXattrs(entry, name, value string) check {
+	return func(t *testing.T, root *node) {
 		_, inode, err := getDirentAndNode(root, entry)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", entry, err)
@@ -528,11 +515,11 @@ func hasNodeXattrs(entry, name, value string) fsCheck {
 			t.Errorf("node %q has an invalid xattr %q; want %q", entry, v, value)
 			return
 		}
-	})
+	}
 }
 
-func hasStateFile(id string) fsCheck {
-	return fsCheckFn(func(t *testing.T, root *node) {
+func hasStateFile(id string) check {
+	return func(t *testing.T, root *node) {
 
 		// Check existence of state dir
 		var attr fuse.Attr
@@ -614,7 +601,7 @@ func hasStateFile(id string) fsCheck {
 			t.Errorf("expected error %q, got %q", wantErr.Error(), j.Error)
 			return
 		}
-	})
+	}
 }
 
 // getDirentAndNode gets dirent and node at the specified path at once and makes

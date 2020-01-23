@@ -162,9 +162,9 @@ func (er *exceptSectionReader) ReadAt(p []byte, offset int64) (int, error) {
 
 func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) (*fileReaderAt, string) {
 	testName := "test"
-	r, err := stargz.Open(buildStargz(t, tarOf(
+	r, err := stargz.Open(buildStargz(t, []tarent{
 		regfile(testName, string(contents)),
-	), chunkSizeInfo(chunkSize)))
+	}, chunkSizeInfo(chunkSize)))
 	t.Logf("single entry stargz; contents=%q", string(contents))
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
@@ -189,39 +189,39 @@ func makeFileReaderAt(t *testing.T, contents []byte, chunkSize int64) (*fileRead
 
 // Tests prefetch method of each stargz file.
 func TestPrefetch(t *testing.T) {
-	prefetchLandmarkFile := regfile(prefetchLandmark, string([]byte{1}))
+	prefetchLandmarkFile := regfile(PrefetchLandmark, string([]byte{1}))
 	tests := []struct {
 		name    string
-		in      []tarEntry
+		in      []tarent
 		wantNum int      // number of chunks wanted in the cache
 		wants   []string // filenames to compare
 	}{
 		{
 			name: "no_prefetch",
-			in: tarOf(
+			in: []tarent{
 				regfile("foo.txt", sampleData1),
-			),
+			},
 			wantNum: 0,
 		},
 		{
 			name: "prefetch",
-			in: tarOf(
+			in: []tarent{
 				regfile("foo.txt", sampleData1),
 				prefetchLandmarkFile,
 				regfile("bar.txt", sampleData2),
-			),
+			},
 			wantNum: chunkNum(sampleData1),
 			wants:   []string{"foo.txt"},
 		},
 		{
 			name: "with_dir",
-			in: tarOf(
-				dir("foo/"),
+			in: []tarent{
+				directory("foo/"),
 				regfile("foo/bar.txt", sampleData1),
 				prefetchLandmarkFile,
-				dir("buz/"),
+				directory("buz/"),
 				regfile("buz/buzbuz.txt", sampleData2),
-			),
+			},
 			wantNum: chunkNum(sampleData1),
 			wants:   []string{"foo/bar.txt"},
 		},
@@ -243,7 +243,7 @@ func TestPrefetch(t *testing.T) {
 				t.Errorf("failed to prefetch: %v", err)
 				return
 			}
-			if <-done; tt.wantNum != len(gr.cache.(*testCache).membuf) {
+			if done(); tt.wantNum != len(gr.cache.(*testCache).membuf) {
 				t.Errorf("number of chunks in the cache %d; want %d", len(gr.cache.(*testCache).membuf), tt.wantNum)
 				return
 			}
@@ -297,10 +297,10 @@ func chunkNum(data string) int {
 // Tests stargzReader for failure cases.
 func TestFailStargzReader(t *testing.T) {
 	testFileName := "test"
-	stargzFile := buildStargz(t, tarOf(
+	stargzFile := buildStargz(t, []tarent{
 		regfile(testFileName, sampleData1),
-		regfile(prefetchLandmark, string([]byte{1})),
-	), chunkSizeInfo(sampleChunkSize))
+		regfile(PrefetchLandmark, string([]byte{1})),
+	}, chunkSizeInfo(sampleChunkSize))
 	br := &breakReaderAt{
 		ReaderAt: stargzFile,
 		success:  true,
@@ -350,21 +350,21 @@ func TestFailStargzReader(t *testing.T) {
 	// tests for prefetch
 	br.success = true
 	done, err := gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
-	if <-done; err != nil {
+	if done(); err != nil {
 		t.Errorf("failed to prefetch but wanted to succeed: %v", err)
 		return
 	}
 
 	br.success = false
 	done, err = gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
-	if <-done; err == nil {
+	if done(); err == nil {
 		t.Errorf("succeeded to prefetch but wanted to fail")
 		return
 	}
 
 	dummyData := []byte("dummy") // wants to be succeeded even for dummy data
 	done, err = gr.prefetch(io.NewSectionReader(bytes.NewReader(dummyData), 0, int64(len(dummyData))))
-	if <-done; err != nil {
+	if done(); err != nil {
 		t.Errorf("failed to prefetch for dummy but wanted to succeed: %v", err)
 		return
 	}
