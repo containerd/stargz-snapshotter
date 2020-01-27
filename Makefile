@@ -22,7 +22,7 @@ CMD=containerd-stargz-grpc ctr-remote
 
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
 
-.PHONY: check build
+.PHONY: check build protos
 
 all: build
 
@@ -77,3 +77,7 @@ integration:
 
 test-optimize:
 	@./script/make.sh test-optimize
+
+protos:
+	@echo "$@"
+	@protobuild ./stargz/proto/events

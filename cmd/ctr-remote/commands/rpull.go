@@ -18,16 +18,22 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	"github.com/containerd/containerd/cmd/ctr/commands/content"
+	"github.com/containerd/containerd/events"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/typeurl"
 	stargz "github.com/ktock/stargz-snapshotter/stargz/handler"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli"
+
+	// Register grpc event types
+	_ "github.com/ktock/stargz-snapshotter/stargz/proto/events"
 )
 
 const (
@@ -69,9 +75,13 @@ command.
 			return err
 		}
 
+		eventsCancelCh := make(chan struct{})
+		go showEvents(ctx, client, eventsCancelCh)
+		defer close(eventsCancelCh)
 		if err := pull(ctx, client, ref, config); err != nil {
 			return err
 		}
+
 		return nil
 	},
 }
@@ -100,4 +110,34 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *co
 	}
 
 	return nil
+}
+
+func showEvents(ctx context.Context, client *containerd.Client, cancelCh <-chan struct{}) {
+	eventsClient := client.EventService()
+	// TODO: filter
+	eventsCh, errCh := eventsClient.Subscribe(ctx)
+	for {
+		var e *events.Envelope
+		select {
+		case e = <-eventsCh:
+		case err := <-errCh:
+			log.G(ctx).WithError(err).Warn("error during subscribing events")
+		case <-cancelCh:
+			return
+		}
+		if e != nil {
+			var out []byte
+			if e.Event != nil {
+				v, err := typeurl.UnmarshalAny(e.Event)
+				if err != nil {
+					log.G(ctx).WithError(err).Warn("cannot unmarshal an event from Any")
+				}
+				out, err = json.Marshal(v)
+				if err != nil {
+					log.G(ctx).WithError(err).Warn("cannot marshal Any into JSON")
+				}
+			}
+			log.G(ctx).Infof("%s: %s", e.Topic, string(out))
+		}
+	}
 }

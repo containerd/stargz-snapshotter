@@ -49,6 +49,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/containerd/containerd/events"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference/docker"
 	"github.com/google/crfs/stargz"
@@ -60,6 +61,7 @@ import (
 	"github.com/ktock/stargz-snapshotter/cache"
 	snbase "github.com/ktock/stargz-snapshotter/snapshot"
 	"github.com/ktock/stargz-snapshotter/stargz/handler"
+	sgzevents "github.com/ktock/stargz-snapshotter/stargz/proto/events"
 	"golang.org/x/sys/unix"
 )
 
@@ -104,7 +106,7 @@ func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
 	}
 }
 
-func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
+func NewFilesystem(root string, pub events.Publisher, config *Config) (snbase.FileSystem, error) {
 	var err error
 	fs := &filesystem{
 		httpCacheChunkSize: config.HTTPCacheChunkSize,
@@ -113,6 +115,7 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 		pullTransports:     make(map[string]http.RoundTripper),
 		conn:               make(map[string]*connection),
 		debug:              config.Debug,
+		pub:                pub,
 	}
 	if fs.httpCacheChunkSize == 0 {
 		fs.httpCacheChunkSize = defaultHTTPCacheChunkSize
@@ -154,6 +157,7 @@ type filesystem struct {
 	conn               map[string]*connection
 	connMu             sync.Mutex
 	debug              bool
+	pub                events.Publisher
 }
 
 type connection struct {
@@ -162,7 +166,16 @@ type connection struct {
 	lastCheck time.Time
 }
 
+// logf publishes a Log event
+func (fs *filesystem) logf(ctx context.Context, s string, args ...interface{}) error {
+	text := fmt.Sprintf(s, args...)
+	return fs.pub.Publish(ctx, sgzevents.LogTopic, &sgzevents.Log{Text: text})
+}
+
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
+	if err := fs.pub.Publish(ctx, sgzevents.MountBeginTopic, &sgzevents.MountBegin{Mountpoint: mountpoint}); err != nil {
+		return err
+	}
 	ref, ok := labels[handler.TargetRefLabel]
 	if !ok {
 		log.G(ctx).Debug("stargz: reference hasn't been passed")
@@ -180,6 +193,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		log.G(ctx).WithError(err).WithField("ref", ref).WithField("url", url).Debug("stargz: failed to resolve the reference")
 		return err
 	}
+	fs.logf(ctx, "%s: resolved URL for ref=%s, digest=%s", mountpoint, ref, digest)
 	fs.connMu.Lock()
 	fs.conn[mountpoint] = &connection{
 		url:       url,
@@ -194,6 +208,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to get layer size information")
 		return err
 	}
+	fs.logf(ctx, "%s: size=%d", mountpoint, size)
 
 	// Construct filesystem from the remote stargz layer.
 	ur := &urlReaderAt{
@@ -209,11 +224,13 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to parse stargz")
 		return err
 	}
+	fs.logf(ctx, "%s: opened stargz archive", mountpoint)
 	root, ok := r.Lookup("")
 	if !ok {
 		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to get a TOCEntry of the root node of the layer")
 		return err
 	}
+	fs.logf(ctx, "%s: got TOCEntry", mountpoint)
 	gr := &stargzReader{
 		r:     r,
 		cache: fs.fsCache,
@@ -249,7 +266,13 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 
 	server.SetDebug(fs.debug)
 	go server.Serve()
-	return server.WaitMount()
+	if err := server.WaitMount(); err != nil {
+		return err
+	}
+	if err := fs.pub.Publish(ctx, sgzevents.MountCompleteTopic, &sgzevents.MountComplete{Mountpoint: mountpoint}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (fs *filesystem) Check(ctx context.Context, mountpoint string) (err error) {

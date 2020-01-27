@@ -29,7 +29,10 @@ import (
 	"github.com/BurntSushi/toml"
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
+	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/namespaces"
+	"github.com/ktock/stargz-snapshotter/cmd/containerd-stargz-grpc/publisher"
 	snbase "github.com/ktock/stargz-snapshotter/snapshot"
 	stargz "github.com/ktock/stargz-snapshotter/stargz"
 	"github.com/sirupsen/logrus"
@@ -42,10 +45,12 @@ const (
 )
 
 var (
-	address    = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
-	configPath = flag.String("config", "", "path to the configuration file")
-	logLevel   = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
-	rootDir    = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
+	address         = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
+	eventsAddress   = flag.String("events-address", defaults.DefaultAddress, "address for containerd events API endpoint")
+	eventsNamespace = flag.String("events-namespace", namespaces.Default, "namespace for events-address")
+	configPath      = flag.String("config", "", "path to the configuration file")
+	logLevel        = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
+	rootDir         = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
 )
 
 func main() {
@@ -65,6 +70,12 @@ func main() {
 		config = &stargz.Config{}
 	)
 
+	eventsCtx := namespaces.WithNamespace(ctx, *eventsNamespace)
+	pub, err := publisher.New(eventsCtx, *eventsAddress)
+	if err != nil {
+		log.G(eventsCtx).WithError(err).Fatalf("failed to create event publisher for %q", *eventsAddress)
+	}
+
 	// Get configuration from specified file
 	if *configPath != "" {
 		if _, err := toml.DecodeFile(*configPath, &config); err != nil {
@@ -73,7 +84,7 @@ func main() {
 	}
 
 	// Configure filesystem and snapshotter
-	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"), config)
+	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"), pub, config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
 	}

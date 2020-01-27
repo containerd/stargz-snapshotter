@@ -1,0 +1,38 @@
+file {
+  name: "github.com/ktock/stargz-snapshotter/stargz/proto/events/events.proto"
+  package: "stargz.proto.events"
+  message_type {
+    name: "MountBegin"
+    field {
+      name: "mountpoint"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "mountpoint"
+    }
+  }
+  message_type {
+    name: "MountComplete"
+    field {
+      name: "mountpoint"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "mountpoint"
+    }
+  }
+  message_type {
+    name: "Log"
+    field {
+      name: "text"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "text"
+    }
+  }
+  options {
+    go_package: "github.com/ktock/stargz-snapshotter/stargz/proto/events;events"
+  }
+  syntax: "proto3"
+}

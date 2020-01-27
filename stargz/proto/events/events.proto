@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package stargz.proto.events;
+
+option go_package = "github.com/ktock/stargz-snapshotter/stargz/proto/events;events";
+
+message MountBegin {
+  string mountpoint = 1;
+}
+
+message MountComplete {
+  string mountpoint = 1;
+}
+
+// Log should be used only if the log needs to be printed on the client side.
+// Consider defining a new message structure whenever possible.
+message Log {
+  string text = 1;
+}
