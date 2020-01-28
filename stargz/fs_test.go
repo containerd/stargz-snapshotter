@@ -39,16 +39,86 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestCheckInterval(t *testing.T) {
+	var (
+		largeInterval = time.Hour
+		tr            = &calledRoundTripper{}
+		c             = &connection{
+			url: "test",
+			tr:  tr,
+		}
+		fs = &filesystem{
+			conn:               map[string]*connection{"test": c},
+			layerValidInterval: largeInterval,
+		}
+	)
+
+	check := func(name string) (time.Time, bool) {
+		beforeUpdate := time.Now()
+		tr.called = false
+		if err := fs.Check(context.TODO(), "test"); err != nil {
+			t.Fatalf("%s: check mustn't be failed", name)
+		}
+		var (
+			updatedTime = c.lastCheck
+			afterUpdate = time.Now()
+		)
+		if !tr.called {
+			return updatedTime, false
+		}
+		if !(updatedTime.After(beforeUpdate) && updatedTime.Before(afterUpdate)) {
+			t.Errorf("%s: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, c.lastCheck)
+		}
+
+		return updatedTime, true
+	}
+
+	// first time
+	firstTime, called := check("first time")
+	if !called {
+		t.Error("must be called for the first time")
+	}
+
+	// second time(not expired yet)
+	secondTime, called := check("second time")
+	if called {
+		t.Error("mustn't be checked if not expired")
+	}
+	if !secondTime.Equal(firstTime) {
+		t.Errorf("lastCheck time must be same as first time(%q) but %q", firstTime, secondTime)
+	}
+
+	// third time(expired, must be checked)
+	c.lastCheck = time.Now().Add(-1 * largeInterval) // set to "largeInterval" ago
+	if _, called := check("third time"); !called {
+		t.Error("must be called for the third time")
+	}
+}
+
+type calledRoundTripper struct {
+	called bool
+}
+
+func (c *calledRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	c.called = true
+	res = &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
+	}
+	return
+}
+
 func TestCheck(t *testing.T) {
 	tr := &breakRoundTripper{}
 	fs := &filesystem{
-		transport: tr,
 		conn: map[string]*connection{
 			"test": {
 				url: "test",
 				tr:  tr,
 			},
 		},
+		layerValidInterval: 0,
 	}
 	tr.success = true
 	if err := fs.Check(context.TODO(), "test"); err != nil {

@@ -77,6 +77,7 @@ const (
 
 	defaultHTTPCacheChunkSize = 50000
 	defaultLRUCacheEntry      = 5000
+	defaultLayerValidInterval = 60
 )
 
 type Config struct {
@@ -84,6 +85,7 @@ type Config struct {
 	HTTPCacheChunkSize int64  `toml:"http_chunk_size"`
 	HTTPCacheType      string `toml:"http_cache_type"`
 	FSCacheType        string `toml:"filesystem_cache_type"`
+	LayerValidInterval int64  `toml:"layer_valid_interval"` // set to negative value to check every time
 
 	Insecure   []string `toml:"insecure"`
 	NoPrefetch bool     `toml:"noprefetch"`
@@ -115,6 +117,15 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 	if fs.httpCacheChunkSize == 0 {
 		fs.httpCacheChunkSize = defaultHTTPCacheChunkSize
 	}
+	interval := config.LayerValidInterval
+	if interval == 0 {
+		// zero means "use default interval"
+		interval = int64(defaultLayerValidInterval)
+	} else if interval < 0 {
+		// negative value means "check every time"
+		interval = 0
+	}
+	fs.layerValidInterval = time.Duration(interval) * time.Second
 	maxEntry := config.LRUCacheEntry
 	if maxEntry == 0 {
 		maxEntry = defaultLRUCacheEntry
@@ -135,6 +146,7 @@ type filesystem struct {
 	httpCacheChunkSize int64
 	httpCache          cache.BlobCache
 	fsCache            cache.BlobCache
+	layerValidInterval time.Duration
 	noprefetch         bool
 	insecure           []string
 	transport          http.RoundTripper
@@ -144,8 +156,9 @@ type filesystem struct {
 }
 
 type connection struct {
-	url string
-	tr  http.RoundTripper
+	url       string
+	tr        http.RoundTripper
+	lastCheck time.Time
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
@@ -167,7 +180,11 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		return err
 	}
 	fs.mu.Lock()
-	fs.conn[mountpoint] = &connection{url, tr}
+	fs.conn[mountpoint] = &connection{
+		url:       url,
+		tr:        tr,
+		lastCheck: time.Now(),
+	}
 	fs.mu.Unlock()
 
 	// Get size information.
@@ -234,16 +251,28 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	return server.WaitMount()
 }
 
-func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
-	rCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+func (fs *filesystem) Check(ctx context.Context, mountpoint string) (err error) {
 	fs.mu.Lock()
-	c := fs.conn[mountpoint]
-	fs.mu.Unlock()
+	defer fs.mu.Unlock()
+	var (
+		c   = fs.conn[mountpoint]
+		now = time.Now()
+	)
 	if c == nil {
 		log.G(ctx).WithField("mountpoint", mountpoint).Debug("stargz: check failed: connection not registered")
 		return fmt.Errorf("connection not regisiterd")
 	}
+	if now.Sub(c.lastCheck) < fs.layerValidInterval {
+		// do nothing if not expired
+		log.G(ctx).WithField("mountpoint", mountpoint).
+			WithField("remaining(sec)", fs.layerValidInterval-now.Sub(c.lastCheck)).
+			Debug("stargz: skipping checking layer")
+		return nil
+	}
+	c.lastCheck = now
+
+	rCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	req, err := http.NewRequest("GET", c.url, nil)
 	if err != nil {
 		log.G(ctx).WithError(err).WithField("url", c.url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to make request")
