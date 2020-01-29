@@ -110,7 +110,7 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 		httpCacheChunkSize: config.HTTPCacheChunkSize,
 		noprefetch:         config.NoPrefetch,
 		insecure:           config.Insecure,
-		transport:          http.DefaultTransport,
+		pullTransports:     make(map[string]http.RoundTripper),
 		conn:               make(map[string]*connection),
 		debug:              config.Debug,
 	}
@@ -149,9 +149,10 @@ type filesystem struct {
 	layerValidInterval time.Duration
 	noprefetch         bool
 	insecure           []string
-	transport          http.RoundTripper
+	pullTransports     map[string]http.RoundTripper
+	pullTransportsMu   sync.Mutex
 	conn               map[string]*connection
-	mu                 sync.Mutex
+	connMu             sync.Mutex
 	debug              bool
 }
 
@@ -179,13 +180,13 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		log.G(ctx).WithError(err).WithField("ref", ref).WithField("url", url).Debug("stargz: failed to resolve the reference")
 		return err
 	}
-	fs.mu.Lock()
+	fs.connMu.Lock()
 	fs.conn[mountpoint] = &connection{
 		url:       url,
 		tr:        tr,
 		lastCheck: time.Now(),
 	}
-	fs.mu.Unlock()
+	fs.connMu.Unlock()
 
 	// Get size information.
 	size, err := fs.getSize(tr, url)
@@ -252,8 +253,8 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 }
 
 func (fs *filesystem) Check(ctx context.Context, mountpoint string) (err error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
+	fs.connMu.Lock()
+	defer fs.connMu.Unlock()
 	var (
 		c   = fs.conn[mountpoint]
 		now = time.Now()
@@ -314,6 +315,9 @@ func (fs *filesystem) isInsecure(host string) bool {
 // resolve resolves specified reference with authenticating and dealing with
 // redirection in a proper way. We use `~/.docker/config.json` for authn.
 func (fs *filesystem) resolve(ctx context.Context, ref string, digest string) (string, http.RoundTripper, error) {
+	fs.pullTransportsMu.Lock()
+	defer fs.pullTransportsMu.Unlock()
+
 	// Parse reference in docker convention
 	named, err := docker.ParseDockerRef(ref)
 	if err != nil {
@@ -338,37 +342,62 @@ func (fs *filesystem) resolve(ctx context.Context, ref string, digest string) (s
 		return "", nil, fmt.Errorf("failed to parse reference %q: %v", ref, err)
 	}
 
-	// Authn against the repository using `~/.docker/config.json`
-	auth, err := authn.DefaultKeychain.Resolve(nameref.Context())
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
-	}
-	tr, err := transport.New(nameref.Context().Registry, auth, fs.transport, []string{nameref.Scope(transport.PullScope)})
-	if err != nil {
-		return "", nil, fmt.Errorf("faild to get transport of %q: %v", ref, err)
+	// Try to use cached transport (cahced per reference name)
+	tr, ok := fs.pullTransports[nameref.Name()]
+	if ok {
+		// Check the connectivity of the transport (and redirect if necessary)
+		if url, err := checkAndRedirect(ctx, url, tr); err == nil {
+			return url, tr, nil
+		}
 	}
 
-	// Redirect if necessary. We use GET request for GCR.
+	// Refresh the transport and check the connectivity
+	if tr, err = refreshTransport(nameref); err != nil {
+		return "", nil, err
+	}
+	if url, err = checkAndRedirect(ctx, url, tr); err != nil {
+		return "", nil, err
+	}
+
+	// Update transports cache
+	fs.pullTransports[nameref.Name()] = tr
+
+	return url, tr, nil
+}
+
+func refreshTransport(ref name.Reference) (http.RoundTripper, error) {
+	// Authn against the repository using `~/.docker/config.json`
+	auth, err := authn.DefaultKeychain.Resolve(ref.Context())
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
+	}
+	return transport.New(ref.Context().Registry, auth, http.DefaultTransport, []string{ref.Scope(transport.PullScope)})
+}
+
+func checkAndRedirect(ctx context.Context, url string, tr http.RoundTripper) (string, error) {
 	rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	// We use GET request for GCR.
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to request to the registry of %q: %v", url, err)
+		return "", fmt.Errorf("failed to request to the registry of %q: %v", url, err)
 	}
 	req = req.WithContext(rCtx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
-	if res, err := tr.RoundTrip(req); err == nil && res.StatusCode < 400 {
-		defer func() {
-			io.Copy(ioutil.Discard, res.Body)
-			res.Body.Close()
-		}()
-		if redir := res.Header.Get("Location"); redir != "" && res.StatusCode/100 == 3 {
-			url = redir
-		}
+	res, err := tr.RoundTrip(req)
+	if err != nil || res.StatusCode >= 400 {
+		return "", fmt.Errorf("failed to redirect: %v", err)
 	}
-
-	return url, tr, nil
+	defer func() {
+		io.Copy(ioutil.Discard, res.Body)
+		res.Body.Close()
+	}()
+	if redir := res.Header.Get("Location"); redir != "" && res.StatusCode/100 == 3 {
+		url = redir
+	}
+	return url, nil
 }
 
 // getSize fetches the size info of the specified layer by requesting HEAD.
@@ -404,9 +433,9 @@ type node struct {
 }
 
 func (n *node) OnUnmount() {
-	n.fs.mu.Lock()
+	n.fs.connMu.Lock()
 	delete(n.fs.conn, n.root)
-	n.fs.mu.Unlock()
+	n.fs.connMu.Unlock()
 }
 
 func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
