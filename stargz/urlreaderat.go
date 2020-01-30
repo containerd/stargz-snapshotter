@@ -54,14 +54,14 @@ type regionSet struct {
 func (rs *regionSet) add(r region) {
 	for i := range rs.rs {
 		f := &rs.rs[i]
-		if r.b <= f.b && f.b <= r.e && r.e <= f.e {
+		if r.b <= f.b && f.b <= r.e+1 && r.e <= f.e {
 			f.b = r.b
 			return
 		}
 		if f.b <= r.b && r.e <= f.e {
 			return
 		}
-		if f.b <= r.b && r.b <= f.e && f.e <= r.e {
+		if f.b <= r.b && r.b <= f.e+1 && f.e <= r.e {
 			f.e = r.e
 			return
 		}
@@ -174,16 +174,25 @@ func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[r
 		return nil
 	}
 
+	// squash requesting chunks to reduce the total size of request header (servers
+	// normally have limits for the size of headers)
+	// TODO: when our request has too many ranges, we need to divide it into
+	//       multiple requests to avoid huge header.
+	rs := regionSet{}
+	for reg := range requests {
+		rs.add(reg)
+	}
+
 	// request specified ranges.
 	req, err := http.NewRequest("GET", r.url, nil)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	req = req.WithContext(ctx)
 	ranges := "bytes=0-0," // dummy range to make sure the response to be multipart
-	for reg := range requests {
+	for _, reg := range rs.rs {
 		ranges += fmt.Sprintf("%d-%d,", reg.b, reg.e)
 	}
 	req.Header.Add("Range", ranges[:len(ranges)-1])
@@ -238,10 +247,21 @@ func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[r
 		if err != nil {
 			return fmt.Errorf("failed to read multipart response data: %v", err)
 		}
-		if reg.size() != int64(len(data)) {
-			return fmt.Errorf("chunk has invalid size %d; want %d", len(data), reg.size())
+
+		// Chunk this part
+		if err := r.walkChunks(reg, func(chunk region) error {
+			var (
+				base = chunk.b - reg.b
+				end  = base + chunk.size()
+			)
+			if int64(len(data)) < end {
+				return fmt.Errorf("invalid part data size %d; want at least %d", len(data), end)
+			}
+			allData[chunk] = data[base:end]
+			return nil
+		}); err != nil {
+			return err
 		}
-		allData[reg] = data
 	}
 
 	return nil
