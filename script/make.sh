@@ -68,7 +68,7 @@ if [ "${INTEGRATION}" == "true" ] ; then
     "${CONTEXT}"/docker-compose-integration.yml.sh "${REPO}" "${AUTH_DIR}" "${RS_ROOT_DIR}" > "${DOCKER_COMPOSE_YAML}"
 
     if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} testenv_integration remote_snapshotter_integration && \
-               docker-compose -f "${DOCKER_COMPOSE_YAML}" up --exit-code-from testenv_integration ) ; then
+               docker-compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
         FAIL=true
     fi
 
@@ -90,7 +90,7 @@ if [ "${OPTIMIZE}" == "true" ] ; then
     "${CONTEXT}"/docker-compose-opt.yml.sh "${REPO}" "${AUTH_DIR}" > "${DOCKER_COMPOSE_YAML}"
 
     if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} testenv_opt && \
-               docker-compose -f "${DOCKER_COMPOSE_YAML}" up --exit-code-from testenv_opt ) ; then
+               docker-compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
         FAIL=true
     fi
 
