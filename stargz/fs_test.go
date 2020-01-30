@@ -55,22 +55,25 @@ func TestCheckInterval(t *testing.T) {
 
 	check := func(name string) (time.Time, bool) {
 		beforeUpdate := time.Now()
+
+		time.Sleep(time.Millisecond)
+
 		tr.called = false
 		if err := fs.Check(context.TODO(), "test"); err != nil {
 			t.Fatalf("%s: check mustn't be failed", name)
 		}
-		var (
-			updatedTime = c.lastCheck
-			afterUpdate = time.Now()
-		)
+
+		time.Sleep(time.Millisecond)
+
+		afterUpdate := time.Now()
 		if !tr.called {
-			return updatedTime, false
+			return c.lastCheck, false
 		}
-		if !(updatedTime.After(beforeUpdate) && updatedTime.Before(afterUpdate)) {
+		if !(c.lastCheck.After(beforeUpdate) && c.lastCheck.Before(afterUpdate)) {
 			t.Errorf("%s: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, c.lastCheck)
 		}
 
-		return updatedTime, true
+		return c.lastCheck, true
 	}
 
 	// first time
