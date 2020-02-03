@@ -66,14 +66,13 @@ import (
 const (
 	PrefetchLandmark = ".prefetch.landmark"
 
-	blockSize          = 512
-	directoryCacheType = "directory"
-	memoryCacheType    = "memory"
-	whiteoutPrefix     = ".wh."
-	whiteoutOpaqueDir  = whiteoutPrefix + whiteoutPrefix + ".opq"
-	opaqueXattr        = "trusted.overlay.opaque"
-	opaqueXattrValue   = "y"
-	stateDirName       = ".stargz-snapshotter"
+	blockSize         = 512
+	memoryCacheType   = "memory"
+	whiteoutPrefix    = ".wh."
+	whiteoutOpaqueDir = whiteoutPrefix + whiteoutPrefix + ".opq"
+	opaqueXattr       = "trusted.overlay.opaque"
+	opaqueXattrValue  = "y"
+	stateDirName      = ".stargz-snapshotter"
 
 	defaultHTTPCacheChunkSize = 50000
 	defaultLRUCacheEntry      = 5000
@@ -94,14 +93,10 @@ type Config struct {
 
 // getCache gets a cache corresponding to specified type.
 func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
-	switch ctype {
-	case directoryCacheType:
-		return cache.NewDirectoryCache(dir, maxEntry)
-	case memoryCacheType:
+	if ctype == memoryCacheType {
 		return cache.NewMemoryCache(), nil
-	default:
-		return cache.NewNopCache(), nil
 	}
+	return cache.NewDirectoryCache(dir, maxEntry)
 }
 
 func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {

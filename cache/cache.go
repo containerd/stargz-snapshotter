@@ -175,16 +175,3 @@ func (mc *memoryCache) Add(blobHash string, p []byte) {
 	defer mc.mu.Unlock()
 	mc.membuf[blobHash] = string(p)
 }
-
-// nopCache is a cache implementation which doesn't cache anything.
-type nopCache struct{}
-
-func NewNopCache() BlobCache {
-	return &nopCache{}
-}
-
-func (nc *nopCache) Fetch(blobHash string) ([]byte, error) {
-	return nil, fmt.Errorf("Missed cache: %s", blobHash)
-}
-
-func (nc *nopCache) Add(blobHash string, p []byte) {}
