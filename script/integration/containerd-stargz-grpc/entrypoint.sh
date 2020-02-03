@@ -52,6 +52,4 @@ GO111MODULE=off PREFIX=/tmp/out/ make clean && \
     GO111MODULE=off PREFIX=/tmp/out/ make install
 
 echo "Running remote snapshotter..."
-mkdir -p /etc/containerd-stargz-grpc && \
-    cp ./script/integration/containerd-stargz-grpc/config.stargz.toml /etc/containerd-stargz-grpc/config.stargz.toml
-containerd-stargz-grpc --log-level=debug --config=/etc/containerd-stargz-grpc/config.stargz.toml
+containerd-stargz-grpc --log-level=debug

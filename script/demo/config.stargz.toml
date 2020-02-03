@@ -1,5 +1,1 @@
 insecure = ["127.0.0.1", "localhost", "registry2"]
-lru_max_entry = 5000
-http_chunk_size = 50000
-http_cache_type = "directory"
-filesystem_cache_type = "directory"
