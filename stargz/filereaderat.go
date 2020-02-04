@@ -23,7 +23,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"strings"
 
 	"github.com/google/crfs/stargz"
@@ -87,62 +86,80 @@ func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *stargzReader) prefetch(layer *io.SectionReader) (wait func(), err error) {
-	done := make(chan struct{})
-	wait = func() { <-done }
-	e, ok := gr.r.Lookup(PrefetchLandmark)
-	if !ok {
-		close(done)
-		return wait, nil
+func (gr *stargzReader) prefetch(layer *io.SectionReader) (cache func() error, err error) {
+	var prefetchSize int64
+	if e, ok := gr.r.Lookup(PrefetchLandmark); ok {
+		if e.Offset > layer.Size() {
+			return nil, fmt.Errorf("invalid landmark offset %d is larger than layer size %d", e.Offset, layer.Size())
+		}
+		prefetchSize = e.Offset
 	}
-	size := e.Offset
 
-	// Prefetch specified range at once
-	raw := make([]byte, size)
-	_, err = layer.ReadAt(raw, 0)
+	// Fetch specified range at once (synchronously)
+	// TODO: when prefetchSize is too large, save memory by chunking the range
+	prefetchBytes := make([]byte, prefetchSize)
+	if _, err := io.ReadFull(layer, prefetchBytes); err != nil && err != io.EOF {
+		return nil, fmt.Errorf("failed to prefetch layer data: %v", err)
+	}
+
+	// Cache specified range to filesystem cache (asynchronously)
+	cache = func() error {
+		if err := gr.cacheTarGz(bytes.NewReader(prefetchBytes)); err != io.EOF && err != io.ErrUnexpectedEOF {
+			return err
+		}
+		return nil
+	}
+
+	return
+}
+
+func (gr *stargzReader) cacheTarGz(r io.Reader) error {
+	gzr, err := gzip.NewReader(r)
 	if err != nil {
-		if err != io.EOF {
-			close(done)
-			return wait, fmt.Errorf("failed to get raw data: %v", err)
-		}
+		return err
 	}
-
-	go func() {
-		defer close(done)
-
-		// Parse the layer and cache chunks
-		gz, err := gzip.NewReader(bytes.NewReader(raw))
+	tr := tar.NewReader(gzr)
+	for {
+		h, err := tr.Next()
 		if err != nil {
-			return
-		}
-		tr := tar.NewReader(gz)
-		for {
-			h, err := tr.Next()
-			if err != nil {
-				break
+			if err != io.EOF {
+				return err
 			}
-			fe, ok := gr.r.Lookup(strings.TrimSuffix(h.Name, "/"))
+			break
+		}
+		if h.Name == PrefetchLandmark || h.Name == stargz.TOCTarName {
+			// We don't need to cache PrefetchLandmark and TOC json file.
+			continue
+		}
+		fe, ok := gr.r.Lookup(strings.TrimSuffix(h.Name, "/"))
+		if !ok {
+			return fmt.Errorf("failed to get TOCEntry of %q", h.Name)
+		}
+		var nr int64
+		for nr < h.Size {
+			ce, ok := gr.r.ChunkEntryForOffset(h.Name, nr)
 			if !ok {
 				break
 			}
-			payload, err := ioutil.ReadAll(tr)
-			if err != nil {
-				break
-			}
-			var nr int64
-			for nr < h.Size {
-				ce, ok := gr.r.ChunkEntryForOffset(h.Name, nr)
-				if !ok {
-					break
-				}
-				gr.cache.Add(gr.genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize),
-					payload[ce.ChunkOffset:ce.ChunkOffset+ce.ChunkSize])
-				nr += ce.ChunkSize
-			}
-		}
-	}()
+			id := gr.genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize)
+			if cacheData, err := gr.cache.Fetch(id); err != nil || len(cacheData) != int(ce.ChunkSize) {
 
-	return wait, nil
+				// make sure that this range is at ce.ChunkOffset for ce.ChunkSize
+				if nr != ce.ChunkOffset {
+					return fmt.Errorf("invalid offset %d != %d", nr, ce.ChunkOffset)
+				}
+				data := make([]byte, int(ce.ChunkSize))
+
+				// Cache this chunk (offset: ce.ChunkOffset, size: ce.ChunkSize)
+				if _, err := io.ReadFull(tr, data); err != nil && err != io.EOF {
+					return fmt.Errorf("failed to read data: %v", err)
+				}
+				gr.cache.Add(id, data)
+			}
+			nr += ce.ChunkSize
+		}
+	}
+	return nil
 }
 
 func (gr *stargzReader) genID(digest string, offset, size int64) string {

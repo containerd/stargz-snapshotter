@@ -30,6 +30,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ktock/stargz-snapshotter/task"
 )
 
 const (
@@ -177,11 +180,12 @@ func TestFailReadAt(t *testing.T) {
 
 func makeURLReaderAt(t *testing.T, contents []byte, chunkSize int64, fn RoundTripFunc) *urlReaderAt {
 	return &urlReaderAt{
-		url:       testURL,
-		t:         fn,
-		size:      int64(len(contents)),
-		chunkSize: chunkSize,
-		cache:     &testCache{membuf: map[string]string{}, t: t},
+		url:                   testURL,
+		t:                     fn,
+		size:                  int64(len(contents)),
+		chunkSize:             chunkSize,
+		cache:                 &testCache{membuf: map[string]string{}, t: t},
+		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
 	}
 }
 

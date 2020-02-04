@@ -36,6 +36,7 @@ import (
 	"github.com/google/crfs/stargz"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
+	"github.com/ktock/stargz-snapshotter/task"
 	"golang.org/x/sys/unix"
 )
 
@@ -48,8 +49,9 @@ func TestCheckInterval(t *testing.T) {
 			tr:  tr,
 		}
 		fs = &filesystem{
-			conn:               map[string]*connection{"test": c},
-			layerValidInterval: largeInterval,
+			conn:                  map[string]*connection{"test": c},
+			layerValidInterval:    largeInterval,
+			backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Second),
 		}
 	)
 
@@ -121,7 +123,8 @@ func TestCheck(t *testing.T) {
 				tr:  tr,
 			},
 		},
-		layerValidInterval: 0,
+		layerValidInterval:    0,
+		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Second),
 	}
 	tr.success = true
 	if err := fs.Check(context.TODO(), "test"); err != nil {

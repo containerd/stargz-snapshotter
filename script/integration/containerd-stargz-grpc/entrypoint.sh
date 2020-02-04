@@ -40,6 +40,24 @@ function retry {
     fi
 }
 
+SSNAPSHOTD_PID=""  # what PID needs be killed on exit (PID of stargz snapshotter daemon).
+SSNAPSHOTD_ROOT=/var/lib/containerd-stargz-grpc/
+function cleanup {
+    ORG_EXIT_CODE="${1}"
+    if [[ "${SSNAPSHOTD_PID}" != "" ]] ; then
+        kill -9 "${SSNAPSHOTD_PID}" || true
+    fi
+    echo "Cleaning up /var/lib/containerd-stargz-grpc..."
+    if [ -d "${SSNAPSHOTD_ROOT}snapshotter/snapshots/" ] ; then 
+        find "${SSNAPSHOTD_ROOT}snapshotter/snapshots/" \
+             -maxdepth 1 -mindepth 1 -type d -exec umount "{}/fs" \;
+    fi
+    rm -rf "${SSNAPSHOTD_ROOT}"*
+    echo "Exit with code: ${ORG_EXIT_CODE}"
+    exit "${ORG_EXIT_CODE}"
+}
+trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+
 echo "Logging into the registry..."
 cp /auth/certs/domain.crt /usr/local/share/ca-certificates
 update-ca-certificates
@@ -52,4 +70,6 @@ GO111MODULE=off PREFIX=/tmp/out/ make clean && \
     GO111MODULE=off PREFIX=/tmp/out/ make install
 
 echo "Running remote snapshotter..."
-containerd-stargz-grpc --log-level=debug
+containerd-stargz-grpc --log-level=debug &
+SSNAPSHOTD_PID=$! # tells cleanup code what PID needs be killed on exit (via ${SSNAPSHOTD_PID}).
+wait "${SSNAPSHOTD_PID}"

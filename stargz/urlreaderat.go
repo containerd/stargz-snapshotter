@@ -32,18 +32,20 @@ import (
 	"time"
 
 	"github.com/ktock/stargz-snapshotter/cache"
+	"github.com/ktock/stargz-snapshotter/task"
 )
 
 var contentRangeRegexp = regexp.MustCompile(`bytes ([0-9]+)-([0-9]+)/([0-9]+|\\*)`)
 
 type urlReaderAt struct {
-	url                string
-	t                  http.RoundTripper
-	size               int64
-	chunkSize          int64
-	cache              cache.BlobCache
-	fetchedRegionSet   regionSet
-	fetchedRegionSetMu sync.Mutex
+	url                   string
+	t                     http.RoundTripper
+	size                  int64
+	chunkSize             int64
+	cache                 cache.BlobCache
+	fetchedRegionSet      regionSet
+	fetchedRegionSetMu    sync.Mutex
+	backgroundTaskManager *task.BackgroundTaskManager
 }
 
 type regionSet struct {
@@ -108,7 +110,34 @@ func (r *urlReaderAt) walkChunks(allRegion region, walkFn walkFunc) error {
 
 // ReadAt reads remote chunks from specified offset for the buffer size.
 // It tries to fetch as many chunks as possible from local cache.
+// This read functionality is a prioritized task and all background tasks
+// will be stopped during the execution so this can avoid being disturbed
+// for NW traffic by background tasks.
 func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
+	r.backgroundTaskManager.DoPrioritizedTask()
+	defer r.backgroundTaskManager.DonePrioritizedTask()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	return r.readAtWithContext(ctx, p, offset)
+}
+
+type readerAtFunc func([]byte, int64) (int, error)
+
+func (f readerAtFunc) ReadAt(p []byte, offset int64) (int, error) { return f(p, offset) }
+
+// backgroundReaderAt provides ReaderAt which has same functionality as
+// urlReaderAt instance but the ReadAt functinality can be interrupted by
+// prioritized tasks.
+func (r *urlReaderAt) backgroundReaderAt() io.ReaderAt {
+	return readerAtFunc(func(p []byte, offset int64) (n int, err error) {
+		r.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
+			n, err = r.readAtWithContext(ctx, p, offset)
+		}, 120*time.Second)
+		return
+	})
+}
+
+func (r *urlReaderAt) readAtWithContext(ctx context.Context, p []byte, offset int64) (int, error) {
 	if len(p) == 0 || offset > r.size {
 		return 0, nil
 	}
@@ -117,7 +146,7 @@ func (r *urlReaderAt) ReadAt(p []byte, offset int64) (int, error) {
 	allRegion := region{floor(offset, r.chunkSize), ceil(offset+int64(len(p))-1, r.chunkSize) - 1}
 	allData := map[region][]byte{}
 	remotes := r.appendFromCache(allData, allRegion)
-	if err := r.appendFromRemote(allData, remotes); err != nil {
+	if err := r.appendFromRemote(ctx, allData, remotes); err != nil {
 		return 0, err
 	}
 	r.fetchedRegionSetMu.Lock()
@@ -169,7 +198,7 @@ func (r *urlReaderAt) appendFromCache(allData map[region][]byte, whole region) m
 }
 
 // appendFromRemote fetches all specified chunks from remote store.
-func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[region]bool) error {
+func (r *urlReaderAt) appendFromRemote(ctx context.Context, allData map[region][]byte, requests map[region]bool) error {
 	if len(requests) == 0 {
 		return nil
 	}
@@ -188,8 +217,6 @@ func (r *urlReaderAt) appendFromRemote(allData map[region][]byte, requests map[r
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
 	req = req.WithContext(ctx)
 	ranges := "bytes=0-0," // dummy range to make sure the response to be multipart
 	for _, reg := range rs.rs {
