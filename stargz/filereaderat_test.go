@@ -239,13 +239,13 @@ func TestPrefetch(t *testing.T) {
 				r:     r,
 				cache: &testCache{membuf: map[string]string{}, t: t},
 			}
-			done, err := gr.prefetch(sr)
+			cache, err := gr.prefetch(sr)
 			if err != nil {
 				t.Errorf("failed to prefetch: %v", err)
 				return
 			}
-			if done(); tt.wantNum != len(gr.cache.(*testCache).membuf) {
-				t.Errorf("number of chunks in the cache %d; want %d", len(gr.cache.(*testCache).membuf), tt.wantNum)
+			if err := cache(); err != nil || tt.wantNum != len(gr.cache.(*testCache).membuf) {
+				t.Errorf("number of chunks in the cache %d; want %d: %v", len(gr.cache.(*testCache).membuf), tt.wantNum, err)
 				return
 			}
 
@@ -350,23 +350,16 @@ func TestFailStargzReader(t *testing.T) {
 
 	// tests for prefetch
 	br.success = true
-	done, err := gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
-	if done(); err != nil {
+	_, err = gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
+	if err != nil {
 		t.Errorf("failed to prefetch but wanted to succeed: %v", err)
 		return
 	}
 
 	br.success = false
-	done, err = gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
-	if done(); err == nil {
+	_, err = gr.prefetch(io.NewSectionReader(br, 0, stargzFile.Size()))
+	if err == nil {
 		t.Errorf("succeeded to prefetch but wanted to fail")
-		return
-	}
-
-	dummyData := []byte("dummy") // wants to be succeeded even for dummy data
-	done, err = gr.prefetch(io.NewSectionReader(bytes.NewReader(dummyData), 0, int64(len(dummyData))))
-	if done(); err != nil {
-		t.Errorf("failed to prefetch for dummy but wanted to succeed: %v", err)
 		return
 	}
 }

@@ -32,6 +32,7 @@
 package stargz
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -61,6 +62,7 @@ import (
 	"github.com/ktock/stargz-snapshotter/cache"
 	snbase "github.com/ktock/stargz-snapshotter/snapshot"
 	"github.com/ktock/stargz-snapshotter/stargz/handler"
+	"github.com/ktock/stargz-snapshotter/task"
 	"golang.org/x/sys/unix"
 )
 
@@ -103,12 +105,13 @@ func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
 func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 	var err error
 	fs := &filesystem{
-		httpCacheChunkSize: config.HTTPCacheChunkSize,
-		noprefetch:         config.NoPrefetch,
-		insecure:           config.Insecure,
-		pullTransports:     make(map[string]http.RoundTripper),
-		conn:               make(map[string]*connection),
-		debug:              config.Debug,
+		httpCacheChunkSize:    config.HTTPCacheChunkSize,
+		noprefetch:            config.NoPrefetch,
+		insecure:              config.Insecure,
+		pullTransports:        make(map[string]http.RoundTripper),
+		conn:                  make(map[string]*connection),
+		debug:                 config.Debug,
+		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
 	}
 	if fs.httpCacheChunkSize == 0 {
 		fs.httpCacheChunkSize = defaultHTTPCacheChunkSize
@@ -139,17 +142,18 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 }
 
 type filesystem struct {
-	httpCacheChunkSize int64
-	httpCache          cache.BlobCache
-	fsCache            cache.BlobCache
-	layerValidInterval time.Duration
-	noprefetch         bool
-	insecure           []string
-	pullTransports     map[string]http.RoundTripper
-	pullTransportsMu   sync.Mutex
-	conn               map[string]*connection
-	connMu             sync.Mutex
-	debug              bool
+	httpCacheChunkSize    int64
+	httpCache             cache.BlobCache
+	fsCache               cache.BlobCache
+	layerValidInterval    time.Duration
+	noprefetch            bool
+	insecure              []string
+	pullTransports        map[string]http.RoundTripper
+	pullTransportsMu      sync.Mutex
+	conn                  map[string]*connection
+	connMu                sync.Mutex
+	debug                 bool
+	backgroundTaskManager *task.BackgroundTaskManager
 }
 
 type connection struct {
@@ -159,6 +163,12 @@ type connection struct {
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
+	// This Mount functionality is a prioritized task and all background
+	// tasks will be stopped during the execution so this can avoid being
+	// disturbed for NW traffic by background tasks.
+	fs.backgroundTaskManager.DoPrioritizedTask()
+	defer fs.backgroundTaskManager.DonePrioritizedTask()
+
 	ref, ok := labels[handler.TargetRefLabel]
 	if !ok {
 		log.G(ctx).Debug("stargz: reference hasn't been passed")
@@ -193,11 +203,12 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 
 	// Construct filesystem from the remote stargz layer.
 	ur := &urlReaderAt{
-		url:       url,
-		t:         tr,
-		size:      size,
-		chunkSize: fs.httpCacheChunkSize,
-		cache:     fs.httpCache,
+		url:                   url,
+		t:                     tr,
+		size:                  size,
+		chunkSize:             fs.httpCacheChunkSize,
+		cache:                 fs.httpCache,
+		backgroundTaskManager: fs.backgroundTaskManager,
 	}
 	sr := io.NewSectionReader(ur, 0, size)
 	r, err := stargz.Open(sr)
@@ -216,11 +227,33 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	}
 	if !fs.noprefetch {
 		// TODO: make sync/async switchable
-		if _, err := gr.prefetch(sr); err != nil {
-			log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to prefetch layer")
+		cache, err := gr.prefetch(sr)
+		if err != nil {
+			log.G(ctx).WithError(err).WithField("digest", digest).WithField("url", url).Debug("stargz: failed to prefetch layer")
 			return err
 		}
+		go func() {
+			if err := cache(); err != nil {
+				log.G(ctx).WithError(err).WithField("digest", digest).WithField("url", url).Warning("error occurred during caching")
+				return
+			}
+			log.G(ctx).WithField("digest", digest).WithField("url", url).Debug("prefetch completed")
+		}()
 	}
+
+	// Fetch whole layer aggressively in background. We use background
+	// reader for this so prioritized tasks(Mount, Check, etc...) can
+	// interrupt the reading. This can avoid disturbing prioritized tasks
+	// about NW traffic. We read layer with a buffer to reduce num of
+	// requests to the registry.
+	go func() {
+		pr := bufio.NewReaderSize(io.NewSectionReader(ur.backgroundReaderAt(), 0, size), 2<<28)
+		if err := gr.cacheTarGz(pr); err != nil && err != io.EOF {
+			log.G(ctx).WithError(err).WithField("digest", digest).WithField("url", url).Warning("error during fetching in background")
+			return
+		}
+		log.G(ctx).WithField("digest", digest).WithField("url", url).Debug("fetched all layer data in background")
+	}()
 
 	// Mounting stargz
 	// TODO: bind mount the state directory as a read-only fs on snapshotter's side
@@ -249,6 +282,11 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 }
 
 func (fs *filesystem) Check(ctx context.Context, mountpoint string) (err error) {
+	// This Check functionality is a prioritized task and all background
+	// tasks will be stopped during the execution so this can avoid being
+	// disturbed for NW traffic by background tasks.
+	fs.backgroundTaskManager.DoPrioritizedTask()
+	defer fs.backgroundTaskManager.DonePrioritizedTask()
 	fs.connMu.Lock()
 	defer fs.connMu.Unlock()
 	var (

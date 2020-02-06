@@ -64,21 +64,6 @@ function reboot_containerd {
     retry ctr version
 }
 
-SSNAPSHOTD_ROOT=/var/lib/containerd-stargz-grpc/
-function cleanup {
-    ORG_EXIT_CODE="${1}"
-    echo "Cleaning up /var/lib/containerd-stargz-grpc..."
-    if [ -d "${SSNAPSHOTD_ROOT}snapshotter/snapshots/" ] ; then 
-        find "${SSNAPSHOTD_ROOT}snapshotter/snapshots/" \
-             -maxdepth 1 -mindepth 1 -type d -exec umount "{}/fs" \;
-    fi
-    rm -rf "${SSNAPSHOTD_ROOT}"*
-    echo "Exit with code: ${ORG_EXIT_CODE}"
-    exit "${ORG_EXIT_CODE}"
-}
-
-trap 'cleanup $?' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
-
 echo "Logging into the registry..."
 cp /auth/certs/domain.crt /usr/local/share/ca-certificates
 update-ca-certificates
