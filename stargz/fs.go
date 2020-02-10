@@ -32,7 +32,6 @@
 package stargz
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -44,7 +43,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -62,13 +60,13 @@ import (
 	"github.com/ktock/stargz-snapshotter/cache"
 	snbase "github.com/ktock/stargz-snapshotter/snapshot"
 	"github.com/ktock/stargz-snapshotter/stargz/handler"
+	"github.com/ktock/stargz-snapshotter/stargz/reader"
+	"github.com/ktock/stargz-snapshotter/stargz/remote"
 	"github.com/ktock/stargz-snapshotter/task"
 	"golang.org/x/sys/unix"
 )
 
 const (
-	PrefetchLandmark = ".prefetch.landmark"
-
 	blockSize         = 512
 	memoryCacheType   = "memory"
 	whiteoutPrefix    = ".wh."
@@ -79,15 +77,25 @@ const (
 
 	defaultHTTPCacheChunkSize = 50000
 	defaultLRUCacheEntry      = 5000
-	defaultLayerValidInterval = 60
+	defaultLayerValidInterval = 60 * time.Second
 )
+
+type layer interface {
+	OpenFile(name string) (io.ReaderAt, error)
+}
+
+type remoteInfo interface {
+	FetchedSize() int64
+	Check() error
+}
 
 type Config struct {
 	LRUCacheEntry      int    `toml:"lru_max_entry"`
 	HTTPCacheChunkSize int64  `toml:"http_chunk_size"`
 	HTTPCacheType      string `toml:"http_cache_type"`
 	FSCacheType        string `toml:"filesystem_cache_type"`
-	LayerValidInterval int64  `toml:"layer_valid_interval"` // set to negative value to check every time
+	LayerValidInterval int64  `toml:"layer_valid_interval"`
+	CheckLayerAlways   bool   `toml:"check_layer_always"`
 
 	Insecure   []string `toml:"insecure"`
 	NoPrefetch bool     `toml:"noprefetch"`
@@ -103,141 +111,156 @@ func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
 }
 
 func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
-	var err error
-	fs := &filesystem{
-		httpCacheChunkSize:    config.HTTPCacheChunkSize,
-		noprefetch:            config.NoPrefetch,
-		insecure:              config.Insecure,
-		pullTransports:        make(map[string]http.RoundTripper),
-		conn:                  make(map[string]*connection),
-		debug:                 config.Debug,
-		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
+	httpCacheChunkSize := config.HTTPCacheChunkSize
+	if httpCacheChunkSize == 0 {
+		httpCacheChunkSize = defaultHTTPCacheChunkSize
 	}
-	if fs.httpCacheChunkSize == 0 {
-		fs.httpCacheChunkSize = defaultHTTPCacheChunkSize
-	}
-	interval := config.LayerValidInterval
-	if interval == 0 {
-		// zero means "use default interval"
-		interval = int64(defaultLayerValidInterval)
-	} else if interval < 0 {
-		// negative value means "check every time"
-		interval = 0
-	}
-	fs.layerValidInterval = time.Duration(interval) * time.Second
 	maxEntry := config.LRUCacheEntry
 	if maxEntry == 0 {
 		maxEntry = defaultLRUCacheEntry
 	}
-	fs.httpCache, err = getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"), maxEntry)
+	httpCache, err := getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"), maxEntry)
 	if err != nil {
 		return nil, err
 	}
-	fs.fsCache, err = getCache(config.FSCacheType, filepath.Join(root, "fscache"), maxEntry)
+	fsCache, err := getCache(config.FSCacheType, filepath.Join(root, "fscache"), maxEntry)
 	if err != nil {
 		return nil, err
+	}
+	var layerValidInterval time.Duration
+	if config.LayerValidInterval == 0 {
+		layerValidInterval = defaultLayerValidInterval // zero means "use default interval"
+	} else {
+		layerValidInterval = time.Duration(config.LayerValidInterval) * time.Second
+	}
+	if config.CheckLayerAlways {
+		layerValidInterval = 0
 	}
 
-	return fs, nil
+	return &filesystem{
+		httpCacheChunkSize:    httpCacheChunkSize,
+		httpCache:             httpCache,
+		fsCache:               fsCache,
+		noprefetch:            config.NoPrefetch,
+		insecure:              config.Insecure,
+		pullTransports:        make(map[string]http.RoundTripper),
+		layerValidInterval:    layerValidInterval,
+		remoteInfo:            make(map[string]remoteInfo),
+		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
+		debug:                 config.Debug,
+	}, nil
 }
 
 type filesystem struct {
 	httpCacheChunkSize    int64
 	httpCache             cache.BlobCache
 	fsCache               cache.BlobCache
-	layerValidInterval    time.Duration
 	noprefetch            bool
 	insecure              []string
 	pullTransports        map[string]http.RoundTripper
 	pullTransportsMu      sync.Mutex
-	conn                  map[string]*connection
-	connMu                sync.Mutex
-	debug                 bool
+	layerValidInterval    time.Duration
+	remoteInfo            map[string]remoteInfo
+	remoteInfoMu          sync.Mutex
 	backgroundTaskManager *task.BackgroundTaskManager
+	debug                 bool
 }
 
-type connection struct {
-	url       string
-	tr        http.RoundTripper
-	lastCheck time.Time
-}
+type readerAtFunc func([]byte, int64) (int, error)
+
+func (f readerAtFunc) ReadAt(p []byte, offset int64) (int, error) { return f(p, offset) }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
-	// This Mount functionality is a prioritized task and all background
-	// tasks will be stopped during the execution so this can avoid being
-	// disturbed for NW traffic by background tasks.
+	// This is a prioritized task and all background tasks will be stopped
+	// execution so this can avoid being disturbed for NW traffic by background
+	// tasks.
 	fs.backgroundTaskManager.DoPrioritizedTask()
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
 
+	// Get basic information of this layer.
 	ref, ok := labels[handler.TargetRefLabel]
 	if !ok {
-		log.G(ctx).Debug("stargz: reference hasn't been passed")
+		log.G(ctx).Debug("reference hasn't been passed")
 		return fmt.Errorf("reference hasn't been passed")
 	}
 	digest, ok := labels[handler.TargetDigestLabel]
 	if !ok {
-		log.G(ctx).Debug("stargz: digest hasn't been passed")
+		log.G(ctx).WithField("ref", ref).Debug("digest hasn't been passed")
 		return fmt.Errorf("digest hasn't been passed")
 	}
 
-	// authenticate to the registry using ~/.docker/config.json.
-	url, tr, err := fs.resolve(ctx, ref, digest)
+	// Authenticate to the registry using ~/.docker/config.json.
+	url, tr, err := fs.resolve(ref, digest)
 	if err != nil {
-		log.G(ctx).WithError(err).WithField("ref", ref).WithField("url", url).Debug("stargz: failed to resolve the reference")
-		return err
-	}
-	fs.connMu.Lock()
-	fs.conn[mountpoint] = &connection{
-		url:       url,
-		tr:        tr,
-		lastCheck: time.Now(),
-	}
-	fs.connMu.Unlock()
-
-	// Get size information.
-	size, err := fs.getSize(tr, url)
-	if err != nil {
-		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to get layer size information")
+		log.G(ctx).WithField("ref", ref).
+			WithField("digest", digest).
+			Debug("failed to resolve the reference")
 		return err
 	}
 
-	// Construct filesystem from the remote stargz layer.
-	ur := &urlReaderAt{
-		url:                   url,
-		t:                     tr,
-		size:                  size,
-		chunkSize:             fs.httpCacheChunkSize,
-		cache:                 fs.httpCache,
-		backgroundTaskManager: fs.backgroundTaskManager,
-	}
-	sr := io.NewSectionReader(ur, 0, size)
-	r, err := stargz.Open(sr)
+	// Make and register a reader for the remote blob of this layer.
+	ur, size, err := remote.NewURLReaderAt(
+		url,
+		tr,
+		fs.httpCacheChunkSize,
+		fs.httpCache,
+		fs.layerValidInterval)
 	if err != nil {
-		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to parse stargz")
+		log.G(ctx).WithError(err).
+			WithField("ref", ref).
+			WithField("digest", digest).
+			WithField("url", url).
+			Debug("failed to connect")
 		return err
 	}
-	root, ok := r.Lookup("")
-	if !ok {
-		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to get a TOCEntry of the root node of the layer")
+	fs.remoteInfoMu.Lock()
+	fs.remoteInfo[mountpoint] = ur
+	fs.remoteInfoMu.Unlock()
+
+	// Get a reader for stargz archive.
+	// Each file's read operation is a prioritized task and all background tasks
+	// will be stopped during the execution so this can avoid being disturbed for
+	// NW traffic by background tasks.
+	sr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (n int, err error) {
+		fs.backgroundTaskManager.DoPrioritizedTask()
+		defer fs.backgroundTaskManager.DonePrioritizedTask()
+		return ur.ReadAt(p, offset)
+	}), 0, size)
+	gr, root, err := reader.NewReader(sr, fs.fsCache)
+	if err != nil {
+		log.G(ctx).WithError(err).
+			WithField("ref", ref).
+			WithField("digest", digest).
+			WithField("url", url).
+			Debug("failed to read layer")
 		return err
 	}
-	gr := &stargzReader{
-		r:     r,
-		cache: fs.fsCache,
-	}
+
+	// Prefetch this layer
 	if !fs.noprefetch {
-		// TODO: make sync/async switchable
-		cache, err := gr.prefetch(sr)
+		cache, err := gr.Prefetch() // TODO: make sync/async switchable
 		if err != nil {
-			log.G(ctx).WithError(err).WithField("digest", digest).WithField("url", url).Debug("stargz: failed to prefetch layer")
+			log.G(ctx).WithError(err).
+				WithField("ref", ref).
+				WithField("digest", digest).
+				WithField("url", url).
+				Debug("failed to prefetch layer")
 			return err
 		}
 		go func() {
 			if err := cache(); err != nil {
-				log.G(ctx).WithError(err).WithField("digest", digest).WithField("url", url).Warning("error occurred during caching")
+				log.G(ctx).WithError(err).
+					WithField("ref", ref).
+					WithField("digest", digest).
+					WithField("url", url).
+					Debug("failed to cache prefetched layer")
 				return
 			}
-			log.G(ctx).WithField("digest", digest).WithField("url", url).Debug("prefetch completed")
+			log.G(ctx).WithError(err).
+				WithField("ref", ref).
+				WithField("digest", digest).
+				WithField("url", url).
+				Debug("completed to prefetch")
 		}()
 	}
 
@@ -246,24 +269,38 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// interrupt the reading. This can avoid disturbing prioritized tasks
 	// about NW traffic. We read layer with a buffer to reduce num of
 	// requests to the registry.
+	// this fetching functionality can be interrupted by prioritized tasks.
 	go func() {
-		pr := bufio.NewReaderSize(io.NewSectionReader(ur.backgroundReaderAt(), 0, size), 2<<28)
-		if err := gr.cacheTarGz(pr); err != nil && err != io.EOF {
-			log.G(ctx).WithError(err).WithField("digest", digest).WithField("url", url).Warning("error during fetching in background")
+		br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (n int, err error) {
+			fs.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
+				n, err = ur.ReadAtWithContext(ctx, p, offset)
+			}, 120*time.Second)
+			return
+		}), 0, size)
+		if err := gr.FetchTarGzWithReader(br); err != nil {
+			log.G(ctx).WithError(err).
+				WithField("ref", ref).
+				WithField("digest", digest).
+				WithField("url", url).
+				Debug("failed to fetch whole layer")
 			return
 		}
-		log.G(ctx).WithField("digest", digest).WithField("url", url).Debug("fetched all layer data in background")
+		log.G(ctx).WithError(err).
+			WithField("ref", ref).
+			WithField("digest", digest).
+			WithField("url", url).
+			Debug("completed to fetch all layer data in background")
 	}()
 
 	// Mounting stargz
 	// TODO: bind mount the state directory as a read-only fs on snapshotter's side
 	conn := nodefs.NewFileSystemConnector(&node{
-		Node: nodefs.NewDefaultNode(),
-		fs:   fs,
-		gr:   gr,
-		e:    root,
-		s:    newState(digest, ur),
-		root: mountpoint,
+		Node:  nodefs.NewDefaultNode(),
+		fs:    fs,
+		layer: gr,
+		e:     root,
+		s:     newState(digest, ur, size),
+		root:  mountpoint,
 	}, &nodefs.Options{
 		NegativeTimeout: 0,
 		AttrTimeout:     time.Second,
@@ -272,7 +309,11 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	})
 	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{AllowOther: true})
 	if err != nil {
-		log.G(ctx).WithError(err).WithField("url", url).Debug("stargz: failed to make server")
+		log.G(ctx).WithError(err).
+			WithField("ref", ref).
+			WithField("digest", digest).
+			WithField("url", url).
+			Debug("failed to make filesstem server")
 		return err
 	}
 
@@ -281,74 +322,40 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	return server.WaitMount()
 }
 
-func (fs *filesystem) Check(ctx context.Context, mountpoint string) (err error) {
-	// This Check functionality is a prioritized task and all background
-	// tasks will be stopped during the execution so this can avoid being
-	// disturbed for NW traffic by background tasks.
+func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
+	// This is a prioritized task and all background tasks will be stopped
+	// execution so this can avoid being disturbed for NW traffic by background
+	// tasks.
 	fs.backgroundTaskManager.DoPrioritizedTask()
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
-	fs.connMu.Lock()
-	defer fs.connMu.Unlock()
-	var (
-		c   = fs.conn[mountpoint]
-		now = time.Now()
-	)
-	if c == nil {
-		log.G(ctx).WithField("mountpoint", mountpoint).Debug("stargz: check failed: connection not registered")
-		return fmt.Errorf("connection not regisiterd")
-	}
-	if now.Sub(c.lastCheck) < fs.layerValidInterval {
-		// do nothing if not expired
-		log.G(ctx).WithField("mountpoint", mountpoint).
-			WithField("remaining(sec)", fs.layerValidInterval-now.Sub(c.lastCheck)).
-			Debug("stargz: skipping checking layer")
-		return nil
-	}
-	c.lastCheck = now
 
-	rCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequest("GET", c.url, nil)
-	if err != nil {
-		log.G(ctx).WithError(err).WithField("url", c.url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to make request")
-		return err
+	fs.remoteInfoMu.Lock()
+	r := fs.remoteInfo[mountpoint]
+	fs.remoteInfoMu.Unlock()
+	if r == nil {
+		log.G(ctx).WithField("mountpoint", mountpoint).
+			Debug("check failed: reader not registered")
+		return fmt.Errorf("reader not regisiterd")
 	}
-	req = req.WithContext(rCtx)
-	req.Close = false
-	req.Header.Set("Range", "bytes=0-1")
-	res, err := c.tr.RoundTrip(req)
-	if err != nil {
-		log.G(ctx).WithError(err).WithField("url", c.url).WithField("mountpoint", mountpoint).Debug("stargz: check failed: failed to request to the registry")
+	if err := r.Check(); err != nil {
+		log.G(ctx).WithError(err).
+			WithField("mountpoint", mountpoint).
+			Debug("check failed")
 		return err
-	}
-	defer func() {
-		io.Copy(ioutil.Discard, res.Body)
-		res.Body.Close()
-	}()
-	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		log.G(ctx).WithField("url", c.url).WithField("mountpoint", mountpoint).WithField("status", res.Status).Debug("stargz: check failed: unexpected response code")
-		return fmt.Errorf("unexpected status code %q", res.StatusCode)
 	}
 
 	return nil
 }
 
-// isInsecure checks if the specified host is registered as "insecure" registry
-// in this filesystem. If so, this filesystem treat the host in a proper way
-// e.g. using HTTP instead of HTTPS.
-func (fs *filesystem) isInsecure(host string) bool {
-	for _, i := range fs.insecure {
-		if ok, _ := regexp.Match(i, []byte(host)); ok {
-			return true
-		}
-	}
-
-	return false
+func (fs *filesystem) unregisterRemote(mountpoint string) {
+	fs.remoteInfoMu.Lock()
+	delete(fs.remoteInfo, mountpoint)
+	fs.remoteInfoMu.Unlock()
 }
 
 // resolve resolves specified reference with authenticating and dealing with
 // redirection in a proper way. We use `~/.docker/config.json` for authn.
-func (fs *filesystem) resolve(ctx context.Context, ref string, digest string) (string, http.RoundTripper, error) {
+func (fs *filesystem) resolve(ref string, digest string) (string, http.RoundTripper, error) {
 	fs.pullTransportsMu.Lock()
 	defer fs.pullTransportsMu.Unlock()
 
@@ -366,9 +373,12 @@ func (fs *filesystem) resolve(ctx context.Context, ref string, digest string) (s
 	if host == "docker.io" {
 		host = "registry-1.docker.io"
 	}
-	if fs.isInsecure(host) {
-		scheme = "http"
-		opts = append(opts, name.Insecure)
+	for _, i := range fs.insecure {
+		if ok, _ := regexp.Match(i, []byte(host)); ok {
+			scheme = "http"
+			opts = append(opts, name.Insecure)
+			break
+		}
 	}
 	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, path, digest)
 	nameref, err := name.ParseReference(fmt.Sprintf("%s/%s", host, path), opts...)
@@ -380,7 +390,7 @@ func (fs *filesystem) resolve(ctx context.Context, ref string, digest string) (s
 	tr, ok := fs.pullTransports[nameref.Name()]
 	if ok {
 		// Check the connectivity of the transport (and redirect if necessary)
-		if url, err := checkAndRedirect(ctx, url, tr); err == nil {
+		if url, err := checkAndRedirect(url, tr); err == nil {
 			return url, tr, nil
 		}
 	}
@@ -389,7 +399,7 @@ func (fs *filesystem) resolve(ctx context.Context, ref string, digest string) (s
 	if tr, err = refreshTransport(nameref); err != nil {
 		return "", nil, err
 	}
-	if url, err = checkAndRedirect(ctx, url, tr); err != nil {
+	if url, err = checkAndRedirect(url, tr); err != nil {
 		return "", nil, err
 	}
 
@@ -408,8 +418,8 @@ func refreshTransport(ref name.Reference) (http.RoundTripper, error) {
 	return transport.New(ref.Context().Registry, auth, http.DefaultTransport, []string{ref.Scope(transport.PullScope)})
 }
 
-func checkAndRedirect(ctx context.Context, url string, tr http.RoundTripper) (string, error) {
-	rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+func checkAndRedirect(url string, tr http.RoundTripper) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// We use GET request for GCR.
@@ -417,7 +427,7 @@ func checkAndRedirect(ctx context.Context, url string, tr http.RoundTripper) (st
 	if err != nil {
 		return "", fmt.Errorf("failed to request to the registry of %q: %v", url, err)
 	}
-	req = req.WithContext(rCtx)
+	req = req.WithContext(ctx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := tr.RoundTrip(req)
@@ -434,32 +444,11 @@ func checkAndRedirect(ctx context.Context, url string, tr http.RoundTripper) (st
 	return url, nil
 }
 
-// getSize fetches the size info of the specified layer by requesting HEAD.
-func (fs *filesystem) getSize(tr http.RoundTripper, url string) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequest("HEAD", url, nil)
-	if err != nil {
-		return 0, err
-	}
-	req = req.WithContext(ctx)
-	req.Close = false
-	res, err := tr.RoundTrip(req)
-	if err != nil {
-		return 0, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed HEAD request with code %v", res.StatusCode)
-	}
-	return strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
-}
-
 // node is a filesystem inode abstraction which implements node in go-fuse.
 type node struct {
 	nodefs.Node
 	fs     *filesystem
-	gr     *stargzReader
+	layer  layer
 	e      *stargz.TOCEntry
 	s      *state
 	root   string
@@ -467,9 +456,7 @@ type node struct {
 }
 
 func (n *node) OnUnmount() {
-	n.fs.connMu.Lock()
-	delete(n.fs.conn, n.root)
-	n.fs.connMu.Unlock()
+	n.fs.unregisterRemote(n.root)
 }
 
 func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
@@ -479,7 +466,7 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	n.e.ForeachChild(func(baseName string, ent *stargz.TOCEntry) bool {
 
 		// We don't want to show prefetch landmark in "/".
-		if n.e.Name == "" && baseName == PrefetchLandmark {
+		if n.e.Name == "" && baseName == reader.PrefetchLandmark {
 			return true
 		}
 
@@ -539,7 +526,7 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 	}
 
 	// We don't want to show prefetch landmark in "/".
-	if n.e.Name == "" && name == PrefetchLandmark {
+	if n.e.Name == "" && name == reader.PrefetchLandmark {
 		return nil, fuse.ENOENT
 	}
 
@@ -572,7 +559,7 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 	return n.Inode().NewChild(name, ce.Stat().IsDir(), &node{
 		Node:   nodefs.NewDefaultNode(),
 		fs:     n.fs,
-		gr:     n.gr,
+		layer:  n.layer,
 		e:      ce,
 		s:      n.s,
 		root:   n.root,
@@ -606,7 +593,7 @@ func (n *node) Access(mode uint32, context *fuse.Context) fuse.Status {
 }
 
 func (n *node) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Status) {
-	ra, err := n.gr.openFile(n.e.Name)
+	ra, err := n.layer.OpenFile(n.e.Name)
 	if err != nil {
 		n.s.report(fmt.Errorf("failed to open node: %v", err))
 		return nil, fuse.EIO
@@ -671,7 +658,7 @@ func (f *file) String() string {
 
 func (f *file) Read(buf []byte, off int64) (fuse.ReadResult, fuse.Status) {
 	n, err := f.ra.ReadAt(buf, off)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		f.n.s.report(fmt.Errorf("failed to read node: %v", err))
 		return nil, fuse.EIO
 	}
@@ -695,18 +682,17 @@ func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Conte
 
 // newState provides new state directory node.
 // It creates statFile at the same time to give it stable inode number.
-func newState(digest string, ur *urlReaderAt) *state {
+func newState(digest string, ri remoteInfo, size int64) *state {
 	return &state{
 		Node: nodefs.NewDefaultNode(),
-		ur:   ur,
 		statFile: &statFile{
 			Node: nodefs.NewDefaultNode(),
 			name: digest + ".json",
 			statJSON: statJSON{
 				Digest: digest,
-				Size:   ur.size,
+				Size:   size,
 			},
-			ur: ur,
+			ri: ri,
 		},
 	}
 }
@@ -717,7 +703,6 @@ func newState(digest string, ur *urlReaderAt) *state {
 // This directory has mode "dr-x------ root root".
 type state struct {
 	nodefs.Node
-	ur       *urlReaderAt
 	statFile *statFile
 }
 
@@ -814,7 +799,7 @@ type statJSON struct {
 type statFile struct {
 	nodefs.Node
 	name     string
-	ur       *urlReaderAt
+	ri       remoteInfo
 	statJSON statJSON
 	mu       sync.Mutex
 }
@@ -826,7 +811,7 @@ func (e *statFile) report(err error) {
 }
 
 func (e *statFile) updateStatUnlocked() ([]byte, error) {
-	e.statJSON.FetchedSize = e.ur.getFetchedSize()
+	e.statJSON.FetchedSize = e.ri.FetchedSize()
 	e.statJSON.FetchedPercent = float64(e.statJSON.FetchedSize) / float64(e.statJSON.Size) * 100.0
 	j, err := json.Marshal(&e.statJSON)
 	if err != nil {

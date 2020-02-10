@@ -25,9 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -37,126 +35,50 @@ import (
 	"github.com/google/crfs/stargz"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
+	"github.com/ktock/stargz-snapshotter/stargz/reader"
 	"github.com/ktock/stargz-snapshotter/task"
 	"golang.org/x/sys/unix"
 )
 
-func TestCheckInterval(t *testing.T) {
-	var (
-		largeInterval = time.Hour
-		tr            = &calledRoundTripper{}
-		c             = &connection{
-			url: "test",
-			tr:  tr,
-		}
-		fs = &filesystem{
-			conn:                  map[string]*connection{"test": c},
-			layerValidInterval:    largeInterval,
-			backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Second),
-		}
-	)
-
-	check := func(name string) (time.Time, bool) {
-		beforeUpdate := time.Now()
-
-		time.Sleep(time.Millisecond)
-
-		tr.called = false
-		if err := fs.Check(context.TODO(), "test"); err != nil {
-			t.Fatalf("%s: check mustn't be failed", name)
-		}
-
-		time.Sleep(time.Millisecond)
-
-		afterUpdate := time.Now()
-		if !tr.called {
-			return c.lastCheck, false
-		}
-		if !(c.lastCheck.After(beforeUpdate) && c.lastCheck.Before(afterUpdate)) {
-			t.Errorf("%s: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, c.lastCheck)
-		}
-
-		return c.lastCheck, true
-	}
-
-	// first time
-	firstTime, called := check("first time")
-	if !called {
-		t.Error("must be called for the first time")
-	}
-
-	// second time(not expired yet)
-	secondTime, called := check("second time")
-	if called {
-		t.Error("mustn't be checked if not expired")
-	}
-	if !secondTime.Equal(firstTime) {
-		t.Errorf("lastCheck time must be same as first time(%q) but %q", firstTime, secondTime)
-	}
-
-	// third time(expired, must be checked)
-	c.lastCheck = time.Now().Add(-1 * largeInterval) // set to "largeInterval" ago
-	if _, called := check("third time"); !called {
-		t.Error("must be called for the third time")
-	}
-}
-
-type calledRoundTripper struct {
-	called bool
-}
-
-func (c *calledRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
-	c.called = true
-	res = &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     make(http.Header),
-		Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
-	}
-	return
-}
+const (
+	sampleChunkSize    = 3
+	sampleMiddleOffset = sampleChunkSize / 2
+	sampleData1        = "0123456789"
+	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
+)
 
 func TestCheck(t *testing.T) {
-	tr := &breakRoundTripper{}
+	br := &breakRemoteInfo{}
 	fs := &filesystem{
-		conn: map[string]*connection{
-			"test": {
-				url: "test",
-				tr:  tr,
-			},
+		remoteInfo: map[string]remoteInfo{
+			"test": br,
 		},
-		layerValidInterval:    0,
-		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Second),
+		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
 	}
-	tr.success = true
+	br.success = true
 	if err := fs.Check(context.TODO(), "test"); err != nil {
 		t.Errorf("connection failed; wanted to succeed")
 	}
 
-	tr.success = false
+	br.success = false
 	if err := fs.Check(context.TODO(), "test"); err == nil {
 		t.Errorf("connection succeeded; wanted to fail")
 	}
 }
 
-type breakRoundTripper struct {
+type breakRemoteInfo struct {
 	success bool
 }
 
-func (b *breakRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
-	if b.success {
-		res = &http.Response{
-			StatusCode: http.StatusPartialContent,
-			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
-		}
-	} else {
-		res = &http.Response{
-			StatusCode: http.StatusInternalServerError,
-			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
-		}
+func (r *breakRemoteInfo) FetchedSize() int64 {
+	return 5
+}
+
+func (r *breakRemoteInfo) Check() error {
+	if !r.success {
+		return fmt.Errorf("failed")
 	}
-	return
+	return nil
 }
 
 // Tests Read method of each file node.
@@ -331,13 +253,13 @@ func TestExistence(t *testing.T) {
 		{
 			name: "prefetch_landmark",
 			in: []tarent{
-				regfile(PrefetchLandmark, "test"),
+				regfile(reader.PrefetchLandmark, "test"),
 				directory("foo/"),
-				regfile(fmt.Sprintf("foo/%s", PrefetchLandmark), "test"),
+				regfile(fmt.Sprintf("foo/%s", reader.PrefetchLandmark), "test"),
 			},
 			want: []check{
-				fileNotExist(PrefetchLandmark),
-				hasFileDigest(fmt.Sprintf("foo/%s", PrefetchLandmark), digestFor("test")),
+				fileNotExist(reader.PrefetchLandmark),
+				hasFileDigest(fmt.Sprintf("foo/%s", reader.PrefetchLandmark), digestFor("test")),
 			},
 		},
 		{
@@ -373,21 +295,13 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 	if !ok {
 		t.Fatalf("failed to find root in stargz")
 	}
-	gr := &stargzReader{
-		r:     r,
-		cache: &testCache{membuf: map[string]string{}, t: t},
-	}
-	ur := &urlReaderAt{
-		url:       "http://example.com/dummy/blobs/sha256/deadbeef",
-		size:      64,
-		chunkSize: 1024,
-		cache:     &testCache{membuf: map[string]string{}, t: t},
-	}
 	rootNode := &node{
-		Node: nodefs.NewDefaultNode(),
-		gr:   gr,
-		e:    root,
-		s:    newState(testStateLayerDigest, ur),
+		Node:  nodefs.NewDefaultNode(),
+		layer: &testLayer{r},
+		e:     root,
+		s: newState(testStateLayerDigest, &dummyRemoteInfo{
+			fetchedSize: 5,
+		}, 10),
 	}
 	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -397,6 +311,26 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 	})
 
 	return rootNode
+}
+
+type testLayer struct {
+	r *stargz.Reader
+}
+
+func (tl *testLayer) OpenFile(name string) (io.ReaderAt, error) {
+	return tl.r.OpenFile(name)
+}
+
+type dummyRemoteInfo struct {
+	fetchedSize int64
+}
+
+func (ri *dummyRemoteInfo) FetchedSize() int64 {
+	return ri.fetchedSize
+}
+
+func (ri *dummyRemoteInfo) Check() error {
+	return nil
 }
 
 type chunkSizeInfo int

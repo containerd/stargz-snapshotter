@@ -15,10 +15,11 @@
    limitations under the License.
 */
 
-package stargz
+package reader
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
@@ -30,47 +31,35 @@ import (
 	"github.com/ktock/stargz-snapshotter/cache"
 )
 
-type fileReaderAt struct {
-	name   string
-	digest string
-	gr     *stargzReader
-	ra     io.ReaderAt
-}
+const (
+	PrefetchLandmark = ".prefetch.landmark"
+)
 
-// ReadAt reads chunks from the stargz file with trying to fetch as many chunks
-// as possible from the cache.
-func (fr *fileReaderAt) ReadAt(p []byte, offset int64) (int, error) {
-	nr := 0
-	for nr < len(p) {
-		ce, ok := fr.gr.r.ChunkEntryForOffset(fr.name, offset+int64(nr))
-		if !ok {
-			break
-		}
-		id := fr.gr.genID(fr.digest, ce.ChunkOffset, ce.ChunkSize)
-		data, err := fr.gr.cache.Fetch(id)
-		if err != nil || len(data) != int(ce.ChunkSize) {
-			data = make([]byte, int(ce.ChunkSize))
-			if _, err := fr.ra.ReadAt(data, ce.ChunkOffset); err != nil {
-				if err != io.EOF {
-					return 0, fmt.Errorf("failed to read data: %v", err)
-				}
-			}
-			fr.gr.cache.Add(id, data)
-		}
-		n := copy(p[nr:], data[offset+int64(nr)-ce.ChunkOffset:])
-		nr += n
+func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*Reader, *stargz.TOCEntry, error) {
+	r, err := stargz.Open(sr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse stargz: %v", err)
 	}
-	p = p[:nr]
 
-	return len(p), nil
+	root, ok := r.Lookup("")
+	if !ok {
+		return nil, nil, fmt.Errorf("stargz: failed to get a TOCEntry of the root")
+	}
+
+	return &Reader{
+		r:     r,
+		sr:    sr,
+		cache: cache,
+	}, root, nil
 }
 
-type stargzReader struct {
+type Reader struct {
 	r     *stargz.Reader
+	sr    *io.SectionReader
 	cache cache.BlobCache
 }
 
-func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
+func (gr *Reader) OpenFile(name string) (io.ReaderAt, error) {
 	sr, err := gr.r.OpenFile(name)
 	if err != nil {
 		return nil, err
@@ -79,19 +68,20 @@ func (gr *stargzReader) openFile(name string) (io.ReaderAt, error) {
 	if !ok {
 		return nil, fmt.Errorf("failed to get TOCEntry %q", name)
 	}
-	return &fileReaderAt{
+	return &file{
 		name:   name,
 		digest: e.Digest,
-		gr:     gr,
+		r:      gr.r,
+		cache:  gr.cache,
 		ra:     sr,
 	}, nil
 }
 
-func (gr *stargzReader) prefetch(layer *io.SectionReader) (cache func() error, err error) {
+func (gr *Reader) Prefetch() (cache func() error, err error) {
 	var prefetchSize int64
 	if e, ok := gr.r.Lookup(PrefetchLandmark); ok {
-		if e.Offset > layer.Size() {
-			return nil, fmt.Errorf("invalid landmark offset %d is larger than layer size %d", e.Offset, layer.Size())
+		if e.Offset > gr.sr.Size() {
+			return nil, fmt.Errorf("invalid landmark offset %d is larger than layer size %d", e.Offset, gr.sr.Size())
 		}
 		prefetchSize = e.Offset
 	}
@@ -99,14 +89,14 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader) (cache func() error, e
 	// Fetch specified range at once (synchronously)
 	// TODO: when prefetchSize is too large, save memory by chunking the range
 	prefetchBytes := make([]byte, prefetchSize)
-	if _, err := io.ReadFull(layer, prefetchBytes); err != nil && err != io.EOF {
+	if _, err := io.ReadFull(gr.sr, prefetchBytes); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("failed to prefetch layer data: %v", err)
 	}
 
 	// Cache specified range to filesystem cache (asynchronously)
 	cache = func() error {
-		if err := gr.cacheTarGz(bytes.NewReader(prefetchBytes)); err != io.EOF && err != io.ErrUnexpectedEOF {
-			return err
+		if err := gr.cacheTarGzWithReader(bytes.NewReader(prefetchBytes)); err != io.EOF && err != io.ErrUnexpectedEOF {
+			return fmt.Errorf("error occurred during caching: %v", err)
 		}
 		return nil
 	}
@@ -114,7 +104,15 @@ func (gr *stargzReader) prefetch(layer *io.SectionReader) (cache func() error, e
 	return
 }
 
-func (gr *stargzReader) cacheTarGz(r io.Reader) error {
+func (gr *Reader) FetchTarGzWithReader(sr *io.SectionReader) error {
+	r := bufio.NewReaderSize(sr, 1<<29)
+	if err := gr.cacheTarGzWithReader(r); err != nil && err != io.EOF {
+		return fmt.Errorf("error during fetching the layer: %v", err)
+	}
+	return nil
+}
+
+func (gr *Reader) cacheTarGzWithReader(r io.Reader) error {
 	gzr, err := gzip.NewReader(r)
 	if err != nil {
 		return err
@@ -142,7 +140,7 @@ func (gr *stargzReader) cacheTarGz(r io.Reader) error {
 			if !ok {
 				break
 			}
-			id := gr.genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize)
+			id := genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize)
 			if cacheData, err := gr.cache.Fetch(id); err != nil || len(cacheData) != int(ce.ChunkSize) {
 
 				// make sure that this range is at ce.ChunkOffset for ce.ChunkSize
@@ -163,7 +161,43 @@ func (gr *stargzReader) cacheTarGz(r io.Reader) error {
 	return nil
 }
 
-func (gr *stargzReader) genID(digest string, offset, size int64) string {
+type file struct {
+	name   string
+	digest string
+	ra     io.ReaderAt
+	r      *stargz.Reader
+	cache  cache.BlobCache
+}
+
+// ReadAt reads chunks from the stargz file with trying to fetch as many chunks
+// as possible from the cache.
+func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
+	nr := 0
+	for nr < len(p) {
+		ce, ok := sf.r.ChunkEntryForOffset(sf.name, offset+int64(nr))
+		if !ok {
+			break
+		}
+		id := genID(sf.digest, ce.ChunkOffset, ce.ChunkSize)
+		data, err := sf.cache.Fetch(id)
+		if err != nil || len(data) != int(ce.ChunkSize) {
+			data = make([]byte, int(ce.ChunkSize))
+			if _, err := sf.ra.ReadAt(data, ce.ChunkOffset); err != nil {
+				if err != io.EOF {
+					return 0, fmt.Errorf("failed to read data: %v", err)
+				}
+			}
+			sf.cache.Add(id, data)
+		}
+		n := copy(p[nr:], data[offset+int64(nr)-ce.ChunkOffset:])
+		nr += n
+	}
+	p = p[:nr]
+
+	return len(p), nil
+}
+
+func genID(digest string, offset, size int64) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", digest, offset, size)))
 	return fmt.Sprintf("%x", sum)
 }
