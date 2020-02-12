@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ktock/stargz-snapshotter/stargz"
+	"github.com/ktock/stargz-snapshotter/stargz/reader"
 )
 
 func TestSort(t *testing.T) {
@@ -369,7 +369,7 @@ type tarent struct {
 func landmark() tarent {
 	return tarent{
 		header: &tar.Header{
-			Name:     stargz.PrefetchLandmark,
+			Name:     reader.PrefetchLandmark,
 			Typeflag: tar.TypeReg,
 			Size:     int64(len([]byte{prefetchLandmarkContents})),
 		},

@@ -15,7 +15,7 @@
    limitations under the License.
 */
 
-package stargz
+package remote
 
 import (
 	"bytes"
@@ -30,16 +30,57 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
-
-	"github.com/ktock/stargz-snapshotter/task"
 )
 
 const (
-	testURL           = "http://testdummy.com/testblob"
-	rangeHeaderPrefix = "bytes="
+	testURL            = "http://testdummy.com/testblob"
+	rangeHeaderPrefix  = "bytes="
+	sampleChunkSize    = 3
+	sampleMiddleOffset = sampleChunkSize / 2
+	sampleData1        = "0123456789"
+	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
 )
+
+func TestCheckWithRoundTripper(t *testing.T) {
+	tr := &breakRoundTripper{}
+	ur := &URLReaderAt{
+		url: "test",
+		t:   tr,
+	}
+	tr.success = true
+	if err := ur.Check(); err != nil {
+		t.Errorf("connection failed; wanted to succeed")
+	}
+
+	tr.success = false
+	if err := ur.Check(); err == nil {
+		t.Errorf("connection succeeded; wanted to fail")
+	}
+}
+
+type breakRoundTripper struct {
+	success bool
+}
+
+func (b *breakRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	if b.success {
+		res = &http.Response{
+			StatusCode: http.StatusPartialContent,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
+		}
+	} else {
+		res = &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		}
+	}
+	return
+}
 
 // Tests ReadAt method of each file.
 func TestURLReadAt(t *testing.T) {
@@ -179,14 +220,13 @@ func TestFailReadAt(t *testing.T) {
 	}
 }
 
-func makeURLReaderAt(t *testing.T, contents []byte, chunkSize int64, fn RoundTripFunc) *urlReaderAt {
-	return &urlReaderAt{
-		url:                   testURL,
-		t:                     fn,
-		size:                  int64(len(contents)),
-		chunkSize:             chunkSize,
-		cache:                 &testCache{membuf: map[string]string{}, t: t},
-		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
+func makeURLReaderAt(t *testing.T, contents []byte, chunkSize int64, fn RoundTripFunc) *URLReaderAt {
+	return &URLReaderAt{
+		url:       testURL,
+		t:         fn,
+		size:      int64(len(contents)),
+		chunkSize: chunkSize,
+		cache:     &testCache{membuf: map[string]string{}, t: t},
 	}
 }
 
@@ -458,4 +498,93 @@ func TestRegionSet(t *testing.T) {
 			t.Errorf("#%d: expected %v, got %v", i, tt.expected, rs.rs)
 		}
 	}
+}
+
+type testCache struct {
+	membuf map[string]string
+	t      *testing.T
+	mu     sync.Mutex
+}
+
+func (tc *testCache) Fetch(blobHash string) ([]byte, error) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	cache, ok := tc.membuf[blobHash]
+	if !ok {
+		return nil, fmt.Errorf("Missed cache: %q", blobHash)
+	}
+	return []byte(cache), nil
+}
+
+func (tc *testCache) Add(blobHash string, p []byte) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.membuf[blobHash] = string(p)
+	tc.t.Logf("  cached [%s...]: %q", blobHash[:8], string(p))
+}
+
+func TestCheckInterval(t *testing.T) {
+	var (
+		largeInterval = time.Hour
+		tr            = &calledRoundTripper{}
+		firstTime     = time.Now()
+		ur            = &URLReaderAt{
+			t:             tr,
+			lastCheck:     firstTime,
+			checkInterval: largeInterval,
+		}
+	)
+
+	check := func(name string) (time.Time, bool) {
+		beforeUpdate := time.Now()
+
+		time.Sleep(time.Millisecond)
+
+		tr.called = false
+		if err := ur.Check(); err != nil {
+			t.Fatalf("%s: check mustn't be failed", name)
+		}
+
+		time.Sleep(time.Millisecond)
+
+		afterUpdate := time.Now()
+		if !tr.called {
+			return ur.lastCheck, false
+		}
+		if !(ur.lastCheck.After(beforeUpdate) && ur.lastCheck.Before(afterUpdate)) {
+			t.Errorf("%s: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, ur.lastCheck)
+		}
+
+		return ur.lastCheck, true
+	}
+
+	// second time(not expired yet)
+	secondTime, called := check("second time")
+	if called {
+		t.Error("mustn't be checked if not expired")
+	}
+	if !secondTime.Equal(firstTime) {
+		t.Errorf("lastCheck time must be same as first time(%q) but %q", firstTime, secondTime)
+	}
+
+	// third time(expired, must be checked)
+	ur.lastCheck = time.Now().Add(-1 * largeInterval) // set to "largeInterval" ago
+	if _, called := check("third time"); !called {
+		t.Error("must be called for the third time")
+	}
+}
+
+type calledRoundTripper struct {
+	called bool
+}
+
+func (c *calledRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	c.called = true
+	res = &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
+	}
+	return
 }
