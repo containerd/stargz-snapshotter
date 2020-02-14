@@ -47,10 +47,12 @@ echo "Build arguments: ${DOCKER_BUILD_ARGS:-}"
 TARGETS=
 INTEGRATION=false
 OPTIMIZE=false
+BENCHMARK=false
 for T in ${@} ; do
     case "${T}" in
         "integration" ) INTEGRATION=true ;;
         "test-optimize" ) OPTIMIZE=true ;;
+        "benchmark" ) BENCHMARK=true ;;
         * ) TARGETS="${TARGETS} ${T}" ;;
     esac
 done
@@ -77,6 +79,44 @@ if [ "${INTEGRATION}" == "true" ] ; then
     rm "${DOCKER_COMPOSE_YAML}"
     rm -rf "${AUTH_DIR}"
     rm -rf "${RS_ROOT_DIR}"
+fi
+
+if [ "${BENCHMARK}" == "true" ] ; then
+    echo "Preparing docker-compose.yml..."
+
+    DOCKER_COMPOSE_YAML=$(mktemp)
+    CONTEXT="${REPO}/script/benchmark"
+    cd "${CONTEXT}"
+    CONTAINER_NAME=hello-bench
+    "${CONTEXT}"/docker-compose-benchmark.yml.sh "${REPO}" "${CONTAINER_NAME}" > "${DOCKER_COMPOSE_YAML}"
+
+    BENCHMARK_LOG=$(mktemp)
+    echo "log file: ${BENCHMARK_LOG}"
+    if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} hello-bench && \
+               docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
+               docker exec -i "${CONTAINER_NAME}" script/benchmark/hello-bench/run.sh "${BENCHMARK_USER}" ${BENCHMARK_TARGETS} \
+                   | tee "${BENCHMARK_LOG}" ) ; then
+        FAIL=true
+    else
+        OUTPUTDIR=${BENCHMARK_RESULT_DIR:-}
+        if [ "${OUTPUTDIR}" == "" ] ; then
+            OUTPUTDIR=$(mktemp -d)
+        fi
+        OUTPUTFILENAME=${BENCHMARK_RESULT_FILENAME:-}
+        if [ "${OUTPUTFILENAME}" == "" ] ; then
+            OUTPUTFILENAME="result.md"
+        fi
+        if [ "${BENCHMARK_WITH_PLOT:-}" == "true" ] ; then
+            cat "${BENCHMARK_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/plot.sh" "${OUTPUTDIR}"
+        fi
+        cat "${BENCHMARK_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/table.sh" > "${OUTPUTDIR}/${OUTPUTFILENAME}"
+        mv "${BENCHMARK_LOG}" "${OUTPUTDIR}/out.log"
+        echo "See output for >>> ${OUTPUTDIR}"
+    fi
+
+    echo "Cleaning up environment..."
+    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+    rm "${DOCKER_COMPOSE_YAML}"
 fi
 
 if [ "${OPTIMIZE}" == "true" ] ; then
