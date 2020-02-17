@@ -77,3 +77,6 @@ integration:
 
 test-optimize:
 	@./script/make.sh test-optimize
+
+benchmark:
+	@./script/make.sh benchmark
