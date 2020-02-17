@@ -37,6 +37,7 @@
 package stargz
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -68,6 +69,7 @@ import (
 	"github.com/ktock/stargz-snapshotter/stargz/reader"
 	"github.com/ktock/stargz-snapshotter/stargz/remote"
 	"github.com/ktock/stargz-snapshotter/task"
+	"golang.org/x/sync/semaphore"
 	"golang.org/x/sys/unix"
 )
 
@@ -151,6 +153,8 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 		pullTransports:        make(map[string]http.RoundTripper),
 		layerValidInterval:    layerValidInterval,
 		remoteInfo:            make(map[string]remoteInfo),
+		stargzReader:          make(map[string]*reader.Reader),
+		prefetchSem:           semaphore.NewWeighted(2),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
 		debug:                 config.Debug,
 	}, nil
@@ -167,6 +171,9 @@ type filesystem struct {
 	layerValidInterval    time.Duration
 	remoteInfo            map[string]remoteInfo
 	remoteInfoMu          sync.Mutex
+	stargzReader          map[string]*reader.Reader
+	stargzReaderMu        sync.Mutex
+	prefetchSem           *semaphore.Weighted
 	backgroundTaskManager *task.BackgroundTaskManager
 	debug                 bool
 }
@@ -240,29 +247,25 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			Debug("failed to read layer")
 		return err
 	}
+	fs.stargzReaderMu.Lock()
+	fs.stargzReader[mountpoint] = gr
+	fs.stargzReaderMu.Unlock()
 
-	// Prefetch this layer
+	// Prefetch this layer. We prefetch several layers in parallel. The first
+	// Check() for this layer waits for the prefetch completion.
 	if !fs.noprefetch {
-		cache, err := gr.Prefetch() // TODO: make sync/async switchable
-		if err != nil {
-			log.G(ctx).WithError(err).
-				WithField("ref", ref).
-				WithField("digest", digest).
-				WithField("url", url).
-				Debug("failed to prefetch layer")
-			return err
-		}
 		go func() {
-			if err := cache(); err != nil {
+			fs.prefetchSem.Acquire(context.Background(), 1)
+			defer fs.prefetchSem.Release(1)
+			if err := gr.Prefetch(); err != nil {
 				log.G(ctx).WithError(err).
 					WithField("ref", ref).
 					WithField("digest", digest).
 					WithField("url", url).
-					Debug("failed to cache prefetched layer")
+					Debug("failed to prefetch layer")
 				return
 			}
-			log.G(ctx).WithError(err).
-				WithField("ref", ref).
+			log.G(ctx).WithField("ref", ref).
 				WithField("digest", digest).
 				WithField("url", url).
 				Debug("completed to prefetch")
@@ -274,7 +277,6 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// interrupt the reading. This can avoid disturbing prioritized tasks
 	// about NW traffic. We read layer with a buffer to reduce num of
 	// requests to the registry.
-	// this fetching functionality can be interrupted by prioritized tasks.
 	go func() {
 		br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (n int, err error) {
 			fs.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
@@ -282,7 +284,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			}, 120*time.Second)
 			return
 		}), 0, size)
-		if err := gr.FetchTarGzWithReader(br); err != nil {
+		if err := gr.CacheTarGzWithReader(bufio.NewReaderSize(br, 1<<29)); err != nil {
 			log.G(ctx).WithError(err).
 				WithField("ref", ref).
 				WithField("digest", digest).
@@ -334,13 +336,25 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	fs.backgroundTaskManager.DoPrioritizedTask()
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
 
+	fs.stargzReaderMu.Lock()
+	gr := fs.stargzReader[mountpoint]
+	fs.stargzReaderMu.Unlock()
+	if gr == nil {
+		log.G(ctx).WithField("mountpoint", mountpoint).
+			Debug("stargz reader not registered")
+	} else if err := gr.WaitForPrefetchCompletion(10 * time.Second); err != nil {
+		log.G(ctx).WithError(err).
+			WithField("mountpoint", mountpoint).
+			Warn("failed to sync with prefetch completion")
+	}
+
 	fs.remoteInfoMu.Lock()
 	r := fs.remoteInfo[mountpoint]
 	fs.remoteInfoMu.Unlock()
 	if r == nil {
 		log.G(ctx).WithField("mountpoint", mountpoint).
-			Debug("check failed: reader not registered")
-		return fmt.Errorf("reader not regisiterd")
+			Debug("check failed: remote reader not registered")
+		return fmt.Errorf("remote reader not regisiterd")
 	}
 	if err := r.Check(); err != nil {
 		log.G(ctx).WithError(err).
@@ -352,10 +366,13 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	return nil
 }
 
-func (fs *filesystem) unregisterRemote(mountpoint string) {
+func (fs *filesystem) unregister(mountpoint string) {
 	fs.remoteInfoMu.Lock()
 	delete(fs.remoteInfo, mountpoint)
 	fs.remoteInfoMu.Unlock()
+	fs.stargzReaderMu.Lock()
+	delete(fs.stargzReader, mountpoint)
+	fs.stargzReaderMu.Unlock()
 }
 
 // resolve resolves specified reference with authenticating and dealing with
@@ -461,7 +478,7 @@ type node struct {
 }
 
 func (n *node) OnUnmount() {
-	n.fs.unregisterRemote(n.root)
+	n.fs.unregister(n.root)
 }
 
 func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {

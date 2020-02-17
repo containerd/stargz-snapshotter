@@ -196,7 +196,7 @@ func (o *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, e
 }
 
 func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
-	m, err := o.createSnapshot(ctx, snapshots.KindActive, key, parent, opts)
+	s, err := o.createSnapshot(ctx, snapshots.KindActive, key, parent, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -210,24 +210,23 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		}
 	}
 	if target, ok := base.Labels[targetSnapshotLabel]; ok {
-		if err := o.prepareRemoteSnapshot(ctx, key, base.Labels); err != nil {
-			return m, nil // fallback to the normal behavior
+		if err := o.prepareRemoteSnapshot(ctx, key, base.Labels); err == nil {
+			base.Labels[remoteLabel] = fmt.Sprintf("remote snapshot") // Mark this snapshot as remote
+			if err := o.Commit(ctx, target, key, append(opts, snapshots.WithLabels(base.Labels))...); err == nil {
+				return nil, errors.Wrapf(errdefs.ErrAlreadyExists, "target snapshot %q", target)
+			}
 		}
-		if base.Labels == nil {
-			base.Labels = make(map[string]string)
-		}
-		base.Labels[remoteLabel] = fmt.Sprintf("remote snapshot") // Mark this snapshot as remote
-		if err := o.Commit(ctx, target, key, append(opts, snapshots.WithLabels(base.Labels))...); err != nil {
-			return m, nil // fallback to the normal behavior
-		}
-		return nil, errors.Wrapf(errdefs.ErrAlreadyExists, "target snapshot %q", target)
 	}
 
-	return m, nil
+	return o.mounts(ctx, s, parent)
 }
 
 func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
-	return o.createSnapshot(ctx, snapshots.KindView, key, parent, opts)
+	s, err := o.createSnapshot(ctx, snapshots.KindView, key, parent, opts)
+	if err != nil {
+		return nil, err
+	}
+	return o.mounts(ctx, s, parent)
 }
 
 // Mounts returns the mounts for the transaction identified by key. Can be
@@ -417,10 +416,10 @@ func (o *snapshotter) cleanupSnapshotDirectory(ctx context.Context, dir string) 
 	return nil
 }
 
-func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string, opts []snapshots.Opt) (_ []mount.Mount, err error) {
+func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string, opts []snapshots.Opt) (_ storage.Snapshot, err error) {
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
-		return nil, err
+		return storage.Snapshot{}, err
 	}
 
 	var td, path string
@@ -446,7 +445,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		if rerr := t.Rollback(); rerr != nil {
 			log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
 		}
-		return nil, errors.Wrap(err, "failed to create prepare snapshot dir")
+		return storage.Snapshot{}, errors.Wrap(err, "failed to create prepare snapshot dir")
 	}
 	rollback := true
 	defer func() {
@@ -459,13 +458,13 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 
 	s, err := storage.CreateSnapshot(ctx, kind, key, parent, opts...)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create snapshot")
+		return storage.Snapshot{}, errors.Wrap(err, "failed to create snapshot")
 	}
 
 	if len(s.ParentIDs) > 0 {
 		st, err := os.Stat(o.upperPath(s.ParentIDs[0]))
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to stat parent")
+			return storage.Snapshot{}, errors.Wrap(err, "failed to stat parent")
 		}
 
 		stat := st.Sys().(*syscall.Stat_t)
@@ -474,22 +473,22 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 			if rerr := t.Rollback(); rerr != nil {
 				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
 			}
-			return nil, errors.Wrap(err, "failed to chown")
+			return storage.Snapshot{}, errors.Wrap(err, "failed to chown")
 		}
 	}
 
 	path = filepath.Join(snapshotDir, s.ID)
 	if err = os.Rename(td, path); err != nil {
-		return nil, errors.Wrap(err, "failed to rename")
+		return storage.Snapshot{}, errors.Wrap(err, "failed to rename")
 	}
 	td = ""
 
 	rollback = false
 	if err = t.Commit(); err != nil {
-		return nil, errors.Wrap(err, "commit failed")
+		return storage.Snapshot{}, errors.Wrap(err, "commit failed")
 	}
 
-	return o.mounts(ctx, s, parent)
+	return s, nil
 }
 
 func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, kind snapshots.Kind) (string, error) {
