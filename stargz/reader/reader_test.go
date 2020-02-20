@@ -89,12 +89,11 @@ func TestPrefetch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
-			cache, err := gr.Prefetch()
-			if err != nil {
+			if err := gr.Prefetch(); err != nil {
 				t.Errorf("failed to prefetch: %v", err)
 				return
 			}
-			if err := cache(); err != nil || tt.wantNum != len(gr.cache.(*testCache).membuf) {
+			if tt.wantNum != len(gr.cache.(*testCache).membuf) {
 				t.Errorf("number of chunks in the cache %d; want %d: %v", len(gr.cache.(*testCache).membuf), tt.wantNum, err)
 				return
 			}
@@ -192,13 +191,13 @@ func TestFailReader(t *testing.T) {
 
 	// tests for prefetch
 	br.success = true
-	if _, err = gr.Prefetch(); err != nil {
+	if err = gr.Prefetch(); err != nil {
 		t.Errorf("failed to prefetch but wanted to succeed: %v", err)
 		return
 	}
 
 	br.success = false
-	if _, err = gr.Prefetch(); err == nil {
+	if err = gr.Prefetch(); err == nil {
 		t.Errorf("succeeded to prefetch but wanted to fail")
 		return
 	}

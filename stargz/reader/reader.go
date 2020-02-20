@@ -24,13 +24,14 @@ package reader
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"fmt"
 	"io"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/crfs/stargz"
 	"github.com/ktock/stargz-snapshotter/cache"
@@ -52,16 +53,19 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*Reader, *stargz.TO
 	}
 
 	return &Reader{
-		r:     r,
-		sr:    sr,
-		cache: cache,
+		r:                      r,
+		sr:                     sr,
+		cache:                  cache,
+		prefetchCompletionCond: sync.NewCond(&sync.Mutex{}),
 	}, root, nil
 }
 
 type Reader struct {
-	r     *stargz.Reader
-	sr    *io.SectionReader
-	cache cache.BlobCache
+	r                      *stargz.Reader
+	sr                     *io.SectionReader
+	cache                  cache.BlobCache
+	prefetchInProgress     bool
+	prefetchCompletionCond *sync.Cond
 }
 
 func (gr *Reader) OpenFile(name string) (io.ReaderAt, error) {
@@ -82,42 +86,61 @@ func (gr *Reader) OpenFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *Reader) Prefetch() (cache func() error, err error) {
+func (gr *Reader) Prefetch() error {
+	gr.prefetchInProgress = true
+	defer func() {
+		gr.prefetchInProgress = false
+		gr.prefetchCompletionCond.Broadcast()
+	}()
+
 	var prefetchSize int64
 	if e, ok := gr.r.Lookup(PrefetchLandmark); ok {
 		if e.Offset > gr.sr.Size() {
-			return nil, fmt.Errorf("invalid landmark offset %d is larger than layer size %d", e.Offset, gr.sr.Size())
+			return fmt.Errorf("invalid landmark offset %d is larger than layer size %d",
+				e.Offset, gr.sr.Size())
 		}
 		prefetchSize = e.Offset
 	}
 
-	// Fetch specified range at once (synchronously)
+	// Fetch specified range at once
 	// TODO: when prefetchSize is too large, save memory by chunking the range
 	prefetchBytes := make([]byte, prefetchSize)
 	if _, err := io.ReadFull(gr.sr, prefetchBytes); err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to prefetch layer data: %v", err)
+		return fmt.Errorf("failed to prefetch layer data: %v", err)
 	}
 
-	// Cache specified range to filesystem cache (asynchronously)
-	cache = func() error {
-		if err := gr.cacheTarGzWithReader(bytes.NewReader(prefetchBytes)); err != io.EOF && err != io.ErrUnexpectedEOF {
-			return fmt.Errorf("error occurred during caching: %v", err)
-		}
-		return nil
-	}
-
-	return
-}
-
-func (gr *Reader) FetchTarGzWithReader(sr *io.SectionReader) error {
-	r := bufio.NewReaderSize(sr, 1<<29)
-	if err := gr.cacheTarGzWithReader(r); err != nil && err != io.EOF {
-		return fmt.Errorf("error during fetching the layer: %v", err)
+	// Cache specified range to filesystem cache
+	err := gr.CacheTarGzWithReader(bytes.NewReader(prefetchBytes))
+	if err != io.EOF && err != io.ErrUnexpectedEOF {
+		return fmt.Errorf("error occurred during caching: %v", err)
 	}
 	return nil
 }
 
-func (gr *Reader) cacheTarGzWithReader(r io.Reader) error {
+func (gr *Reader) WaitForPrefetchCompletion(timeout time.Duration) error {
+	waitUntilPrefetching := func() <-chan struct{} {
+		ch := make(chan struct{})
+		go func() {
+			if gr.prefetchInProgress {
+				gr.prefetchCompletionCond.L.Lock()
+				gr.prefetchCompletionCond.Wait()
+				gr.prefetchCompletionCond.L.Unlock()
+			}
+			ch <- struct{}{}
+		}()
+		return ch
+	}
+	select {
+	case <-time.After(timeout):
+		gr.prefetchInProgress = false
+		gr.prefetchCompletionCond.Broadcast()
+		return fmt.Errorf("timeout(%v)", timeout)
+	case <-waitUntilPrefetching():
+		return nil
+	}
+}
+
+func (gr *Reader) CacheTarGzWithReader(r io.Reader) error {
 	gzr, err := gzip.NewReader(r)
 	if err != nil {
 		return err
