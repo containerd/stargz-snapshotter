@@ -535,7 +535,27 @@ func hasNodeXattrs(entry, name, value string) check {
 }
 
 func hasStateFile(id string) check {
+	isExist := func(name string, ents []fuse.DirEntry) bool {
+		for _, e := range ents {
+			if e.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+
 	return func(t *testing.T, root *node) {
+
+		// Check the state dir is hidden on OpenDir for "/"
+		ents, status := root.OpenDir(nil)
+		if status != fuse.OK {
+			t.Errorf("failed to open root directory: %v", status)
+			return
+		}
+		if isExist(stateDirName, ents) {
+			t.Errorf("state direntry %q should not be listed", stateDirName)
+			return
+		}
 
 		// Check existence of state dir
 		var attr fuse.Attr
@@ -551,18 +571,12 @@ func hasStateFile(id string) check {
 		}
 
 		// Check existence of state file
-		ents, status := st.OpenDir(nil)
+		ents, status = st.OpenDir(nil)
 		if status != fuse.OK {
 			t.Errorf("failed to open directory %q: %v", stateDirName, status)
 			return
 		}
-		var found bool
-		for _, e := range ents {
-			if e.Name == id {
-				found = true
-			}
-		}
-		if !found {
+		if !isExist(id, ents) {
 			t.Errorf("direntry %q not found in %q", id, stateDirName)
 			return
 		}
