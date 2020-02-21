@@ -524,15 +524,6 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		}
 	}
 
-	// Append state directory in "/".
-	if n.e.Name == "" {
-		ents = append(ents, fuse.DirEntry{
-			Mode: syscall.S_IFDIR | n.s.mode(),
-			Name: stateDirName,
-			Ino:  n.s.ino(),
-		})
-	}
-
 	sort.Slice(ents, func(i, j int) bool { return ents[i].Name < ents[j].Name })
 	return ents, fuse.OK
 }
