@@ -169,15 +169,45 @@ func (r *URLReaderAt) FetchedSize() int64 {
 	return sz
 }
 
-// ReadAt reads remote chunks from specified offset for the buffer size.
-// It tries to fetch as many chunks as possible from local cache.
-func (r *URLReaderAt) ReadAt(p []byte, offset int64) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	return r.ReadAtWithContext(ctx, p, offset)
+type Option func(*options)
+
+type options struct {
+	ctx context.Context
+	tr  http.RoundTripper
 }
 
-func (r *URLReaderAt) ReadAtWithContext(ctx context.Context, p []byte, offset int64) (int, error) {
+func WithContext(ctx context.Context) Option {
+	return func(opts *options) {
+		opts.ctx = ctx
+	}
+}
+
+func WithRoundTripper(tr http.RoundTripper) Option {
+	return func(opts *options) {
+		opts.tr = tr
+	}
+}
+
+// ReadAt reads remote chunks from specified offset for the buffer size.
+// It tries to fetch as many chunks as possible from local cache.
+// We can configure this function with options.
+func (r *URLReaderAt) ReadAt(p []byte, offset int64, opts ...Option) (int, error) {
+	opt := options{}
+	for _, o := range opts {
+		o(&opt)
+	}
+	var (
+		ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
+		tr          = r.t
+	)
+	defer cancel()
+	if opt.ctx != nil {
+		ctx = opt.ctx
+	}
+	if opt.tr != nil {
+		tr = opt.tr
+	}
+
 	if len(p) == 0 || offset > r.size {
 		return 0, nil
 	}
@@ -186,7 +216,7 @@ func (r *URLReaderAt) ReadAtWithContext(ctx context.Context, p []byte, offset in
 	allRegion := region{floor(offset, r.chunkSize), ceil(offset+int64(len(p))-1, r.chunkSize) - 1}
 	allData := map[region][]byte{}
 	remotes := r.appendFromCache(allData, allRegion)
-	if err := r.appendFromRemote(ctx, allData, remotes); err != nil {
+	if err := r.appendFromRemote(ctx, tr, allData, remotes); err != nil {
 		return 0, err
 	}
 	r.fetchedRegionSetMu.Lock()
@@ -238,7 +268,7 @@ func (r *URLReaderAt) appendFromCache(allData map[region][]byte, whole region) m
 }
 
 // appendFromRemote fetches all specified chunks from remote store.
-func (r *URLReaderAt) appendFromRemote(ctx context.Context, allData map[region][]byte, requests map[region]bool) error {
+func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper, allData map[region][]byte, requests map[region]bool) error {
 	if len(requests) == 0 {
 		return nil
 	}
@@ -265,7 +295,7 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, allData map[region][
 	req.Header.Add("Range", ranges[:len(ranges)-1])
 	req.Header.Add("Accept-Encoding", "identity")
 	req.Close = false
-	res, err := r.t.RoundTrip(req) // NOT DefaultClient; don't want redirects
+	res, err := tr.RoundTrip(req) // NOT DefaultClient; don't want redirects
 	if err != nil {
 		return err
 	}

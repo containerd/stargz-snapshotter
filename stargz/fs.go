@@ -69,7 +69,6 @@ import (
 	"github.com/ktock/stargz-snapshotter/stargz/reader"
 	"github.com/ktock/stargz-snapshotter/stargz/remote"
 	"github.com/ktock/stargz-snapshotter/task"
-	"golang.org/x/sync/semaphore"
 	"golang.org/x/sys/unix"
 )
 
@@ -154,7 +153,6 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 		layerValidInterval:    layerValidInterval,
 		remoteInfo:            make(map[string]remoteInfo),
 		stargzReader:          make(map[string]*reader.Reader),
-		prefetchSem:           semaphore.NewWeighted(2),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
 		debug:                 config.Debug,
 	}, nil
@@ -173,7 +171,6 @@ type filesystem struct {
 	remoteInfoMu          sync.Mutex
 	stargzReader          map[string]*reader.Reader
 	stargzReaderMu        sync.Mutex
-	prefetchSem           *semaphore.Weighted
 	backgroundTaskManager *task.BackgroundTaskManager
 	debug                 bool
 }
@@ -188,27 +185,30 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// tasks.
 	fs.backgroundTaskManager.DoPrioritizedTask()
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
+	logCtx := log.G(ctx).WithField("mountpoint", mountpoint)
 
 	// Get basic information of this layer.
 	ref, ok := labels[handler.TargetRefLabel]
 	if !ok {
-		log.G(ctx).Debug("reference hasn't been passed")
+		logCtx.Debug("reference hasn't been passed")
 		return fmt.Errorf("reference hasn't been passed")
 	}
 	digest, ok := labels[handler.TargetDigestLabel]
 	if !ok {
-		log.G(ctx).WithField("ref", ref).Debug("digest hasn't been passed")
+		logCtx.Debug("digest hasn't been passed")
 		return fmt.Errorf("digest hasn't been passed")
 	}
 
+	logCtx = logCtx.WithField("ref", ref).WithField("digest", digest)
+
 	// Authenticate to the registry using ~/.docker/config.json.
-	url, tr, err := fs.resolve(ref, digest)
+	url, tr, nameref, err := fs.resolve(ref, digest)
 	if err != nil {
-		log.G(ctx).WithField("ref", ref).
-			WithField("digest", digest).
-			Debug("failed to resolve the reference")
+		logCtx.WithError(err).Debug("failed to resolve the reference")
 		return err
 	}
+
+	logCtx = logCtx.WithField("url", url)
 
 	// Make and register a reader for the remote blob of this layer.
 	ur, size, err := remote.NewURLReaderAt(
@@ -218,11 +218,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		fs.httpCache,
 		fs.layerValidInterval)
 	if err != nil {
-		log.G(ctx).WithError(err).
-			WithField("ref", ref).
-			WithField("digest", digest).
-			WithField("url", url).
-			Debug("failed to connect")
+		logCtx.WithError(err).Debug("failed to connect")
 		return err
 	}
 	fs.remoteInfoMu.Lock()
@@ -240,11 +236,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	}), 0, size)
 	gr, root, err := reader.NewReader(sr, fs.fsCache)
 	if err != nil {
-		log.G(ctx).WithError(err).
-			WithField("ref", ref).
-			WithField("digest", digest).
-			WithField("url", url).
-			Debug("failed to read layer")
+		logCtx.WithError(err).Debug("failed to read layer")
 		return err
 	}
 	fs.stargzReaderMu.Lock()
@@ -252,23 +244,26 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	fs.stargzReaderMu.Unlock()
 
 	// Prefetch this layer. We prefetch several layers in parallel. The first
-	// Check() for this layer waits for the prefetch completion.
+	// Check() for this layer waits for the prefetch completion. We recreate
+	// RoundTripper to avoid disturbing other NW-related operations.
 	if !fs.noprefetch {
 		go func() {
-			fs.prefetchSem.Acquire(context.Background(), 1)
-			defer fs.prefetchSem.Release(1)
-			if err := gr.Prefetch(); err != nil {
-				log.G(ctx).WithError(err).
-					WithField("ref", ref).
-					WithField("digest", digest).
-					WithField("url", url).
-					Debug("failed to prefetch layer")
+			// Recreate new transport not to disturb other HTTP-related operations
+			tr, err := authnTransport(http.DefaultTransport.(*http.Transport).Clone(), nameref)
+			if err != nil {
+				logCtx.WithError(err).Debug("failed to authenticate for prefetch")
 				return
 			}
-			log.G(ctx).WithField("ref", ref).
-				WithField("digest", digest).
-				WithField("url", url).
-				Debug("completed to prefetch")
+			pr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (int, error) {
+				fs.backgroundTaskManager.DoPrioritizedTask()
+				defer fs.backgroundTaskManager.DonePrioritizedTask()
+				return ur.ReadAt(p, offset, remote.WithRoundTripper(tr))
+			}), 0, size)
+			if err := gr.PrefetchWithReader(pr); err != nil {
+				logCtx.WithError(err).Debug("failed to prefetch layer")
+				return
+			}
+			logCtx.Debug("completed to prefetch")
 		}()
 	}
 
@@ -280,23 +275,21 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	go func() {
 		br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (n int, err error) {
 			fs.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
-				n, err = ur.ReadAtWithContext(ctx, p, offset)
+				// Recreate new transport not to disturb other HTTP-related operations
+				var tr http.RoundTripper
+				if tr, err = authnTransport(http.DefaultTransport.(*http.Transport).Clone(), nameref); err != nil {
+					logCtx.WithError(err).Debug("failed to authenticate for background fetch")
+					return
+				}
+				n, err = ur.ReadAt(p, offset, remote.WithContext(ctx), remote.WithRoundTripper(tr))
 			}, 120*time.Second)
 			return
 		}), 0, size)
 		if err := gr.CacheTarGzWithReader(bufio.NewReaderSize(br, 1<<29)); err != nil {
-			log.G(ctx).WithError(err).
-				WithField("ref", ref).
-				WithField("digest", digest).
-				WithField("url", url).
-				Debug("failed to fetch whole layer")
+			logCtx.WithError(err).Debug("failed to fetch whole layer")
 			return
 		}
-		log.G(ctx).WithError(err).
-			WithField("ref", ref).
-			WithField("digest", digest).
-			WithField("url", url).
-			Debug("completed to fetch all layer data in background")
+		logCtx.Debug("completed to fetch all layer data in background")
 	}()
 
 	// Mounting stargz
@@ -316,11 +309,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	})
 	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{AllowOther: true})
 	if err != nil {
-		log.G(ctx).WithError(err).
-			WithField("ref", ref).
-			WithField("digest", digest).
-			WithField("url", url).
-			Debug("failed to make filesstem server")
+		logCtx.WithError(err).Debug("failed to make filesstem server")
 		return err
 	}
 
@@ -336,30 +325,26 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	fs.backgroundTaskManager.DoPrioritizedTask()
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
 
+	logCtx := log.G(ctx).WithField("mountpoint", mountpoint)
+
 	fs.stargzReaderMu.Lock()
 	gr := fs.stargzReader[mountpoint]
 	fs.stargzReaderMu.Unlock()
 	if gr == nil {
-		log.G(ctx).WithField("mountpoint", mountpoint).
-			Debug("stargz reader not registered")
+		logCtx.Debug("stargz reader not registered")
 	} else if err := gr.WaitForPrefetchCompletion(10 * time.Second); err != nil {
-		log.G(ctx).WithError(err).
-			WithField("mountpoint", mountpoint).
-			Warn("failed to sync with prefetch completion")
+		logCtx.WithError(err).Warn("failed to sync with prefetch completion")
 	}
 
 	fs.remoteInfoMu.Lock()
 	r := fs.remoteInfo[mountpoint]
 	fs.remoteInfoMu.Unlock()
 	if r == nil {
-		log.G(ctx).WithField("mountpoint", mountpoint).
-			Debug("check failed: remote reader not registered")
+		logCtx.Debug("check failed: remote reader not registered")
 		return fmt.Errorf("remote reader not regisiterd")
 	}
 	if err := r.Check(); err != nil {
-		log.G(ctx).WithError(err).
-			WithField("mountpoint", mountpoint).
-			Debug("check failed")
+		logCtx.WithError(err).Debug("check failed")
 		return err
 	}
 
@@ -377,14 +362,14 @@ func (fs *filesystem) unregister(mountpoint string) {
 
 // resolve resolves specified reference with authenticating and dealing with
 // redirection in a proper way. We use `~/.docker/config.json` for authn.
-func (fs *filesystem) resolve(ref string, digest string) (string, http.RoundTripper, error) {
+func (fs *filesystem) resolve(ref string, digest string) (string, http.RoundTripper, name.Reference, error) {
 	fs.pullTransportsMu.Lock()
 	defer fs.pullTransportsMu.Unlock()
 
 	// Parse reference in docker convention
 	named, err := docker.ParseDockerRef(ref)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	var (
 		scheme = "https"
@@ -405,7 +390,7 @@ func (fs *filesystem) resolve(ref string, digest string) (string, http.RoundTrip
 	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, path, digest)
 	nameref, err := name.ParseReference(fmt.Sprintf("%s/%s", host, path), opts...)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to parse reference %q: %v", ref, err)
+		return "", nil, nil, fmt.Errorf("failed to parse reference %q: %v", ref, err)
 	}
 
 	// Try to use cached transport (cahced per reference name)
@@ -413,31 +398,31 @@ func (fs *filesystem) resolve(ref string, digest string) (string, http.RoundTrip
 	if ok {
 		// Check the connectivity of the transport (and redirect if necessary)
 		if url, err := checkAndRedirect(url, tr); err == nil {
-			return url, tr, nil
+			return url, tr, nameref, nil
 		}
 	}
 
 	// Refresh the transport and check the connectivity
-	if tr, err = refreshTransport(nameref); err != nil {
-		return "", nil, err
+	if tr, err = authnTransport(http.DefaultTransport, nameref); err != nil {
+		return "", nil, nil, err
 	}
 	if url, err = checkAndRedirect(url, tr); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
 	// Update transports cache
 	fs.pullTransports[nameref.Name()] = tr
 
-	return url, tr, nil
+	return url, tr, nameref, nil
 }
 
-func refreshTransport(ref name.Reference) (http.RoundTripper, error) {
+func authnTransport(tr http.RoundTripper, ref name.Reference) (http.RoundTripper, error) {
 	// Authn against the repository using `~/.docker/config.json`
 	auth, err := authn.DefaultKeychain.Resolve(ref.Context())
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
 	}
-	return transport.New(ref.Context().Registry, auth, http.DefaultTransport, []string{ref.Scope(transport.PullScope)})
+	return transport.New(ref.Context().Registry, auth, tr, []string{ref.Scope(transport.PullScope)})
 }
 
 func checkAndRedirect(url string, tr http.RoundTripper) (string, error) {
