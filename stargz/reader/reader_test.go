@@ -89,7 +89,7 @@ func TestPrefetch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
-			if err := gr.Prefetch(); err != nil {
+			if err := gr.PrefetchWithReader(sr); err != nil {
 				t.Errorf("failed to prefetch: %v", err)
 				return
 			}
@@ -191,13 +191,13 @@ func TestFailReader(t *testing.T) {
 
 	// tests for prefetch
 	br.success = true
-	if err = gr.Prefetch(); err != nil {
+	if err = gr.PrefetchWithReader(bsr); err != nil {
 		t.Errorf("failed to prefetch but wanted to succeed: %v", err)
 		return
 	}
 
 	br.success = false
-	if err = gr.Prefetch(); err == nil {
+	if err = gr.PrefetchWithReader(bsr); err == nil {
 		t.Errorf("succeeded to prefetch but wanted to fail")
 		return
 	}

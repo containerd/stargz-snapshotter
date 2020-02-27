@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-FROM golang:1.12
+FROM golang:1.14
 
 # basic tools
 RUN apt-get update -y && \

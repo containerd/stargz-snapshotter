@@ -86,7 +86,7 @@ func (gr *Reader) OpenFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *Reader) Prefetch() error {
+func (gr *Reader) PrefetchWithReader(sr *io.SectionReader) error {
 	gr.prefetchInProgress = true
 	defer func() {
 		gr.prefetchInProgress = false
@@ -95,9 +95,9 @@ func (gr *Reader) Prefetch() error {
 
 	var prefetchSize int64
 	if e, ok := gr.r.Lookup(PrefetchLandmark); ok {
-		if e.Offset > gr.sr.Size() {
+		if e.Offset > sr.Size() {
 			return fmt.Errorf("invalid landmark offset %d is larger than layer size %d",
-				e.Offset, gr.sr.Size())
+				e.Offset, sr.Size())
 		}
 		prefetchSize = e.Offset
 	}
@@ -105,7 +105,7 @@ func (gr *Reader) Prefetch() error {
 	// Fetch specified range at once
 	// TODO: when prefetchSize is too large, save memory by chunking the range
 	prefetchBytes := make([]byte, prefetchSize)
-	if _, err := io.ReadFull(gr.sr, prefetchBytes); err != nil && err != io.EOF {
+	if _, err := io.ReadFull(sr, prefetchBytes); err != nil && err != io.EOF {
 		return fmt.Errorf("failed to prefetch layer data: %v", err)
 	}
 
