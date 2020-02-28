@@ -48,11 +48,13 @@ TARGETS=
 INTEGRATION=false
 OPTIMIZE=false
 BENCHMARK=false
+BUILDKIT=false
 for T in ${@} ; do
     case "${T}" in
         "integration" ) INTEGRATION=true ;;
         "test-optimize" ) OPTIMIZE=true ;;
         "benchmark" ) BENCHMARK=true ;;
+        "buildkit-integration" ) BUILDKIT=true ;;
         * ) TARGETS="${TARGETS} ${T}" ;;
     esac
 done
@@ -111,6 +113,44 @@ if [ "${BENCHMARK}" == "true" ] ; then
         fi
         cat "${BENCHMARK_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/table.sh" > "${OUTPUTDIR}/${OUTPUTFILENAME}"
         mv "${BENCHMARK_LOG}" "${OUTPUTDIR}/out.log"
+        echo "See output for >>> ${OUTPUTDIR}"
+    fi
+
+    echo "Cleaning up environment..."
+    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+    rm "${DOCKER_COMPOSE_YAML}"
+fi
+
+if [ "${BUILDKIT}" == "true" ] ; then
+    echo "Preparing docker-compose.yml..."
+
+    DOCKER_COMPOSE_YAML=$(mktemp)
+    CONTEXT="${REPO}/script/buildkit"
+    cd "${CONTEXT}"
+    CONTAINER_NAME=buildkit-integration
+    "${CONTEXT}"/docker-compose-buildkit.yml.sh "${REPO}" "${CONTAINER_NAME}" > "${DOCKER_COMPOSE_YAML}"
+
+    BUILDKIT_INTEGRATION_LOG=$(mktemp)
+    echo "log file: ${BUILDKIT_INTEGRATION_LOG}"
+    if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} buildkit_integration && \
+               docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
+               echo "# Buildkit integration performance(without exporting)" >> "${BUILDKIT_INTEGRATION_LOG}" && \
+               docker exec -i "${CONTAINER_NAME}" script/buildkit/measure.sh 2>&1 \
+                   | tee -a "${BUILDKIT_INTEGRATION_LOG}" && \
+               echo '# Buildkit integration performance(with exporting: `--output type=tar`)' >> "${BUILDKIT_INTEGRATION_LOG}" && \
+               docker exec -i "${CONTAINER_NAME}" script/buildkit/measure.sh --output type=tar,dest=/opt/buildkit/tmp.tar 2>&1 \
+                   | tee -a "${BUILDKIT_INTEGRATION_LOG}" ) ; then
+        FAIL=true
+    else
+        OUTPUTDIR=${BUILDKIT_RESULT_DIR:-}
+        if [ "${OUTPUTDIR}" == "" ] ; then
+            OUTPUTDIR=$(mktemp -d)
+        fi
+        OUTPUTFILENAME=${BUILDKIT_RESULT_FILENAME:-}
+        if [ "${OUTPUTFILENAME}" == "" ] ; then
+            OUTPUTFILENAME="result.md"
+        fi
+        mv "${BUILDKIT_INTEGRATION_LOG}" "${OUTPUTDIR}/${OUTPUTFILENAME}"
         echo "See output for >>> ${OUTPUTDIR}"
     fi
 

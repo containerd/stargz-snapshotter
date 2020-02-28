@@ -1,0 +1,25 @@
+name: Buildkit
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  buildkit-integration:
+    runs-on: ubuntu-18.04
+    name: BuildkitIntegration
+    env:
+      BUILDKIT_RESULT_DIR: ${{ github.workspace }}/buildkit/
+      BUILDKIT_RESULT_FILENAME: result.md
+    steps:
+    - uses: actions/checkout@v1
+    - name: Prepare output directory
+      run: mkdir "${BUILDKIT_RESULT_DIR}"
+    - name: Run buildkit
+      run: ./script/make.sh buildkit-integration
+    - name: Post the result as a comment
+      run: |
+        jq -n --arg result "$(cat ${BUILDKIT_RESULT_DIR}/${BUILDKIT_RESULT_FILENAME})" '{"body": $result}' | \
+        curl -X POST -d @- \
+             -H "Content-Type: application/json" \
+             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+             ${{ github.event.pull_request.comments_url }}
