@@ -175,7 +175,7 @@ class BenchRunner:
         return runtime
         
     def run_echo_hello(self, repo, cid):
-        cmd = ('%s c create %s -- %s%s %s echo hello' %
+        cmd = ('%s c create --net-host %s -- %s%s %s echo hello' %
                (self.docker, self.snapshotter_opt(), self.registry, self.add_suffix(repo), cid))
         print cmd
         startcreate = time.time()
@@ -186,7 +186,7 @@ class BenchRunner:
 
     def run_cmd_arg(self, repo, cid, runargs):
         assert(len(runargs.mount) == 0)
-        cmd = '%s c create %s ' % (self.docker, self.snapshotter_opt())
+        cmd = '%s c create --net-host %s ' % (self.docker, self.snapshotter_opt())
         cmd += '-- %s%s %s ' % (self.registry, self.add_suffix(repo), cid)
         cmd += runargs.arg
         print cmd
@@ -198,7 +198,7 @@ class BenchRunner:
 
     def run_cmd_arg_wait(self, repo, cid, runargs):
         env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s c create %s %s -- %s%s %s %s' %
+        cmd = ('%s c create --net-host %s %s -- %s%s %s %s' %
                (self.docker, self.snapshotter_opt(), env, self.registry, self.add_suffix(repo), cid, runargs.arg))
         print cmd
         startcreate = time.time()
@@ -232,7 +232,7 @@ class BenchRunner:
         return createtime, runtime
 
     def run_cmd_stdin(self, repo, cid, runargs):
-        cmd = '%s c create %s ' % (self.docker, self.snapshotter_opt())
+        cmd = '%s c create --net-host %s ' % (self.docker, self.snapshotter_opt())
         for a,b in runargs.mount:
             a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
             a = tmp_copy(a)
