@@ -9,19 +9,17 @@ jobs:
     name: HelloBench
     env:
       BENCHMARK_RESULT_DIR: ${{ github.workspace }}/benchmark/
-      BENCHMARK_RESULT_FILENAME: result.md
       BENCHMARK_USER: ktokunaga
       BENCHMARK_TARGETS: --all
     steps:
+    - name: Install gnuplot
+      run: sudo apt-get install -y gnuplot
     - uses: actions/checkout@v1
     - name: Prepare output directory
       run: mkdir "${BENCHMARK_RESULT_DIR}"
     - name: Run benchmark
       run: ./script/make.sh benchmark
-    - name: Post the result as a comment
-      run: |
-        jq -n --arg result "$(cat ${BENCHMARK_RESULT_DIR}/${BENCHMARK_RESULT_FILENAME})" '{"body": $result}' | \
-        curl -X POST -d @- \
-             -H "Content-Type: application/json" \
-             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-             ${{ github.event.pull_request.comments_url }}
+    - uses: actions/upload-artifact@v1
+      with:
+        name: benchmarking-result
+        path: ${{ env.BENCHMARK_RESULT_DIR }}
