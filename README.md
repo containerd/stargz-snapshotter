@@ -1,6 +1,6 @@
 # Stargz Snapshotter
 
-[![Tests Status](https://github.com/ktock/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/ktock/stargz-snapshotter/actions)
+[![Tests Status](https://github.com/containerd/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions)
 
 Pulling image is one of the major performance bottlenecks in container workload. Research shows that time for pulling accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Remote snapshotter* is a solution discussed in containerd community. *Stargz Snapshotter* is an implementation of the remote snapshotter which aims to standard-compatible remote snapshots leveraging [stargz image format by CRFS](https://github.com/google/crfs).
 
@@ -33,11 +33,11 @@ You can test this snapshotter with the latest containerd. Though we still need p
 
 __NOTICE:__
 
-- Put this repo on your `GOPATH`(`${GOPATH}/src/github.com/ktock/stargz-snapshotter`).
+- Put this repo on your `GOPATH`(`${GOPATH}/src/github.com/containerd/stargz-snapshotter`).
 
 ### Build and run the environment
 ```
-$ cd ${GOPATH}/src/github.com/ktock/stargz-snapshotter/script/demo
+$ cd ${GOPATH}/src/github.com/containerd/stargz-snapshotter/script/demo
 $ docker-compose build --build-arg HTTP_PROXY=$HTTP_PROXY \
                        --build-arg HTTPS_PROXY=$HTTP_PROXY \
                        --build-arg http_proxy=$HTTP_PROXY \

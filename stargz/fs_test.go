@@ -37,11 +37,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/containerd/stargz-snapshotter/stargz/reader"
+	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
-	"github.com/ktock/stargz-snapshotter/stargz/reader"
-	"github.com/ktock/stargz-snapshotter/task"
 	"golang.org/x/sys/unix"
 )
 

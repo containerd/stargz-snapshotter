@@ -150,8 +150,8 @@ EOF
     if ! ( docker build "${MINI_CONTEXT}" -t "${IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} && \
                docker run --rm --privileged --device /dev/fuse \
                       --tmpfs /tmp:exec,mode=777 \
-                      -w /go/src/github.com/ktock/stargz-snapshotter \
-                      -v "${REPO}:/go/src/github.com/ktock/stargz-snapshotter:ro" \
+                      -w /go/src/github.com/containerd/stargz-snapshotter \
+                      -v "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro" \
                       "${IMAGE_NAME}" make $TARGETS PREFIX=/tmp/out/ ) ; then
         FAIL=true
     fi

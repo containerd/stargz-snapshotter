@@ -37,7 +37,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ktock/stargz-snapshotter/cache"
+	"github.com/containerd/stargz-snapshotter/cache"
 )
 
 var contentRangeRegexp = regexp.MustCompile(`bytes ([0-9]+)-([0-9]+)/([0-9]+|\\*)`)

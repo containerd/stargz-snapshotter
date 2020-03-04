@@ -30,8 +30,8 @@ import (
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/log"
-	snbase "github.com/ktock/stargz-snapshotter/snapshot"
-	stargz "github.com/ktock/stargz-snapshotter/stargz"
+	snbase "github.com/containerd/stargz-snapshotter/snapshot"
+	stargz "github.com/containerd/stargz-snapshotter/stargz"
 	"github.com/sirupsen/logrus"
 )
 
