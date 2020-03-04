@@ -30,6 +30,7 @@ In the following table, `Image Name` column contains placeholders `{{ suffix }}`
 |`docker.io/ktokunaga/php:7.3.8-{{ suffix }}`|Printing `hello`|
 |`docker.io/ktokunaga/pypy:3.5-{{ suffix }}`|Printing `hello`|
 |`docker.io/ktokunaga/python:3.7-{{ suffix }}`|Printing `hello`|
+|`docker.io/ktokunaga/python:3.7-slim-{{ suffix }}`|Executing `pip --version`|
 |`docker.io/ktokunaga/r-base:3.6.1-{{ suffix }}`|Printing `hello`|
 |`docker.io/ktokunaga/redis:5.0.5-{{ suffix }}`|Code execution until up and ready message (`Ready to accept connections`) is printed|
 |`docker.io/ktokunaga/rethinkdb:2.3.6-{{ suffix }}`|Code execution until up and ready message (`Server ready`) is printed|

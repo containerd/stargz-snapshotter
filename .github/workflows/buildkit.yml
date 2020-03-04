@@ -1,0 +1,23 @@
+name: Buildkit
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  buildkit-integration:
+    runs-on: ubuntu-18.04
+    name: BuildkitIntegration
+    env:
+      BUILDKIT_RESULT_DIR: ${{ github.workspace }}/buildkit/
+    steps:
+    - name: Install gnuplot
+      run: sudo apt-get --no-install-recommends install -y gnuplot
+    - uses: actions/checkout@v1
+    - name: Prepare output directory
+      run: mkdir "${BUILDKIT_RESULT_DIR}"
+    - name: Run buildkit
+      run: ./script/make.sh buildkit-integration
+    - uses: actions/upload-artifact@v1
+      with:
+        name: buildkit-integration-result
+        path: ${{ env.BUILDKIT_RESULT_DIR }}

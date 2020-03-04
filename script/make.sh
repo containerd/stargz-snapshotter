@@ -48,11 +48,13 @@ TARGETS=
 INTEGRATION=false
 OPTIMIZE=false
 BENCHMARK=false
+BUILDKIT=false
 for T in ${@} ; do
     case "${T}" in
         "integration" ) INTEGRATION=true ;;
         "test-optimize" ) OPTIMIZE=true ;;
         "benchmark" ) BENCHMARK=true ;;
+        "buildkit-integration" ) BUILDKIT=true ;;
         * ) TARGETS="${TARGETS} ${T}" ;;
     esac
 done
@@ -107,6 +109,57 @@ if [ "${BENCHMARK}" == "true" ] ; then
         if [ "${OUTPUTDIR}" != "" ] ; then
             cp "${LOGDIR}/result.md" "${LOGDIR}/result.png" "${LOGDIR}/result.log" "${OUTPUTDIR}"
             cat "${LOGDIR}/result.log" | "${CONTEXT}/tools/format.sh" > "${OUTPUTDIR}/result.json"
+        fi
+    fi
+
+    echo "Cleaning up environment..."
+    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+    rm "${DOCKER_COMPOSE_YAML}"
+fi
+
+if [ "${BUILDKIT}" == "true" ] ; then
+    echo "Preparing docker-compose.yml..."
+
+    DOCKER_COMPOSE_YAML=$(mktemp)
+    CONTEXT="${REPO}/script/buildkit"
+    cd "${CONTEXT}"
+    CONTAINER_NAME=buildkit-integration
+    "${CONTEXT}"/docker-compose-buildkit.yml.sh "${REPO}" "${CONTAINER_NAME}" > "${DOCKER_COMPOSE_YAML}"
+
+    BUILDKIT_INTEGRATION_LOG=$(mktemp)
+    RESULT_JSON_LOG_OCI=$(mktemp)
+    RESULT_JSON_LOG_CONTAINERD=$(mktemp)
+    INTERNAL_LOGFILE_PATH=/result.log
+    echo "log file: ${RESULT_JSON_LOG_OCI} ${RESULT_JSON_LOG_CONTAINERD}"
+    if ! ( docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} buildkit_integration && \
+               docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
+               docker exec -i -e WITH_WORKER="oci" -e WITH_LOGFILE="${INTERNAL_LOGFILE_PATH}" \
+                      "${CONTAINER_NAME}" script/buildkit/measure.sh \
+                   | tee "${RESULT_JSON_LOG_OCI}" && \
+               docker exec -i -e WITH_WORKER="containerd" -e WITH_LOGFILE="${INTERNAL_LOGFILE_PATH}" \
+                      "${CONTAINER_NAME}" script/buildkit/measure.sh \
+                   | tee "${RESULT_JSON_LOG_CONTAINERD}"
+         ) ; then
+        FAIL=true
+        LOGDUMP=$(mktemp)
+        docker cp "${CONTAINER_NAME}":"${INTERNAL_LOGFILE_PATH}" "${LOGDUMP}"
+        echo "internal log file: ${LOGDUMP}"
+    else
+        LOGDIR=$(mktemp -d)
+        docker cp "${CONTAINER_NAME}":"${INTERNAL_LOGFILE_PATH}" "${LOGDIR}/result.log"
+        mv "${RESULT_JSON_LOG_OCI}" "${LOGDIR}/result_oci.json"
+        mv "${RESULT_JSON_LOG_CONTAINERD}" "${LOGDIR}/result_containerd.json"
+        cat "${LOGDIR}/result_oci.json" | "${CONTEXT}/tools/plot.sh" "${LOGDIR}" "oci"
+        cat "${LOGDIR}/result_containerd.json" | "${CONTEXT}/tools/plot.sh" "${LOGDIR}" "containerd"
+        echo "See logs for >> ${LOGDIR}"
+        OUTPUTDIR=${BUILDKIT_RESULT_DIR:-}
+        if [ "${OUTPUTDIR}" != "" ] ; then
+            cp "${LOGDIR}/result.log" \
+               "${LOGDIR}/result_oci.json" \
+               "${LOGDIR}/result_containerd.json" \
+               "${LOGDIR}/result_oci.png" \
+               "${LOGDIR}/result_containerd.png" \
+               "${OUTPUTDIR}"
         fi
     fi
 

@@ -107,6 +107,7 @@ class BenchRunner:
     CMD_ARG = {'perl:5.30': RunArgs(arg='perl -e \'print("hello\\n")\''),
                'python:3.7': RunArgs(arg='python -c \'print("hello")\''),
                'pypy:3.5': RunArgs(arg='pypy3 -c \'print("hello")\''),
+               'python:3.7-slim': RunArgs(arg='pip --version'),
     }
 
     # complete listing
@@ -116,6 +117,7 @@ class BenchRunner:
                  Bench('rethinkdb:2.3.6', 'database'),
                  Bench('redis:5.0.5', 'database'),
                  Bench('python:3.7', 'language'),
+                 Bench('python:3.7-slim', 'language'),
                  Bench('golang:1.12.9', 'language'),
                  Bench('gcc:9.2.0', 'language'),
                  Bench('jruby:9.2.8.0', 'language'),
