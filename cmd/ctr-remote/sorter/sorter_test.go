@@ -32,7 +32,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ktock/stargz-snapshotter/stargz/reader"
+	"github.com/containerd/stargz-snapshotter/stargz/reader"
 )
 
 func TestSort(t *testing.T) {

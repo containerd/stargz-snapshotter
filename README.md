@@ -1,6 +1,6 @@
 # Stargz Snapshotter
 
-[![Tests Status](https://github.com/ktock/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/ktock/stargz-snapshotter/actions)
+[![Tests Status](https://github.com/containerd/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions)
 
 Pulling image is one of the major performance bottlenecks in container workload. Research shows that time for pulling accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Remote snapshotter* is a solution discussed in containerd community. *Stargz Snapshotter* is an implementation of the remote snapshotter which aims to standard-compatible remote snapshots leveraging [stargz image format by CRFS](https://github.com/google/crfs).
 
@@ -25,17 +25,19 @@ user	0m0.112s
 sys	0m0.008s
 ```
 
+Stargz Snapshotter is a **non-core** sub-project of containerd.
+
 ## Demo
 
 You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr-remote) for a quick tasting. For an overview of the snapshotter, please check [this doc](./overview.md).
 
 __NOTICE:__
 
-- Put this repo on your `GOPATH`(`${GOPATH}/src/github.com/ktock/stargz-snapshotter`).
+- Put this repo on your `GOPATH`(`${GOPATH}/src/github.com/containerd/stargz-snapshotter`).
 
 ### Build and run the environment
 ```
-$ cd ${GOPATH}/src/github.com/ktock/stargz-snapshotter/script/demo
+$ cd ${GOPATH}/src/github.com/containerd/stargz-snapshotter/script/demo
 $ docker-compose build --build-arg HTTP_PROXY=$HTTP_PROXY \
                        --build-arg HTTPS_PROXY=$HTTP_PROXY \
                        --build-arg http_proxy=$HTTP_PROXY \
@@ -88,6 +90,16 @@ If you have no right to access the repository with credentials stored in `~/.doc
 ## Make your remote snapshotter
 
 It is easy for you to implement your remote snapshotter using [our general snapshotter package](/snapshot) without considering the protocol between that and containerd. You can configure the remote snapshotter with your `FileSystem` structure which you want to use as a backend filesystem. [Our snapshotter command](/cmd/containerd-stargz-grpc/main.go) is a good example for the integration.
+
+## Project details
+
+Stargz Snapshotter is a containerd **non-core** sub-project, licensed under the [Apache 2.0 license](./LICENSE).
+As a containerd non-core sub-project, you will find the:
+ * [Project governance](https://github.com/containerd/project/blob/master/GOVERNANCE.md),
+ * [Maintainers](./MAINTAINERS),
+ * and [Contributing guidelines](https://github.com/containerd/project/blob/master/CONTRIBUTING.md)
+
+information in our [`containerd/project`](https://github.com/containerd/project) repository.
 
 # TODO
 

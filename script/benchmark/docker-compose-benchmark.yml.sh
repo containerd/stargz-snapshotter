@@ -38,7 +38,7 @@ services:
       dockerfile: Dockerfile
     container_name: ${CONTAINER_NAME}
     privileged: true
-    working_dir: /go/src/github.com/ktock/stargz-snapshotter
+    working_dir: /go/src/github.com/containerd/stargz-snapshotter
     command: tail -f /dev/null
     environment:
     - NO_PROXY=127.0.0.1,localhost
@@ -49,7 +49,7 @@ services:
     tmpfs:
     - /tmp:exec,mode=777
     volumes:
-    - "${REPO}:/go/src/github.com/ktock/stargz-snapshotter:ro"
+    - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
     - "/dev/fuse:/dev/fuse"
     - "containerd-data:/var/lib/containerd:delegated"
     - "containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc:delegated"

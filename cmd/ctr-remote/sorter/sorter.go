@@ -24,8 +24,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/ktock/stargz-snapshotter/cmd/ctr-remote/util"
-	"github.com/ktock/stargz-snapshotter/stargz/reader"
+	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/util"
+	"github.com/containerd/stargz-snapshotter/stargz/reader"
 )
 
 const (

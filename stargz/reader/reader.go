@@ -33,8 +33,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/google/crfs/stargz"
-	"github.com/ktock/stargz-snapshotter/cache"
 )
 
 const (
