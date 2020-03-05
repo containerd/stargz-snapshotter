@@ -98,20 +98,16 @@ if [ "${BENCHMARK}" == "true" ] ; then
                    | tee "${BENCHMARK_LOG}" ) ; then
         FAIL=true
     else
-        OUTPUTDIR=${BENCHMARK_RESULT_DIR:-}
-        if [ "${OUTPUTDIR}" == "" ] ; then
-            OUTPUTDIR=$(mktemp -d)
+        LOGDIR=$(mktemp -d)
+        cat "${BENCHMARK_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/plot.sh" "${LOGDIR}"
+        cat "${BENCHMARK_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/table.sh" > "${LOGDIR}/result.md"
+        mv "${BENCHMARK_LOG}" "${LOGDIR}/result.log"
+        echo "See logs for >>> ${LOGDIR}"
+        OUTPUTDIR="${BENCHMARK_RESULT_DIR:-}"
+        if [ "${OUTPUTDIR}" != "" ] ; then
+            cp "${LOGDIR}/result.md" "${LOGDIR}/result.png" "${LOGDIR}/result.log" "${OUTPUTDIR}"
+            cat "${LOGDIR}/result.log" | "${CONTEXT}/tools/format.sh" > "${OUTPUTDIR}/result.json"
         fi
-        OUTPUTFILENAME=${BENCHMARK_RESULT_FILENAME:-}
-        if [ "${OUTPUTFILENAME}" == "" ] ; then
-            OUTPUTFILENAME="result.md"
-        fi
-        if [ "${BENCHMARK_WITH_PLOT:-}" == "true" ] ; then
-            cat "${BENCHMARK_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/plot.sh" "${OUTPUTDIR}"
-        fi
-        cat "${BENCHMARK_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/table.sh" > "${OUTPUTDIR}/${OUTPUTFILENAME}"
-        mv "${BENCHMARK_LOG}" "${OUTPUTDIR}/out.log"
-        echo "See output for >>> ${OUTPUTDIR}"
     fi
 
     echo "Cleaning up environment..."
