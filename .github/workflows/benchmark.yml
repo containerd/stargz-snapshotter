@@ -1,7 +1,5 @@
 name: Benchmark
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+on: [push, pull_request]
 
 jobs:
   hello-bench:
