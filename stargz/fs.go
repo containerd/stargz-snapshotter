@@ -175,10 +175,6 @@ type filesystem struct {
 	debug                 bool
 }
 
-type readerAtFunc func([]byte, int64) (int, error)
-
-func (f readerAtFunc) ReadAt(p []byte, offset int64) (int, error) { return f(p, offset) }
-
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
 	// This is a prioritized task and all background tasks will be stopped
 	// execution so this can avoid being disturbed for NW traffic by background
@@ -243,20 +239,24 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	fs.stargzReader[mountpoint] = gr
 	fs.stargzReaderMu.Unlock()
 
+	// RoundTripper only used for pre-/background-fetch.
+	// We use a separated transport because we don't want these fetching
+	// functionalities to disturb other HTTP-related operations
+	fetchTr := authnTransportLazy(http.DefaultTransport.(*http.Transport).Clone(), nameref)
+
 	// Prefetch this layer. We prefetch several layers in parallel. The first
 	// Check() for this layer waits for the prefetch completion. We recreate
 	// RoundTripper to avoid disturbing other NW-related operations.
 	if !fs.noprefetch {
 		go func() {
-			// Recreate new transport not to disturb other HTTP-related operations
-			tr, err := authnTransport(http.DefaultTransport.(*http.Transport).Clone(), nameref)
-			if err != nil {
-				logCtx.WithError(err).Debug("failed to authenticate for prefetch")
-				return
-			}
 			pr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (int, error) {
 				fs.backgroundTaskManager.DoPrioritizedTask()
 				defer fs.backgroundTaskManager.DonePrioritizedTask()
+				tr, err := fetchTr.transport()
+				if err != nil {
+					logCtx.WithError(err).Debug("failed to prepare transport for prefetch")
+					return 0, err
+				}
 				return ur.ReadAt(p, offset, remote.WithRoundTripper(tr))
 			}), 0, size)
 			if err := gr.PrefetchWithReader(pr); err != nil {
@@ -273,15 +273,15 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// about NW traffic. We read layer with a buffer to reduce num of
 	// requests to the registry.
 	go func() {
-		br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (n int, err error) {
+		br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (retN int, retErr error) {
 			fs.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
-				// Recreate new transport not to disturb other HTTP-related operations
-				var tr http.RoundTripper
-				if tr, err = authnTransport(http.DefaultTransport.(*http.Transport).Clone(), nameref); err != nil {
-					logCtx.WithError(err).Debug("failed to authenticate for background fetch")
+				tr, err := fetchTr.transport()
+				if err != nil {
+					logCtx.WithError(err).Debug("failed to prepare transport for background fetch")
+					retN, retErr = 0, err
 					return
 				}
-				n, err = ur.ReadAt(p, offset, remote.WithContext(ctx), remote.WithRoundTripper(tr))
+				retN, retErr = ur.ReadAt(p, offset, remote.WithContext(ctx), remote.WithRoundTripper(tr))
 			}, 120*time.Second)
 			return
 		}), 0, size)
@@ -425,6 +425,34 @@ func authnTransport(tr http.RoundTripper, ref name.Reference) (http.RoundTripper
 	return transport.New(ref.Context().Registry, auth, tr, []string{ref.Scope(transport.PullScope)})
 }
 
+func authnTransportLazy(tr http.RoundTripper, ref name.Reference) *transportAuthenticator {
+	return &transportAuthenticator{
+		base:    tr,
+		nameref: ref,
+	}
+}
+
+type transportAuthenticator struct {
+	base    http.RoundTripper
+	tr      http.RoundTripper
+	nameref name.Reference
+	mu      sync.Mutex
+}
+
+func (ta *transportAuthenticator) transport() (http.RoundTripper, error) {
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if ta.tr != nil {
+		return ta.tr, nil
+	}
+	tr, err := authnTransport(ta.base, ta.nameref)
+	if err != nil {
+		return nil, err
+	}
+	ta.tr = tr
+	return ta.tr, nil
+}
+
 func checkAndRedirect(url string, tr http.RoundTripper) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -450,6 +478,10 @@ func checkAndRedirect(url string, tr http.RoundTripper) (string, error) {
 	}
 	return url, nil
 }
+
+type readerAtFunc func([]byte, int64) (int, error)
+
+func (f readerAtFunc) ReadAt(p []byte, offset int64) (int, error) { return f(p, offset) }
 
 // node is a filesystem inode abstraction which implements node in go-fuse.
 type node struct {

@@ -30,7 +30,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -40,6 +42,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"golang.org/x/sys/unix"
@@ -687,4 +690,49 @@ func getDirentAndNode(root *node, path string) (ent *fuse.DirEntry, n *nodefs.In
 func digestFor(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return fmt.Sprintf("sha256:%x", sum)
+}
+
+func TestAuthnTransportLazy(t *testing.T) {
+	dummyRef := "example.dummy/dummy:latest"
+	nameref, err := name.ParseReference(dummyRef)
+	if err != nil {
+		t.Fatalf("failed to parse name %q: %v", dummyRef, err)
+	}
+	ta := authnTransportLazy(&okRoundTripper{}, nameref)
+
+	// Initialize transport
+	tr1, err := ta.transport()
+	if err != nil {
+		t.Fatalf("failed to initialize transport: %v", err)
+	}
+	if tr1 == nil {
+		t.Errorf("initialized transport is nil")
+		return
+	}
+
+	// Get the created transport again
+	tr2, err := ta.transport()
+	if err != nil {
+		t.Fatalf("failed to get transport: %v", err)
+	}
+	if tr2 == nil {
+		t.Errorf("passed transport is nil")
+		return
+	}
+
+	// Check if these transports are same
+	if tr1 != tr2 {
+		t.Errorf("lazyTransport gave different transports on each time")
+		return
+	}
+}
+
+type okRoundTripper struct{}
+
+func (tr *okRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+	}, nil
 }
