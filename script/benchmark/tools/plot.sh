@@ -42,14 +42,15 @@ GRAPHFILE_ALL="${DATADIR}result.png"
 
 cat <<EOF > "${PLTFILE_ALL}"
 set output '${GRAPHFILE_ALL}'
-set title "pull + startup time"
+set title "Time to take for starting up containers"
 set terminal png size 1000, 750
 set style data histogram
 set style histogram rowstack gap 1
 set style fill solid 1.0 border -1
 set key autotitle columnheader
 set xtics rotate by -45
-set lmargin 5
+set ylabel 'time[sec]'
+set lmargin 10
 set rmargin 5
 set tmargin 5
 set bmargin 5
