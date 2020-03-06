@@ -85,25 +85,47 @@ class Bench:
         return json.dumps(self.__dict__)
 
 class BenchRunner:
-    ECHO_HELLO = set([])
+    ECHO_HELLO = set(['alpine:3.10.2',
+                      'fedora:30',])
 
     CMD_ARG_WAIT = {'rethinkdb:2.3.6': RunArgs(waitline='Server ready'),
                     'glassfish:4.1-jdk8': RunArgs(waitline='Running GlassFish'),
+                    'drupal:8.7.6': RunArgs(waitline='apache2 -D FOREGROUND'),
+                    'jenkins:2.60.3': RunArgs(waitline='Jenkins is fully up and running'),
+                    'redis:5.0.5': RunArgs(waitline='Ready to accept connections'),
     }
 
-    CMD_STDIN = {'gcc:9.2.0': RunArgs(stdin='cd /src; gcc main.c; ./a.out; exit\n',
+    CMD_STDIN = {'php:7.3.8':  RunArgs(stdin='php -r "echo \\\"hello\\n\\\";"; exit\n'),
+                 'gcc:9.2.0': RunArgs(stdin='cd /src; gcc main.c; ./a.out; exit\n',
                                 mount=[('gcc', '/src')]),
+                 'golang:1.12.9': RunArgs(stdin='cd /go/src; go run main.go; exit\n',
+                                   mount=[('go', '/go/src')]),
+                 'jruby:9.2.8.0': RunArgs(stdin='jruby -e "puts \\\"hello\\\""; exit\n'),
+                 'r-base:3.6.1': RunArgs(stdin='sprintf("hello")\nq()\n', stdin_sh='R --no-save'),
     }
 
-    CMD_ARG = {'python:3.7': RunArgs(arg='python -c \'print("hello")\''),
+    CMD_ARG = {'perl:5.30': RunArgs(arg='perl -e \'print("hello\\n")\''),
+               'python:3.7': RunArgs(arg='python -c \'print("hello")\''),
+               'pypy:3.5': RunArgs(arg='pypy3 -c \'print("hello")\''),
     }
 
     # complete listing
     ALL = dict([(b.name, b) for b in
-                [Bench('rethinkdb:2.3.6', 'database'),
+                [Bench('alpine:3.10.2', 'distro'),
+                 Bench('fedora:30', 'distro'),
+                 Bench('rethinkdb:2.3.6', 'database'),
+                 Bench('redis:5.0.5', 'database'),
                  Bench('python:3.7', 'language'),
+                 Bench('golang:1.12.9', 'language'),
                  Bench('gcc:9.2.0', 'language'),
+                 Bench('jruby:9.2.8.0', 'language'),
+                 Bench('perl:5.30', 'language'),
+                 Bench('php:7.3.8', 'language'),
+                 Bench('pypy:3.5', 'language'),
+                 Bench('r-base:3.6.1', 'language'),
                  Bench('glassfish:4.1-jdk8', 'web-server'),
+                 Bench('drupal:8.7.6'),
+                 Bench('jenkins:2.60.3'),
              ]])
 
     def __init__(self, user='library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER):
@@ -291,7 +313,7 @@ class BenchRunner:
     def convert_echo_hello(self, repo):
         self.mode = ESTARGZ_MODE
         period=10
-        cmd = ('%s -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s%s %s%s' %
+        cmd = ('%s -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s %s/%s' %
                (self.optimizer, period, repo, self.user, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
@@ -304,7 +326,7 @@ class BenchRunner:
         entry = ""
         if runargs.arg != "": # FIXME: this is naive...
             entry = '-entrypoint \'["/bin/sh", "-c"]\''
-        cmd = ('%s -period %s %s %s %s%s %s%s' %
+        cmd = ('%s -period %s %s %s %s %s/%s' %
                (self.optimizer, period, entry, genargs(runargs.arg), repo, self.user, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
@@ -314,7 +336,7 @@ class BenchRunner:
         self.mode = ESTARGZ_MODE
         period = 90
         env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s -period %s %s %s %s%s %s%s' %
+        cmd = ('%s -period %s %s %s %s %s/%s' %
                (self.optimizer, period, env, genargs(runargs.arg), repo, self.user, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
@@ -323,7 +345,7 @@ class BenchRunner:
     def convert_cmd_stdin(self, repo, runargs):
         self.mode = ESTARGZ_MODE
         period = 60
-        cmd = ('%s -period %s -entrypoint \'["/bin/sh", "-c"]\' %s %s%s %s%s' %
+        cmd = ('%s -period %s -entrypoint \'["/bin/sh", "-c"]\' %s %s %s/%s' %
                (self.optimizer, period, genargs(runargs.stdin_sh), repo, self.user, self.add_suffix(repo)))
         print cmd
         p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -335,12 +357,12 @@ class BenchRunner:
 
     def copy_img(self, repo):
         self.mode = LEGACY_MODE
-        cmd = 'gcrane cp %s %s%s' % (repo, self.user, self.add_suffix(repo))
+        cmd = 'crane copy %s %s/%s' % (repo, self.user, self.add_suffix(repo))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
         self.mode = STARGZ_MODE
-        cmd = '%s --stargz-only %s %s%s' % (self.optimizer, repo, self.user, self.add_suffix(repo))
+        cmd = '%s --stargz-only %s %s/%s' % (self.optimizer, repo, self.user, self.add_suffix(repo))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)

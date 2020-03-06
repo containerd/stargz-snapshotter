@@ -1,35 +1,21 @@
 # Stargz Snapshotter
 
-[![Tests Status](https://github.com/containerd/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions)
+[![Tests Status](https://github.com/containerd/stargz-snapshotter/workflows/Tests/badge.svg?branch=master)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ATests+branch%3Amaster)
+[![Benchmarking](https://github.com/containerd/stargz-snapshotter/workflows/Benchmark/badge.svg?branch=master)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ABenchmark+branch%3Amaster)
 
-Pulling image is one of the major performance bottlenecks in container workload. Research shows that time for pulling accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Remote snapshotter* is a solution discussed in containerd community. *Stargz Snapshotter* is an implementation of the remote snapshotter which aims to standard-compatible remote snapshots leveraging [stargz image format by CRFS](https://github.com/google/crfs).
+Pulling image is one of the time-consuming steps in the container lifecycle. Research shows that time to take for pull operation accounts for 76% of container startup time[[FAST '16]](https://www.usenix.org/node/194431). *Stargz Snapshotter* is an implementation of snapshotter which aims to solve this problem leveraging [stargz image format by CRFS](https://github.com/google/crfs). The following histogram is the benchmarking result for startup time of several containers measured on Github Actions, using Docker Hub as a registry.
 
-Related discussion of the snapshotter in containerd community:
-- [Support remote snapshotter to speed up image pulling#3731@containerd](https://github.com/containerd/containerd/issues/3731)
-- [Support `Prepare` for existing snapshots in Snapshotter interface#2968@containerd](https://github.com/containerd/containerd/issues/2968)
-- [remote filesystem snapshotter#2943@containerd](https://github.com/containerd/containerd/issues/2943)
+<img src="docs/images/benchmarking-result-288c338.png" width="600" alt="The benchmarking result on 288c338">
 
-By using this snapshotter, images(even if they are huge) can be pulled in lightning speed because this skips pulling layers but fetches the contents on demand at runtime.
-```
-# time ctr-remote images rpull --plain-http registry2:5000/fedora:30 > /dev/null 
-real	0m0.447s
-user	0m0.081s
-sys	0m0.019s
-# time ctr-remote images rpull --plain-http registry2:5000/python:3.7 > /dev/null 
-real	0m1.041s
-user	0m0.073s
-sys	0m0.028s
-# time ctr-remote images rpull --plain-http registry2:5000/jenkins:2.60.3 > /dev/null 
-real	0m1.231s
-user	0m0.112s
-sys	0m0.008s
-```
+`legacy` shows the startup performance when we use containerd's default snapshotter (`overlayfs`) with images copied from `docker.io/library` without optimization. For this configuration, containerd pulls entire image contents and `pull` operation takes accordingly. When we use stargz snapshotter with `stargz` images we are seeing performance improvement on the `pull` operation because containerd can start the container before the entire image contents locally available and fetches each file on-demand. But at the same time, we see the performance drawback for `run` operation because each access to files takes extra time for fetching them from the registry. When we use the further optimized version of images(`estargz`) we can mitigate the performance drawback observed in `stargz` images. This is because stargz snapshotter prefetches and caches some files which will be most likely accessed during container workload. Stargz snapshotter waits for the first container creation until the prefetch completes so `create` sometimes takes longer than other types of image. But this wait only occurs just after the pull completion until the prefetch completion and it's shorter than waiting for downloading all files of all layers.
+
+The above histogram is [the benchmarking result on the commit `288c338`](https://github.com/containerd/stargz-snapshotter/actions/runs/50632674). We are constantly measuring the performance of this snapshotter so you can get the latest one through the badge shown top of this doc. Please note that we sometimes see dispersion among the results because of the NW condition on the internet and/or the location of the instance in the Github Actions, etc. Our benchmarking method is based on [HelloBench](https://github.com/Tintri/hello-bench).
 
 Stargz Snapshotter is a **non-core** sub-project of containerd.
 
 ## Demo
 
-You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr-remote) for a quick tasting. For an overview of the snapshotter, please check [this doc](./overview.md).
+You can test this snapshotter with the latest containerd. Though we still need patches on clients and we are working on, you can use [a customized version of ctr command](cmd/ctr-remote) for a quick tasting. For an overview of the snapshotter, please check [this doc](./docs/overview.md).
 
 __NOTICE:__
 
@@ -50,14 +36,17 @@ $ docker exec -it containerd_demo /bin/bash
 
 ### Prepare stargz-formatted image on a registry
 
-To make and push a stargz image, you can use CRFS-official `stargzify` or our `ctr-remote` which has additional optimization functionality. In this example, we use `ctr-remote` to convert the image into stargz-formatted one as well as optimize the image for your workload. We optimize the image aming to speed up the execution of `ls` command on `bash`.
+For making and pushing a stargz image, you can use CRFS-official `stargzify` command or our `ctr-remote` command which has further optimization functionality. In this example, we use `ctr-remote`. You can also try our pre-converted images listed in [this doc](./docs/pre-converted-images.md).
+
+We optimize the image for speeding up the execution of `ls` command on `bash`.
 ```
 # ctr-remote image optimize --plain-http --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "ls" ]' \
              ubuntu:18.04 http://registry2:5000/ubuntu:18.04
 ```
-The converted image is still __compatible with a normal docker image__ so you can still pull and run it with normal tools(e.g. docker).
+The converted image is still __docker-compatible__ so you can push/pull/run it with existing tools (e.g. docker).
 
 ### Run the container with stargz snapshots
+
 Layer downloads don't occur. So this "pull" operation ends soon.
 ```
 # time ctr-remote images rpull --plain-http registry2:5000/ubuntu:18.04
@@ -74,22 +63,16 @@ bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  s
 
 ## Authentication
 
-We support private repository authentication powerd by [go-containerregistry](https://github.com/google/go-containerregistry) which supports `~/.docker/config.json`-based credential management.
-You can authenticate yourself with normal operations (e.g. `docker login` command) using `~/.docker/config.json`.
-
-In the example showed above, you can pull images from your private repository on the DockerHub:
+We support private repository authentication powered by [go-containerregistry](https://github.com/google/go-containerregistry) which supports `~/.docker/config.json`-based credential management.
+You can authenticate yourself to private registries with normal operations (e.g. `docker login` command) using `~/.docker/config.json`.
 ```
 # docker login registry-1.docker.io
 (Enter username and password)
 # ctr-remote image rpull --user <username>:<password> docker.io/<your-repository>/ubuntu:18.04
 ```
 The `--user` option is just for containerd's side which doesn't recognize `~/.docker/config.json`.
-We doesn't use credentials specified by this option but uses `~/.docker/config.json` instead.
-If you have no right to access the repository with credentials stored in `~/.docker/config.json`, this pull optration fallbacks to the normal one(i.e. overlayfs).
-
-## Make your remote snapshotter
-
-It is easy for you to implement your remote snapshotter using [our general snapshotter package](/snapshot) without considering the protocol between that and containerd. You can configure the remote snapshotter with your `FileSystem` structure which you want to use as a backend filesystem. [Our snapshotter command](/cmd/containerd-stargz-grpc/main.go) is a good example for the integration.
+We don't use credentials specified by this option but uses `~/.docker/config.json` instead.
+If you have no right to access the repository with credentials stored in `~/.docker/config.json`, this pull operation fallbacks to the normal one(i.e. overlayfs).
 
 ## Project details
 
@@ -100,20 +83,3 @@ As a containerd non-core sub-project, you will find the:
  * and [Contributing guidelines](https://github.com/containerd/project/blob/master/CONTRIBUTING.md)
 
 information in our [`containerd/project`](https://github.com/containerd/project) repository.
-
-# TODO
-
-## General issues:
-- [ ] Completing necessary patches on the containerd.
-  - [x] Implement the protocol on metadata snapshotter: [#3793](https://github.com/containerd/containerd/pull/3793)
-  - [x] Skip downloading remote snapshot layers: [#3846](https://github.com/containerd/containerd/pull/3846), [#3870](https://github.com/containerd/containerd/pull/3870), [#3911](https://github.com/containerd/containerd/pull/3911)
-  - [ ] Add handlers for image information propagation
-  - [ ] Deal with ErrUnavailable error and try re-pull layers
-
-## Snapshotter specific issues:
-- [x] Resiliency:
-  - [x] Ensure all mounts are available on every Prepare() and report erros when unavailable.
-  - [x] Deal with runtime problems(NW disconnection, authn failure and so on).
-- [x] Authn: Implement fundamental private repository authentication using `~/.docker/config.json`.
-- [x] Performance: READ performance improvement
-- [x] Documentation: Add overview docs.

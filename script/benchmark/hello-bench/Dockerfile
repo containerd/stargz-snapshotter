@@ -16,10 +16,20 @@ FROM golang:1.14
 
 # basic tools
 RUN apt-get update -y && \
-    apt-get --no-install-recommends install -y libbtrfs-dev libseccomp-dev fuse python 
+    apt-get install --no-install-recommends -y libbtrfs-dev libseccomp-dev fuse python \
+            apt-transport-https software-properties-common && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
+    add-apt-repository \
+      "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
+    apt-get update -y && apt-get install --no-install-recommends -y docker-ce-cli
 
 # runtime dependencies
-RUN git clone https://github.com/opencontainers/runc \
+RUN git clone https://github.com/google/go-containerregistry \
+              $GOPATH/src/github.com/google/go-containerregistry && \
+    cd $GOPATH/src/github.com/google/go-containerregistry && \
+    git checkout 4b1985e5ea2104672636879e1694808f735fd214 && \
+    GO111MODULE=on go install github.com/google/go-containerregistry/cmd/crane && \
+    git clone https://github.com/opencontainers/runc \
               $GOPATH/src/github.com/opencontainers/runc && \
     cd $GOPATH/src/github.com/opencontainers/runc && \
     git checkout d736ef14f0288d6993a1845745d6756cfc9ddd5a && \
