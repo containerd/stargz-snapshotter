@@ -18,12 +18,12 @@ FROM golang:1.14
 # docker-ce-cli is used only for users to log into registries (e.g. DockerHub)
 # with ~/.docker/config.json
 RUN apt-get update -y && \
-    apt-get install -y libbtrfs-dev libseccomp-dev fuse \
+    apt-get --no-install-recommends install -y libbtrfs-dev libseccomp-dev fuse \
                        apt-transport-https gnupg2 software-properties-common && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
     add-apt-repository \
       "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
-    apt-get update -y && apt-get install -y docker-ce-cli
+    apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli
 
 # runtime dependencies
 RUN git clone https://github.com/opencontainers/runc \

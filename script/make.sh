@@ -140,7 +140,7 @@ if [ "$TARGETS" != "" ] ; then
     MINI_CONTEXT=$(mktemp -d)
     cat <<EOF > "${MINI_CONTEXT}/Dockerfile"
 FROM golang:1.14
-RUN apt-get update -y && apt-get install -y fuse
+RUN apt-get update -y && apt-get --no-install-recommends install -y fuse
 EOF
     IMAGE_NAME="minienv:$(sha256sum ${MINI_CONTEXT}/Dockerfile | cut -f 1 -d ' ')"
     if ! ( docker build "${MINI_CONTEXT}" -t "${IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} && \
