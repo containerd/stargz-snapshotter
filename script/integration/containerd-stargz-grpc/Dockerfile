@@ -16,8 +16,8 @@ FROM golang:1.14
 
 # Install FUSE for filesystems and Docker client for logging into the registry
 RUN apt-get update -y && \
-    apt-get install -y fuse apt-transport-https gnupg2 software-properties-common && \
+    apt-get --no-install-recommends install -y fuse apt-transport-https gnupg2 software-properties-common && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
     add-apt-repository \
       "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
-    apt-get update -y && apt-get install -y docker-ce-cli
+    apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli

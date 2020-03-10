@@ -16,7 +16,7 @@ FROM golang:1.14
 
 # basic tools
 RUN apt-get update -y && \
-    apt-get install -y libbtrfs-dev libseccomp-dev fuse python 
+    apt-get --no-install-recommends install -y libbtrfs-dev libseccomp-dev fuse python 
 
 # runtime dependencies
 RUN git clone https://github.com/opencontainers/runc \
