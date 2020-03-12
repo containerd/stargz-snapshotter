@@ -21,7 +21,7 @@ As an image converter command, you can use CRFS-official `stargzify` or our `ctr
 
 This document gives you a high-level overview of Stargz Snapshotter.
 
-![overview](images/overview01.png)
+![overview](/docs/images/overview01.png)
 
 ## Stargz Snapshotter Proxy Plugin
 
