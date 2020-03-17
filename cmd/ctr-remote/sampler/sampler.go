@@ -65,6 +65,7 @@ func Run(bundle string, config v1.Image, period int, opts ...Option) error {
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
+	defer signal.Stop(sc)
 
 	select {
 	case <-sc:
