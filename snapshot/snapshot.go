@@ -613,37 +613,38 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, lab
 // checkAvailability checks avaiability of the specified layer and all lower
 // layers using filesystem's checking functionality.
 func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
-	log.G(ctx).WithField("key", key).Debug("checking layer availability")
+	logCtx := log.G(ctx).WithField("key", key)
+	logCtx.Debug("checking layer availability")
+
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
-		log.G(ctx).WithError(err).WithField("key", key).Warn("failed to get transaction")
+		logCtx.WithError(err).Warn("failed to get transaction")
 		return false
 	}
 	defer t.Rollback()
-	id, info, _, err := storage.GetInfo(ctx, key)
-	if err != nil {
-		log.G(ctx).WithError(err).WithField("key", key).Warn("failed to get info")
-		return false
+
+	var checkPaths []string
+	for cKey := key; cKey != ""; {
+		id, info, _, err := storage.GetInfo(ctx, cKey)
+		if err != nil {
+			logCtx.WithError(err).Warnf("failed to get info of %q", cKey)
+			return false
+		}
+		if _, ok := info.Labels[remoteLabel]; ok {
+			checkPaths = append(checkPaths, o.upperPath(id))
+		} else {
+			logCtx.WithField("mount-point", o.upperPath(id)).
+				Debug("layer is normal snapshot(overlayfs)")
+		}
+		cKey = info.Parent
 	}
-	if info.Parent != "" {
-		// Check lower layer in advance
-		if !o.checkAvailability(ctx, info.Parent) {
+	for _, mp := range checkPaths {
+		logCtx.WithField("mount-point", mp).Debug("checking mount point")
+		if err := o.fs.Check(o.context, mp); err != nil {
+			logCtx.WithError(err).WithField("mount-point", mp).Warn("layer is unavailable")
 			return false
 		}
 	}
-	if _, ok := info.Labels[remoteLabel]; !ok {
-		log.G(ctx).
-			WithField("key", key).
-			WithField("mount point", o.upperPath(id)).
-			Warn("layer is normal snapshot(overlayfs)")
-		return true // normal overlayfs layer
-	}
-	if err := o.fs.Check(o.context, o.upperPath(id)); err != nil {
-		log.G(ctx).WithError(err).
-			WithField("key", key).
-			WithField("mount point", o.upperPath(id)).
-			Warn("layer is unavailable")
-		return false
-	}
+
 	return true
 }
