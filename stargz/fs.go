@@ -43,11 +43,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -56,7 +54,6 @@ import (
 	"unsafe"
 
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/reference/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/stargz/handler"
@@ -64,63 +61,33 @@ import (
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"golang.org/x/sys/unix"
 )
 
 const (
-	blockSize         = 512
-	memoryCacheType   = "memory"
-	whiteoutPrefix    = ".wh."
-	whiteoutOpaqueDir = whiteoutPrefix + whiteoutPrefix + ".opq"
-	opaqueXattr       = "trusted.overlay.opaque"
-	opaqueXattrValue  = "y"
-	stateDirName      = ".stargz-snapshotter"
-
-	defaultHTTPCacheChunkSize = 50000
-	defaultLRUCacheEntry      = 5000
-	defaultLayerValidInterval = 60 * time.Second
+	blockSize            = 512
+	memoryCacheType      = "memory"
+	whiteoutPrefix       = ".wh."
+	whiteoutOpaqueDir    = whiteoutPrefix + whiteoutPrefix + ".opq"
+	opaqueXattr          = "trusted.overlay.opaque"
+	opaqueXattrValue     = "y"
+	stateDirName         = ".stargz-snapshotter"
+	defaultLRUCacheEntry = 5000
 )
 
-type layer interface {
-	OpenFile(name string) (io.ReaderAt, error)
-}
-
-type remoteInfo interface {
-	FetchedSize() int64
-	Check() error
-}
-
 type Config struct {
-	LRUCacheEntry      int    `toml:"lru_max_entry"`
-	HTTPCacheChunkSize int64  `toml:"http_chunk_size"`
-	HTTPCacheType      string `toml:"http_cache_type"`
-	FSCacheType        string `toml:"filesystem_cache_type"`
-	LayerValidInterval int64  `toml:"layer_valid_interval"`
-	CheckLayerAlways   bool   `toml:"check_layer_always"`
-
-	Insecure   []string `toml:"insecure"`
-	NoPrefetch bool     `toml:"noprefetch"`
-	Debug      bool     `toml:"debug"`
-}
-
-// getCache gets a cache corresponding to specified type.
-func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
-	if ctype == memoryCacheType {
-		return cache.NewMemoryCache(), nil
-	}
-	return cache.NewDirectoryCache(dir, maxEntry)
+	remote.BlobConfig `toml:"blob"`
+	ResolverConfig    map[string]remote.ResolverConfig `toml:"resolver"`
+	HTTPCacheType     string                           `toml:"http_cache_type"`
+	FSCacheType       string                           `toml:"filesystem_cache_type"`
+	LRUCacheEntry     int                              `toml:"lru_max_entry"`
+	NoPrefetch        bool                             `toml:"noprefetch"`
+	Debug             bool                             `toml:"debug"`
 }
 
 func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
-	httpCacheChunkSize := config.HTTPCacheChunkSize
-	if httpCacheChunkSize == 0 {
-		httpCacheChunkSize = defaultHTTPCacheChunkSize
-	}
 	maxEntry := config.LRUCacheEntry
 	if maxEntry == 0 {
 		maxEntry = defaultLRUCacheEntry
@@ -133,46 +100,46 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 	if err != nil {
 		return nil, err
 	}
-	var layerValidInterval time.Duration
-	if config.LayerValidInterval == 0 {
-		layerValidInterval = defaultLayerValidInterval // zero means "use default interval"
-	} else {
-		layerValidInterval = time.Duration(config.LayerValidInterval) * time.Second
-	}
-	if config.CheckLayerAlways {
-		layerValidInterval = 0
-	}
 
 	return &filesystem{
-		httpCacheChunkSize:    httpCacheChunkSize,
+		resolver:              remote.NewResolver(config.ResolverConfig),
+		blobConfig:            config.BlobConfig,
 		httpCache:             httpCache,
 		fsCache:               fsCache,
 		noprefetch:            config.NoPrefetch,
-		insecure:              config.Insecure,
-		pullTransports:        make(map[string]http.RoundTripper),
-		layerValidInterval:    layerValidInterval,
-		remoteInfo:            make(map[string]remoteInfo),
+		debug:                 config.Debug,
+		blobInfo:              make(map[string]blobInfo),
 		stargzReader:          make(map[string]*reader.Reader),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
-		debug:                 config.Debug,
 	}, nil
 }
 
+// getCache gets a cache corresponding to specified type.
+func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
+	if ctype == memoryCacheType {
+		return cache.NewMemoryCache(), nil
+	}
+	return cache.NewDirectoryCache(dir, maxEntry)
+}
+
+type blobInfo interface {
+	Size() int64
+	FetchedSize() int64
+	Check() error
+}
+
 type filesystem struct {
-	httpCacheChunkSize    int64
+	resolver              *remote.Resolver
+	blobConfig            remote.BlobConfig
 	httpCache             cache.BlobCache
 	fsCache               cache.BlobCache
 	noprefetch            bool
-	insecure              []string
-	pullTransports        map[string]http.RoundTripper
-	pullTransportsMu      sync.Mutex
-	layerValidInterval    time.Duration
-	remoteInfo            map[string]remoteInfo
-	remoteInfoMu          sync.Mutex
+	debug                 bool
+	blobInfo              map[string]blobInfo
+	blobInfoMu            sync.Mutex
 	stargzReader          map[string]*reader.Reader
 	stargzReaderMu        sync.Mutex
 	backgroundTaskManager *task.BackgroundTaskManager
-	debug                 bool
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
@@ -194,42 +161,25 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		logCtx.Debug("digest hasn't been passed")
 		return fmt.Errorf("digest hasn't been passed")
 	}
-
 	logCtx = logCtx.WithField("ref", ref).WithField("digest", digest)
 
-	// Authenticate to the registry using ~/.docker/config.json.
-	url, tr, nameref, err := fs.resolve(ref, digest)
+	// Resolve the reference and digest
+	blob, err := fs.resolver.Resolve(ref, digest, fs.httpCache, fs.blobConfig)
 	if err != nil {
 		logCtx.WithError(err).Debug("failed to resolve the reference")
 		return err
 	}
-
-	logCtx = logCtx.WithField("url", url)
-
-	// Make and register a reader for the remote blob of this layer.
-	ur, size, err := remote.NewURLReaderAt(
-		url,
-		tr,
-		fs.httpCacheChunkSize,
-		fs.httpCache,
-		fs.layerValidInterval)
-	if err != nil {
-		logCtx.WithError(err).Debug("failed to connect")
-		return err
-	}
-	fs.remoteInfoMu.Lock()
-	fs.remoteInfo[mountpoint] = ur
-	fs.remoteInfoMu.Unlock()
+	fs.blobInfoMu.Lock()
+	fs.blobInfo[mountpoint] = blob
+	fs.blobInfoMu.Unlock()
 
 	// Get a reader for stargz archive.
 	// Each file's read operation is a prioritized task and all background tasks
 	// will be stopped during the execution so this can avoid being disturbed for
 	// NW traffic by background tasks.
 	sr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (n int, err error) {
-		fs.backgroundTaskManager.DoPrioritizedTask()
-		defer fs.backgroundTaskManager.DonePrioritizedTask()
-		return ur.ReadAt(p, offset)
-	}), 0, size)
+		return blob.ReadAt(p, offset)
+	}), 0, blob.Size())
 	gr, root, err := reader.NewReader(sr, fs.fsCache)
 	if err != nil {
 		logCtx.WithError(err).Debug("failed to read layer")
@@ -242,7 +192,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// RoundTripper only used for pre-/background-fetch.
 	// We use a separated transport because we don't want these fetching
 	// functionalities to disturb other HTTP-related operations
-	fetchTr := authnTransportLazy(http.DefaultTransport.(*http.Transport).Clone(), nameref)
+	fetchTr := lazyTransport(func() (http.RoundTripper, error) {
+		return blob.Authn(http.DefaultTransport.(*http.Transport).Clone())
+	})
 
 	// Prefetch this layer. We prefetch several layers in parallel. The first
 	// Check() for this layer waits for the prefetch completion. We recreate
@@ -252,13 +204,13 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			pr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (int, error) {
 				fs.backgroundTaskManager.DoPrioritizedTask()
 				defer fs.backgroundTaskManager.DonePrioritizedTask()
-				tr, err := fetchTr.transport()
+				tr, err := fetchTr()
 				if err != nil {
 					logCtx.WithError(err).Debug("failed to prepare transport for prefetch")
 					return 0, err
 				}
-				return ur.ReadAt(p, offset, remote.WithRoundTripper(tr))
-			}), 0, size)
+				return blob.ReadAt(p, offset, remote.WithRoundTripper(tr))
+			}), 0, blob.Size())
 			if err := gr.PrefetchWithReader(pr); err != nil {
 				logCtx.WithError(err).Debug("failed to prefetch layer")
 				return
@@ -275,16 +227,16 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	go func() {
 		br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (retN int, retErr error) {
 			fs.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
-				tr, err := fetchTr.transport()
+				tr, err := fetchTr()
 				if err != nil {
 					logCtx.WithError(err).Debug("failed to prepare transport for background fetch")
 					retN, retErr = 0, err
 					return
 				}
-				retN, retErr = ur.ReadAt(p, offset, remote.WithContext(ctx), remote.WithRoundTripper(tr))
+				retN, retErr = blob.ReadAt(p, offset, remote.WithContext(ctx), remote.WithRoundTripper(tr))
 			}, 120*time.Second)
 			return
-		}), 0, size)
+		}), 0, blob.Size())
 		if err := gr.CacheTarGzWithReader(bufio.NewReaderSize(br, 1<<29)); err != nil {
 			logCtx.WithError(err).Debug("failed to fetch whole layer")
 			return
@@ -299,7 +251,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		fs:    fs,
 		layer: gr,
 		e:     root,
-		s:     newState(digest, ur, size),
+		s:     newState(digest, blob),
 		root:  mountpoint,
 	}, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -327,6 +279,7 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 
 	logCtx := log.G(ctx).WithField("mountpoint", mountpoint)
 
+	// Wait for prefetch compeletion
 	fs.stargzReaderMu.Lock()
 	gr := fs.stargzReader[mountpoint]
 	fs.stargzReaderMu.Unlock()
@@ -336,9 +289,10 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 		logCtx.WithError(err).Warn("failed to sync with prefetch completion")
 	}
 
-	fs.remoteInfoMu.Lock()
-	r := fs.remoteInfo[mountpoint]
-	fs.remoteInfoMu.Unlock()
+	// Check the blob connectivity
+	fs.blobInfoMu.Lock()
+	r := fs.blobInfo[mountpoint]
+	fs.blobInfoMu.Unlock()
 	if r == nil {
 		logCtx.Debug("check failed: remote reader not registered")
 		return fmt.Errorf("remote reader not regisiterd")
@@ -352,136 +306,41 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 }
 
 func (fs *filesystem) unregister(mountpoint string) {
-	fs.remoteInfoMu.Lock()
-	delete(fs.remoteInfo, mountpoint)
-	fs.remoteInfoMu.Unlock()
+	fs.blobInfoMu.Lock()
+	delete(fs.blobInfo, mountpoint)
+	fs.blobInfoMu.Unlock()
 	fs.stargzReaderMu.Lock()
 	delete(fs.stargzReader, mountpoint)
 	fs.stargzReaderMu.Unlock()
 }
 
-// resolve resolves specified reference with authenticating and dealing with
-// redirection in a proper way. We use `~/.docker/config.json` for authn.
-func (fs *filesystem) resolve(ref string, digest string) (string, http.RoundTripper, name.Reference, error) {
-	fs.pullTransportsMu.Lock()
-	defer fs.pullTransportsMu.Unlock()
-
-	// Parse reference in docker convention
-	named, err := docker.ParseDockerRef(ref)
-	if err != nil {
-		return "", nil, nil, err
-	}
+func lazyTransport(trFunc func() (http.RoundTripper, error)) func() (http.RoundTripper, error) {
 	var (
-		scheme = "https"
-		host   = docker.Domain(named)
-		path   = docker.Path(named)
-		opts   []name.Option
+		tr   http.RoundTripper
+		trMu sync.Mutex
 	)
-	if host == "docker.io" {
-		host = "registry-1.docker.io"
-	}
-	for _, i := range fs.insecure {
-		if ok, _ := regexp.Match(i, []byte(host)); ok {
-			scheme = "http"
-			opts = append(opts, name.Insecure)
-			break
+	return func() (http.RoundTripper, error) {
+		trMu.Lock()
+		defer trMu.Unlock()
+		if tr != nil {
+			return tr, nil
 		}
-	}
-	url := fmt.Sprintf("%s://%s/v2/%s/blobs/%s", scheme, host, path, digest)
-	nameref, err := name.ParseReference(fmt.Sprintf("%s/%s", host, path), opts...)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("failed to parse reference %q: %v", ref, err)
-	}
-
-	// Try to use cached transport (cahced per reference name)
-	tr, ok := fs.pullTransports[nameref.Name()]
-	if ok {
-		// Check the connectivity of the transport (and redirect if necessary)
-		if url, err := checkAndRedirect(url, tr); err == nil {
-			return url, tr, nameref, nil
+		gotTr, err := trFunc()
+		if err != nil {
+			return nil, err
 		}
+		tr = gotTr
+		return tr, nil
 	}
-
-	// Refresh the transport and check the connectivity
-	if tr, err = authnTransport(http.DefaultTransport, nameref); err != nil {
-		return "", nil, nil, err
-	}
-	if url, err = checkAndRedirect(url, tr); err != nil {
-		return "", nil, nil, err
-	}
-
-	// Update transports cache
-	fs.pullTransports[nameref.Name()] = tr
-
-	return url, tr, nameref, nil
-}
-
-func authnTransport(tr http.RoundTripper, ref name.Reference) (http.RoundTripper, error) {
-	// Authn against the repository using `~/.docker/config.json`
-	auth, err := authn.DefaultKeychain.Resolve(ref.Context())
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
-	}
-	return transport.New(ref.Context().Registry, auth, tr, []string{ref.Scope(transport.PullScope)})
-}
-
-func authnTransportLazy(tr http.RoundTripper, ref name.Reference) *transportAuthenticator {
-	return &transportAuthenticator{
-		base:    tr,
-		nameref: ref,
-	}
-}
-
-type transportAuthenticator struct {
-	base    http.RoundTripper
-	tr      http.RoundTripper
-	nameref name.Reference
-	mu      sync.Mutex
-}
-
-func (ta *transportAuthenticator) transport() (http.RoundTripper, error) {
-	ta.mu.Lock()
-	defer ta.mu.Unlock()
-	if ta.tr != nil {
-		return ta.tr, nil
-	}
-	tr, err := authnTransport(ta.base, ta.nameref)
-	if err != nil {
-		return nil, err
-	}
-	ta.tr = tr
-	return ta.tr, nil
-}
-
-func checkAndRedirect(url string, tr http.RoundTripper) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// We use GET request for GCR.
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to request to the registry of %q: %v", url, err)
-	}
-	req = req.WithContext(ctx)
-	req.Close = false
-	req.Header.Set("Range", "bytes=0-1")
-	res, err := tr.RoundTrip(req)
-	if err != nil || res.StatusCode >= 400 {
-		return "", fmt.Errorf("failed to redirect: %v", err)
-	}
-	defer func() {
-		io.Copy(ioutil.Discard, res.Body)
-		res.Body.Close()
-	}()
-	if redir := res.Header.Get("Location"); redir != "" && res.StatusCode/100 == 3 {
-		url = redir
-	}
-	return url, nil
 }
 
 type readerAtFunc func([]byte, int64) (int, error)
 
 func (f readerAtFunc) ReadAt(p []byte, offset int64) (int, error) { return f(p, offset) }
+
+type layer interface {
+	OpenFile(name string) (io.ReaderAt, error)
+}
 
 // node is a filesystem inode abstraction which implements node in go-fuse.
 type node struct {
@@ -712,7 +571,7 @@ func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Conte
 
 // newState provides new state directory node.
 // It creates statFile at the same time to give it stable inode number.
-func newState(digest string, ri remoteInfo, size int64) *state {
+func newState(digest string, blob blobInfo) *state {
 	return &state{
 		Node: nodefs.NewDefaultNode(),
 		statFile: &statFile{
@@ -720,9 +579,9 @@ func newState(digest string, ri remoteInfo, size int64) *state {
 			name: digest + ".json",
 			statJSON: statJSON{
 				Digest: digest,
-				Size:   size,
+				Size:   blob.Size(),
 			},
-			ri: ri,
+			blob: blob,
 		},
 	}
 }
@@ -829,7 +688,7 @@ type statJSON struct {
 type statFile struct {
 	nodefs.Node
 	name     string
-	ri       remoteInfo
+	blob     blobInfo
 	statJSON statJSON
 	mu       sync.Mutex
 }
@@ -841,7 +700,7 @@ func (e *statFile) report(err error) {
 }
 
 func (e *statFile) updateStatUnlocked() ([]byte, error) {
-	e.statJSON.FetchedSize = e.ri.FetchedSize()
+	e.statJSON.FetchedSize = e.blob.FetchedSize()
 	e.statJSON.FetchedPercent = float64(e.statJSON.FetchedSize) / float64(e.statJSON.Size) * 100.0
 	j, err := json.Marshal(&e.statJSON)
 	if err != nil {

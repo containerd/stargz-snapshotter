@@ -78,6 +78,9 @@ services:
     - REGISTRY_HTTP_TLS_KEY=/auth/certs/domain.key
     volumes:
     - ${AUTH}:/auth
+  registry-alt:
+    image: registry:2
+    container_name: registry-alt
   remote_snapshotter_integration:
     build:
       context: "${REPO}/script/integration/containerd-stargz-grpc"

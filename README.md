@@ -66,7 +66,7 @@ bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  s
 We support private repository authentication powered by [go-containerregistry](https://github.com/google/go-containerregistry) which supports `~/.docker/config.json`-based credential management.
 You can authenticate yourself to private registries with normal operations (e.g. `docker login` command) using `~/.docker/config.json`.
 ```
-# docker login registry-1.docker.io
+# docker login
 (Enter username and password)
 # ctr-remote image rpull --user <username>:<password> docker.io/<your-repository>/ubuntu:18.04
 ```

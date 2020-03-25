@@ -42,7 +42,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
-	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"golang.org/x/sys/unix"
@@ -58,7 +57,7 @@ const (
 func TestCheck(t *testing.T) {
 	br := &breakRemoteInfo{}
 	fs := &filesystem{
-		remoteInfo: map[string]remoteInfo{
+		blobInfo: map[string]blobInfo{
 			"test": br,
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
@@ -76,6 +75,10 @@ func TestCheck(t *testing.T) {
 
 type breakRemoteInfo struct {
 	success bool
+}
+
+func (r *breakRemoteInfo) Size() int64 {
+	return 10
 }
 
 func (r *breakRemoteInfo) FetchedSize() int64 {
@@ -307,9 +310,7 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 		Node:  nodefs.NewDefaultNode(),
 		layer: &testLayer{r},
 		e:     root,
-		s: newState(testStateLayerDigest, &dummyRemoteInfo{
-			fetchedSize: 5,
-		}, 10),
+		s:     newState(testStateLayerDigest, &dummyRemoteInfo{}),
 	}
 	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -329,12 +330,14 @@ func (tl *testLayer) OpenFile(name string) (io.ReaderAt, error) {
 	return tl.r.OpenFile(name)
 }
 
-type dummyRemoteInfo struct {
-	fetchedSize int64
+type dummyRemoteInfo struct{}
+
+func (ri *dummyRemoteInfo) Size() int64 {
+	return 10
 }
 
 func (ri *dummyRemoteInfo) FetchedSize() int64 {
-	return ri.fetchedSize
+	return 5
 }
 
 func (ri *dummyRemoteInfo) Check() error {
@@ -692,16 +695,13 @@ func digestFor(content string) string {
 	return fmt.Sprintf("sha256:%x", sum)
 }
 
-func TestAuthnTransportLazy(t *testing.T) {
-	dummyRef := "example.dummy/dummy:latest"
-	nameref, err := name.ParseReference(dummyRef)
-	if err != nil {
-		t.Fatalf("failed to parse name %q: %v", dummyRef, err)
-	}
-	ta := authnTransportLazy(&okRoundTripper{}, nameref)
+func TestLazyTransport(t *testing.T) {
+	ta := lazyTransport(func() (http.RoundTripper, error) {
+		return &okRoundTripper{}, nil
+	})
 
 	// Initialize transport
-	tr1, err := ta.transport()
+	tr1, err := ta()
 	if err != nil {
 		t.Fatalf("failed to initialize transport: %v", err)
 	}
@@ -711,7 +711,7 @@ func TestAuthnTransportLazy(t *testing.T) {
 	}
 
 	// Get the created transport again
-	tr2, err := ta.transport()
+	tr2, err := ta()
 	if err != nil {
 		t.Fatalf("failed to get transport: %v", err)
 	}

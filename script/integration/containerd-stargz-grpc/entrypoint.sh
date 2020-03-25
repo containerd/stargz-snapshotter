@@ -68,8 +68,10 @@ mkdir -p /tmp/out
 GO111MODULE=off PREFIX=/tmp/out/ make clean && \
     GO111MODULE=off PREFIX=/tmp/out/ make -j2 && \
     GO111MODULE=off PREFIX=/tmp/out/ make install
+mkdir -p /etc/containerd-stargz-grpc && \
+    cp ./script/integration/containerd-stargz-grpc/config.toml /etc/containerd-stargz-grpc/config.toml
 
 echo "Running remote snapshotter..."
-containerd-stargz-grpc --log-level=debug &
+containerd-stargz-grpc --log-level=debug --config=/etc/containerd-stargz-grpc/config.toml &
 SSNAPSHOTD_PID=$! # tells cleanup code what PID needs be killed on exit (via ${SSNAPSHOTD_PID}).
 wait "${SSNAPSHOTD_PID}"
