@@ -18,6 +18,7 @@ set -euo pipefail
 
 PLUGIN=stargz
 REGISTRY_HOST=registry-integration
+REGISTRY_ALT_HOST=registry-alt
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
@@ -71,10 +72,14 @@ retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 
 echo "Preparing images..."
 gcrane cp ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
+gcrane cp alpine:3.10.2 "${REGISTRY_HOST}:5000/alpine:3.10.2"
 GO111MODULE=off PREFIX=/tmp/ctr/ make clean && \
     GO111MODULE=off PREFIX=/tmp/ctr/ make ctr-remote && \
-    install /tmp/ctr/ctr-remote /usr/local/bin && \
-    ctr-remote image optimize --stargz-only "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
+    install /tmp/ctr/ctr-remote /usr/local/bin
+
+ctr-remote image optimize --stargz-only "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
+ctr-remote image optimize --stargz-only "${REGISTRY_HOST}:5000/alpine:3.10.2" "${REGISTRY_HOST}:5000/alpine:stargz"
+ctr-remote image optimize --stargz-only --plain-http "${REGISTRY_HOST}:5000/alpine:3.10.2" "http://${REGISTRY_ALT_HOST}:5000/alpine:stargz"
 
 echo "Waiting for booting stargz snapshotter..."
 RETRYNUM=600 retry ls /run/containerd-stargz-grpc/containerd-stargz-grpc.sock
@@ -93,6 +98,18 @@ OK=$(ctr-remote plugins ls \
          | cut -d ' ' -f 2)
 if [ "${OK}" != "ok" ] ; then
     echo "Plugin ${PLUGIN} not found" 1>&2
+    exit 1
+fi
+
+############
+# Tests for mirror config
+
+reboot_containerd --log-level debug --config=/etc/containerd/config.toml
+PULL_LOG=$(mktemp)
+echo "Checking if mirroring is in effect"
+ctr-remote images rpull --plain-http "${REGISTRY_ALT_HOST}:5000/alpine:stargz" | tee "${PULL_LOG}"
+if ! isServedAsRemoteSnapshot "${PULL_LOG}" ; then
+    echo "Failed to serve all layers as remote snapshots"
     exit 1
 fi
 

@@ -38,99 +38,26 @@ import (
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/google/go-containerregistry/pkg/name"
 )
 
 var contentRangeRegexp = regexp.MustCompile(`bytes ([0-9]+)-([0-9]+)/([0-9]+|\\*)`)
 
-func NewURLReaderAt(url string, tr http.RoundTripper, chunkSize int64, cache cache.BlobCache, checkInterval time.Duration) (*URLReaderAt, int64, error) {
-	size, err := getSize(url, tr)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get layer size information for %s: %v", url, err)
-	}
-	return &URLReaderAt{
-		url:           url,
-		t:             tr,
-		size:          size,
-		chunkSize:     chunkSize,
-		cache:         cache,
-		lastCheck:     time.Now(),
-		checkInterval: checkInterval,
-	}, size, nil
-}
+type Blob struct {
+	ref           name.Reference
+	url           string
+	tr            http.RoundTripper
+	size          int64
+	chunkSize     int64
+	cache         cache.BlobCache
+	lastCheck     time.Time
+	checkInterval time.Duration
 
-type URLReaderAt struct {
-	url                string
-	t                  http.RoundTripper
-	size               int64
-	chunkSize          int64
-	cache              cache.BlobCache
 	fetchedRegionSet   regionSet
 	fetchedRegionSetMu sync.Mutex
-	lastCheck          time.Time
-	checkInterval      time.Duration
 }
 
-type regionSet struct {
-	rs []region
-}
-
-// add attempts to merge r to rs.rs
-func (rs *regionSet) add(r region) {
-	for i := range rs.rs {
-		f := &rs.rs[i]
-		if r.b <= f.b && f.b <= r.e+1 && r.e <= f.e {
-			f.b = r.b
-			return
-		}
-		if f.b <= r.b && r.e <= f.e {
-			return
-		}
-		if f.b <= r.b && r.b <= f.e+1 && f.e <= r.e {
-			f.e = r.e
-			return
-		}
-		if r.b <= f.b && f.e <= r.e {
-			f.b = r.b
-			f.e = r.e
-			return
-		}
-	}
-	rs.rs = append(rs.rs, r)
-}
-func (rs *regionSet) totalSize() int64 {
-	var sz int64
-	for _, f := range rs.rs {
-		sz += f.size()
-	}
-	return sz
-}
-
-// region is HTTP-range-request-compliant range.
-// "b" is beginning byte of the range and "e" is the end.
-// "e" is must be inclusive along with HTTP's range expression.
-type region struct{ b, e int64 }
-
-func (c region) size() int64 {
-	return c.e - c.b + 1
-}
-
-type walkFunc func(reg region) error
-
-// walkChunks walks chunks from begin to end in order in the specified region.
-func (r *URLReaderAt) walkChunks(allRegion region, walkFn walkFunc) error {
-	for b := allRegion.b; b <= allRegion.e && b < r.size; b += r.chunkSize {
-		reg := region{b, b + r.chunkSize - 1}
-		if reg.e >= r.size {
-			reg.e = r.size - 1
-		}
-		if err := walkFn(reg); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *URLReaderAt) Check() error {
+func (r *Blob) Check() error {
 	now := time.Now()
 	if now.Sub(r.lastCheck) < r.checkInterval {
 		// do nothing if not expired
@@ -147,7 +74,7 @@ func (r *URLReaderAt) Check() error {
 	req = req.WithContext(ctx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
-	res, err := r.t.RoundTrip(req)
+	res, err := r.tr.RoundTrip(req)
 	if err != nil {
 		return fmt.Errorf("check failed: failed to request to registry %s: %v", r.url, err)
 	}
@@ -162,43 +89,32 @@ func (r *URLReaderAt) Check() error {
 	return nil
 }
 
-func (r *URLReaderAt) FetchedSize() int64 {
+func (r *Blob) Authn(tr http.RoundTripper) (http.RoundTripper, error) {
+	return authnTransport(r.ref, tr)
+}
+
+func (r *Blob) Size() int64 {
+	return r.size
+}
+
+func (r *Blob) FetchedSize() int64 {
 	r.fetchedRegionSetMu.Lock()
 	sz := r.fetchedRegionSet.totalSize()
 	r.fetchedRegionSetMu.Unlock()
 	return sz
 }
 
-type Option func(*options)
-
-type options struct {
-	ctx context.Context
-	tr  http.RoundTripper
-}
-
-func WithContext(ctx context.Context) Option {
-	return func(opts *options) {
-		opts.ctx = ctx
-	}
-}
-
-func WithRoundTripper(tr http.RoundTripper) Option {
-	return func(opts *options) {
-		opts.tr = tr
-	}
-}
-
 // ReadAt reads remote chunks from specified offset for the buffer size.
 // It tries to fetch as many chunks as possible from local cache.
 // We can configure this function with options.
-func (r *URLReaderAt) ReadAt(p []byte, offset int64, opts ...Option) (int, error) {
+func (r *Blob) ReadAt(p []byte, offset int64, opts ...Option) (int, error) {
 	opt := options{}
 	for _, o := range opts {
 		o(&opt)
 	}
 	var (
 		ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
-		tr          = r.t
+		tr          = r.tr
 	)
 	defer cancel()
 	if opt.ctx != nil {
@@ -252,8 +168,24 @@ func (r *URLReaderAt) ReadAt(p []byte, offset int64, opts ...Option) (int, error
 	return len(p), nil
 }
 
+type walkFunc func(reg region) error
+
+// walkChunks walks chunks from begin to end in order in the specified region.
+func (r *Blob) walkChunks(allRegion region, walkFn walkFunc) error {
+	for b := allRegion.b; b <= allRegion.e && b < r.size; b += r.chunkSize {
+		reg := region{b, b + r.chunkSize - 1}
+		if reg.e >= r.size {
+			reg.e = r.size - 1
+		}
+		if err := walkFn(reg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // appendFromRemote fetches all specified chunks from local cache.
-func (r *URLReaderAt) appendFromCache(allData map[region][]byte, whole region) map[region]bool {
+func (r *Blob) appendFromCache(allData map[region][]byte, whole region) map[region]bool {
 	remotes := map[region]bool{}
 	_ = r.walkChunks(whole, func(reg region) error {
 		data, err := r.cache.Fetch(r.genID(reg))
@@ -268,7 +200,7 @@ func (r *URLReaderAt) appendFromCache(allData map[region][]byte, whole region) m
 }
 
 // appendFromRemote fetches all specified chunks from remote store.
-func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper, allData map[region][]byte, requests map[region]bool) error {
+func (r *Blob) appendFromRemote(ctx context.Context, tr http.RoundTripper, allData map[region][]byte, requests map[region]bool) error {
 	if len(requests) == 0 {
 		return nil
 	}
@@ -285,7 +217,7 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper
 	// request specified ranges.
 	req, err := http.NewRequest("GET", r.url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to make GET request for %q: %v", r.url, err)
 	}
 	req = req.WithContext(ctx)
 	ranges := "bytes=0-0," // dummy range to make sure the response to be multipart
@@ -297,7 +229,7 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper
 	req.Close = false
 	res, err := tr.RoundTrip(req) // NOT DefaultClient; don't want redirects
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to request to %q: %v", r.url, err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
@@ -308,7 +240,7 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper
 	if res.StatusCode == http.StatusOK {
 		data, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			return fmt.Errorf("Failed to read response body: %v", err)
+			return fmt.Errorf("Failed to read response body from %q: %v", r.url, err)
 		}
 		gotSize := int64(len(data))
 		requiredSize := int64(0)
@@ -317,7 +249,8 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper
 			requiredSize += reg.e - reg.b + 1
 		}
 		if requiredSize != gotSize {
-			return fmt.Errorf("broken response body; want size %d but got %d", requiredSize, gotSize)
+			return fmt.Errorf("broken response body for %q; want size %d but got %d",
+				r.url, requiredSize, gotSize)
 		}
 		return nil
 	}
@@ -325,7 +258,7 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper
 	// Get all chunks responsed as a multipart body.
 	mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
 	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
-		return fmt.Errorf("invalid media type %q: %v", mediaType, err)
+		return fmt.Errorf("invalid media type %q for %q: %v", mediaType, r.url, err)
 	}
 	mr := multipart.NewReader(res.Body, params["boundary"])
 	mr.NextPart() // Drop the dummy range.
@@ -334,15 +267,15 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return fmt.Errorf("Failed to read multipart response: %v", err)
+			return fmt.Errorf("Failed to read multipart response from %q: %v", r.url, err)
 		}
 		reg, err := r.parseRange(p.Header.Get("Content-Range"))
 		if err != nil {
-			return fmt.Errorf("failed to parse Content-Range header: %v", err)
+			return fmt.Errorf("failed to parse Content-Range header of %q: %v", r.url, err)
 		}
 		data, err := ioutil.ReadAll(p)
 		if err != nil {
-			return fmt.Errorf("failed to read multipart response data: %v", err)
+			return fmt.Errorf("failed to read multipart response data on %q: %v", r.url, err)
 		}
 
 		// Chunk this part
@@ -352,7 +285,8 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper
 				end  = base + chunk.size()
 			)
 			if int64(len(data)) < end {
-				return fmt.Errorf("invalid part data size %d; want at least %d", len(data), end)
+				return fmt.Errorf("invalid part data on %q: size %d; want at least %d",
+					r.url, len(data), end)
 			}
 			allData[chunk] = data[base:end]
 			return nil
@@ -364,7 +298,7 @@ func (r *URLReaderAt) appendFromRemote(ctx context.Context, tr http.RoundTripper
 	return nil
 }
 
-func (r *URLReaderAt) parseRange(header string) (reg region, err error) {
+func (r *Blob) parseRange(header string) (reg region, err error) {
 	submatches := contentRangeRegexp.FindStringSubmatch(header)
 	if len(submatches) < 4 {
 		err = fmt.Errorf("Content-Range doesn't have enough information")
@@ -384,7 +318,7 @@ func (r *URLReaderAt) parseRange(header string) (reg region, err error) {
 	return region{begin, end}, nil
 }
 
-func (r *URLReaderAt) genID(reg region) string {
+func (r *Blob) genID(reg region) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", r.url, reg.b, reg.e)))
 	return fmt.Sprintf("%x", sum)
 }
@@ -397,22 +331,65 @@ func ceil(n int64, unit int64) int64 {
 	return (n/unit + 1) * unit
 }
 
-func getSize(url string, tr http.RoundTripper) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequest("HEAD", url, nil)
-	if err != nil {
-		return 0, err
+type regionSet struct {
+	rs []region
+}
+
+// add attempts to merge r to rs.rs
+func (rs *regionSet) add(r region) {
+	for i := range rs.rs {
+		f := &rs.rs[i]
+		if r.b <= f.b && f.b <= r.e+1 && r.e <= f.e {
+			f.b = r.b
+			return
+		}
+		if f.b <= r.b && r.e <= f.e {
+			return
+		}
+		if f.b <= r.b && r.b <= f.e+1 && f.e <= r.e {
+			f.e = r.e
+			return
+		}
+		if r.b <= f.b && f.e <= r.e {
+			f.b = r.b
+			f.e = r.e
+			return
+		}
 	}
-	req = req.WithContext(ctx)
-	req.Close = false
-	res, err := tr.RoundTrip(req)
-	if err != nil {
-		return 0, err
+	rs.rs = append(rs.rs, r)
+}
+func (rs *regionSet) totalSize() int64 {
+	var sz int64
+	for _, f := range rs.rs {
+		sz += f.size()
 	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed HEAD request with code %v", res.StatusCode)
+	return sz
+}
+
+// region is HTTP-range-request-compliant range.
+// "b" is beginning byte of the range and "e" is the end.
+// "e" is must be inclusive along with HTTP's range expression.
+type region struct{ b, e int64 }
+
+func (c region) size() int64 {
+	return c.e - c.b + 1
+}
+
+type Option func(*options)
+
+type options struct {
+	ctx context.Context
+	tr  http.RoundTripper
+}
+
+func WithContext(ctx context.Context) Option {
+	return func(opts *options) {
+		opts.ctx = ctx
 	}
-	return strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
+}
+
+func WithRoundTripper(tr http.RoundTripper) Option {
+	return func(opts *options) {
+		opts.tr = tr
+	}
 }
