@@ -28,10 +28,10 @@ import (
 
 	runc "github.com/containerd/go-runc"
 	"github.com/docker/docker/oci"
-	"github.com/moby/buildkit/identity"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/user"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/rs/xid"
 )
 
 // TODO: Enable to specify volumes
@@ -151,7 +151,7 @@ func runContainer(ctx context.Context, bundle string) error {
 		// Setpgid:      true,
 	}
 
-	id := identity.NewID()
+	id := xid.New().String()
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

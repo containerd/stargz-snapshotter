@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-FROM golang:1.14
+FROM golang:1.13
 
 # Install FUSE for filesystems and Docker client for logging into the registry
 RUN apt-get update -y && \

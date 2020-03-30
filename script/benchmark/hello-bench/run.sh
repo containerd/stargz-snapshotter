@@ -56,9 +56,9 @@ function measure {
 
 echo "Installing remote snapshotter..."
 mkdir -p /tmp/out
-GO111MODULE=off PREFIX=/tmp/out/ make clean && \
-    GO111MODULE=off PREFIX=/tmp/out/ make -j2 && \
-    GO111MODULE=off PREFIX=/tmp/out/ make install
+PREFIX=/tmp/out/ make clean && \
+    PREFIX=/tmp/out/ make -j2 && \
+    PREFIX=/tmp/out/ make install
 mkdir -p "${CONTAINERD_CONFIG_DIR}" && \
     cp "${REPO_CONFIG_DIR}"config.containerd.toml "${CONTAINERD_CONFIG_DIR}"
 mkdir -p "${REMOTE_SNAPSHOTTER_CONFIG_DIR}" && \

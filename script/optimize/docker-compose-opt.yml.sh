@@ -60,7 +60,6 @@ services:
     working_dir: ${REPO_PATH}
     entrypoint: ./script/optimize/optimize/entrypoint.sh
     environment:
-    - GO111MODULE=off
     - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000
     - DOCKER_HOST=tcp://docker:2376
     - DOCKER_TLS_VERIFY=1

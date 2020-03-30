@@ -15,7 +15,7 @@
 
 # Base path used to install.
 CMD_DESTDIR ?= /usr/local
-GO111MODULE_VALUE=off
+GO111MODULE_VALUE=auto
 PREFIX ?= out/
 
 CMD=containerd-stargz-grpc ctr-remote

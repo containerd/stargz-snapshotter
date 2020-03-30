@@ -75,7 +75,7 @@ func main() {
 	}
 }
 EOF
-    go build -ldflags '-extldflags "-static"' -o "${CONTEXT_DIR}/accessor" "${GOPATH}/src/test/test"
+    GO111MODULE=off go build -ldflags '-extldflags "-static"' -o "${CONTEXT_DIR}/accessor" "${GOPATH}/src/test/test"
 }
 
 echo "Connecting to the docker server..."
@@ -98,8 +98,8 @@ tar zcv -C "${CONTEXT_DIR}" . \
 
 echo "Optimizing image..."
 WORKING_DIR=$(mktemp -d)
-GO111MODULE=off PREFIX=/tmp/out/ make clean && \
-    GO111MODULE=off PREFIX=/tmp/out/ make ctr-remote && \
+PREFIX=/tmp/out/ make clean && \
+    PREFIX=/tmp/out/ make ctr-remote && \
     /tmp/out/ctr-remote image optimize -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
 
 echo "Downloading optimized image..."

@@ -65,9 +65,9 @@ retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 
 echo "Installing remote snapshotter..."
 mkdir -p /tmp/out
-GO111MODULE=off PREFIX=/tmp/out/ make clean && \
-    GO111MODULE=off PREFIX=/tmp/out/ make -j2 && \
-    GO111MODULE=off PREFIX=/tmp/out/ make install
+PREFIX=/tmp/out/ make clean && \
+    PREFIX=/tmp/out/ make -j2 && \
+    PREFIX=/tmp/out/ make install
 mkdir -p /etc/containerd-stargz-grpc && \
     cp ./script/integration/containerd-stargz-grpc/config.toml /etc/containerd-stargz-grpc/config.toml
 

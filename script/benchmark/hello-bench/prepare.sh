@@ -30,8 +30,8 @@ TARGET_IMAGES=${@:2}
 if ! which ctr-remote ; then
     echo "ctr-remote not found, installing..."
     mkdir -p /tmp/out
-    GO111MODULE=off PREFIX=/tmp/out/ make clean && \
-        GO111MODULE=off PREFIX=/tmp/out/ make ctr-remote && \
+    PREFIX=/tmp/out/ make clean && \
+        PREFIX=/tmp/out/ make ctr-remote && \
         install /tmp/out/ctr-remote /usr/local/bin
 fi
 
