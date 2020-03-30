@@ -18,6 +18,7 @@ set -euo pipefail
 
 REGISTRY_HOST_INTEGRATION=registry-integration
 REGISTRY_HOST_OPTIMIZE=registry-optimize
+REGISTRY_HOST_KIND=kind-private-registry
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 REPO="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/../"
@@ -48,10 +49,12 @@ TARGETS=
 INTEGRATION=false
 OPTIMIZE=false
 BENCHMARK=false
+PULLSECRETS=false
 for T in ${@} ; do
     case "${T}" in
         "integration" ) INTEGRATION=true ;;
         "test-optimize" ) OPTIMIZE=true ;;
+        "test-pullsecrets" ) PULLSECRETS=true ;;
         "benchmark" ) BENCHMARK=true ;;
         * ) TARGETS="${TARGETS} ${T}" ;;
     esac
@@ -133,6 +136,64 @@ if [ "${OPTIMIZE}" == "true" ] ; then
     echo "Cleaning up environment..."
     docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
     rm "${DOCKER_COMPOSE_YAML}"
+    rm -rf "${AUTH_DIR}"
+fi
+
+if [ "${PULLSECRETS}" == "true" ] ; then
+    AUTH_DIR=$(mktemp -d)
+    DOCKERCONFIG=$(mktemp)
+    prepare_creds "${AUTH_DIR}" "${REGISTRY_HOST_KIND}" "${DUMMYUSER}" "${DUMMYPASS}"
+    echo -n '{"auths":{"'"${REGISTRY_HOST_KIND}"':5000":{"auth":"'$(echo -n "${DUMMYUSER}:${DUMMYPASS}" | base64 -i -w 0)'"}}}' > "${DOCKERCONFIG}"
+
+    echo "Preparing private registry..."
+    TESTIMAGE="${REGISTRY_HOST_KIND}:5000/library/ubuntu:18.04"
+    REGISTRY_NETWORK_KIND=kind_registry_network
+    DOCKER_COMPOSE_YAML=$(mktemp)
+    CONTEXT="${REPO}/script/pullsecrets"
+    cd "${CONTEXT}"
+    "${CONTEXT}"/docker-compose-privateregistry.yml.sh "${REGISTRY_HOST_KIND}" \
+                "${REGISTRY_NETWORK_KIND}" "${AUTH_DIR}" > "${DOCKER_COMPOSE_YAML}"
+    if docker network create "${REGISTRY_NETWORK_KIND}" && \
+            docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
+            docker run --rm -i --network "${REGISTRY_NETWORK_KIND}" \
+                   -v "${AUTH_DIR}/certs/domain.crt:/usr/local/share/ca-certificates/rgst.crt:ro" \
+                   -v "${DOCKERCONFIG}:/root/.docker/config.json:ro" \
+                   -v "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro" \
+                   golang:1.13-buster /bin/bash -c "update-ca-certificates && cd /go/src/github.com/containerd/stargz-snapshotter && PREFIX=/out/ make ctr-remote && /out/ctr-remote images optimize --stargz-only ubuntu:18.04 ${TESTIMAGE}" ; then
+        echo "Completed to prepare private registry"
+    else
+        echo "Failed to prepare private registry"
+        FAIL=true
+    fi
+
+    KIND_KUBECONFIG=$(mktemp)
+    echo "Testing in kind cluster (kubeconfig: ${KIND_KUBECONFIG})..."
+    KIND_CLUSTER_NAME=kind-stargz-snapshotter
+    if [ "${FAIL}" != "true" ] && \
+           "${CONTEXT}"/run-kind.sh "${KIND_CLUSTER_NAME}" \
+                       "${KIND_KUBECONFIG}" \
+                       "${AUTH_DIR}/certs/domain.crt" \
+                       "${REPO}" \
+                       "${REGISTRY_NETWORK_KIND}" \
+                       "${DOCKERCONFIG}" && \
+           echo "Waiting until secrets fullly synced..." && \
+           sleep 30 && \
+           echo "Trying to pull private image with secret..." && \
+           "${CONTEXT}"/test.sh "$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sed -n 1p)" \
+                       "${KIND_KUBECONFIG}" "${TESTIMAGE}" ; then
+        echo "Successfully created remote snapshotter with private registry"
+    else
+        echo "Failed to create remote snapshotter with private registry"
+        FAIL=true
+    fi
+
+    echo "Cleaning up environment..."
+    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+    kind delete cluster --name "${KIND_CLUSTER_NAME}"
+    docker network rm "${REGISTRY_NETWORK_KIND}"
+    rm "${DOCKERCONFIG}"
+    rm "${DOCKER_COMPOSE_YAML}"
+    rm "${KIND_KUBECONFIG}"
     rm -rf "${AUTH_DIR}"
 fi
 

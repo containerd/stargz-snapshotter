@@ -37,3 +37,10 @@ jobs:
     - uses: actions/checkout@v1
     - name: Run test for optimize subcommand of ctr-remote
       run: ./script/make.sh test-optimize
+  test-pullsecrets:
+    runs-on: ubuntu-18.04
+    name: PullSecrets
+    steps:
+    - uses: actions/checkout@v1
+    - name: Run test for pulling image from private registry on Kubernetes
+      run: ./script/make.sh test-pullsecrets

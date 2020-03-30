@@ -73,7 +73,7 @@ func main() {
 	}
 
 	// Configure filesystem and snapshotter
-	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"), config)
+	fs, err := stargz.NewFilesystem(ctx, filepath.Join(*rootDir, "stargz"), config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
 	}

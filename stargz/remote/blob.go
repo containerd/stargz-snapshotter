@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 )
 
@@ -45,6 +46,7 @@ var contentRangeRegexp = regexp.MustCompile(`bytes ([0-9]+)-([0-9]+)/([0-9]+|\\*
 
 type Blob struct {
 	ref           name.Reference
+	keychain      authn.Keychain
 	url           string
 	tr            http.RoundTripper
 	size          int64
@@ -90,7 +92,7 @@ func (r *Blob) Check() error {
 }
 
 func (r *Blob) Authn(tr http.RoundTripper) (http.RoundTripper, error) {
-	return authnTransport(r.ref, tr)
+	return authnTransport(r.ref, tr, r.keychain)
 }
 
 func (r *Blob) Size() int64 {
