@@ -139,7 +139,7 @@ fi
 if [ "$TARGETS" != "" ] ; then
     MINI_CONTEXT=$(mktemp -d)
     cat <<EOF > "${MINI_CONTEXT}/Dockerfile"
-FROM golang:1.14
+FROM golang:1.13
 RUN apt-get update -y && apt-get --no-install-recommends install -y fuse
 EOF
     IMAGE_NAME="minienv:$(sha256sum ${MINI_CONTEXT}/Dockerfile | cut -f 1 -d ' ')"
@@ -147,7 +147,7 @@ EOF
                docker run --rm --privileged --device /dev/fuse \
                       --tmpfs /tmp:exec,mode=777 \
                       -w /go/src/github.com/containerd/stargz-snapshotter \
-                      -v "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro" \
+                      -v "${REPO}:/go/src/github.com/containerd/stargz-snapshotter" \
                       "${IMAGE_NAME}" make $TARGETS PREFIX=/tmp/out/ ) ; then
         FAIL=true
     fi

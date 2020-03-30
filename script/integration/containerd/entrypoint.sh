@@ -73,8 +73,8 @@ retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 echo "Preparing images..."
 gcrane cp ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
 gcrane cp alpine:3.10.2 "${REGISTRY_HOST}:5000/alpine:3.10.2"
-GO111MODULE=off PREFIX=/tmp/ctr/ make clean && \
-    GO111MODULE=off PREFIX=/tmp/ctr/ make ctr-remote && \
+PREFIX=/tmp/ctr/ make clean && \
+    PREFIX=/tmp/ctr/ make ctr-remote && \
     install /tmp/ctr/ctr-remote /usr/local/bin
 
 ctr-remote image optimize --stargz-only "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"

@@ -49,7 +49,6 @@ services:
     working_dir: /go/src/github.com/containerd/stargz-snapshotter
     entrypoint: ./script/integration/containerd/entrypoint.sh
     environment:
-    - GO111MODULE=off
     - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000
     - HTTP_PROXY=${HTTP_PROXY:-}
     - HTTPS_PROXY=${HTTPS_PROXY:-}
@@ -90,7 +89,6 @@ services:
     working_dir: /go/src/github.com/containerd/stargz-snapshotter
     entrypoint: ./script/integration/containerd-stargz-grpc/entrypoint.sh
     environment:
-    - GO111MODULE=off
     - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000
     - HTTP_PROXY=${HTTP_PROXY:-}
     - HTTPS_PROXY=${HTTPS_PROXY:-}

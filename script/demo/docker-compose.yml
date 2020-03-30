@@ -9,7 +9,6 @@ services:
     working_dir: /go/src/github.com/containerd/stargz-snapshotter
     entrypoint: /bin/bash
     environment:
-    - GO111MODULE=off
     - NO_PROXY=127.0.0.1,localhost,registry2:5000
     - HTTP_PROXY=${HTTP_PROXY}
     - HTTPS_PROXY=${HTTPS_PROXY}
