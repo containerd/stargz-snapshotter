@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/golang/groupcache/lru"
+	"github.com/pkg/errors"
 )
 
 // TODO: contents validation.
@@ -88,19 +89,17 @@ func (dc *directoryCache) Fetch(blobHash string) (p []byte, err error) {
 
 	c := filepath.Join(dc.directory, blobHash[:2], blobHash)
 	if _, err := os.Stat(c); err != nil {
-		return nil, fmt.Errorf("Missed cache: %s", c)
+		return nil, errors.Wrapf(err, "Missed cache %q", c)
 	}
 
 	file, err := os.Open(c)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to Open cached blob file: %s", c)
+		return nil, errors.Wrapf(err, "Failed to Open cached blob file %q", c)
 	}
 	defer file.Close()
 
-	if p, err = ioutil.ReadAll(file); err != nil {
-		if err != io.EOF {
-			return nil, err
-		}
+	if p, err = ioutil.ReadAll(file); err != nil && err != io.EOF {
+		return nil, errors.Wrapf(err, "failed to read cached data %q", c)
 	}
 	dc.cache.Add(blobHash, p)
 
@@ -125,12 +124,12 @@ func (dc *directoryCache) Add(blobHash string, p []byte) {
 
 		// Create cache file
 		if err := os.MkdirAll(filepath.Dir(c), os.ModePerm); err != nil {
-			fmt.Printf("Warning: Failed to Create blob cache directory %s: %s\n", c, err)
+			fmt.Printf("Warning: Failed to Create blob cache directory %q: %v\n", c, err)
 			return
 		}
 		f, err := os.Create(c)
 		if err != nil {
-			fmt.Printf("Warning: could not create a cache file: %v\n", err)
+			fmt.Printf("Warning: could not create a cache file at %q: %v\n", c, err)
 			return
 		}
 		defer f.Close()
@@ -165,7 +164,7 @@ func (mc *memoryCache) Fetch(blobHash string) ([]byte, error) {
 
 	cache, ok := mc.membuf[blobHash]
 	if !ok {
-		return nil, fmt.Errorf("Missed cache: %s", blobHash)
+		return nil, fmt.Errorf("Missed cache: %q", blobHash)
 	}
 	return []byte(cache), nil
 }

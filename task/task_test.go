@@ -46,7 +46,7 @@ func TestBackgroundTasks(t *testing.T) {
 		select {
 		case <-ch:
 		case <-time.After(5 * time.Second):
-			t.Fatalf("timeout for %s", name)
+			t.Fatalf("timeout for %q", name)
 		}
 	}
 
@@ -180,8 +180,9 @@ func TestBackgroundTasks(t *testing.T) {
 			)
 			tt.context(t, pm, task1, task2, task3, task4)
 			if !tt.assert(task1, task2, task3, task4) {
-				t.Errorf("assertion failed: status=(task1:%s,task2:%s,task3:%s,task4:%s)",
-					task1.dumpStatus(), task2.dumpStatus(), task3.dumpStatus(), task4.dumpStatus())
+				t.Errorf("assertion failed:status=(task1:%q,task2:%q,task3:%q,task4:%q)",
+					task1.dumpStatus(), task2.dumpStatus(),
+					task3.dumpStatus(), task4.dumpStatus())
 			}
 		})
 	}

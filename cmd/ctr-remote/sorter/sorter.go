@@ -26,6 +26,7 @@ import (
 
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/util"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -37,7 +38,7 @@ func Sort(in io.ReaderAt, log []string) (io.Reader, error) {
 	// Import tar file.
 	intar, err := importTar(in)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to sort: %v", err)
+		return nil, errors.Wrap(err, "failed to sort")
 	}
 
 	// Sort the tar file in a order occurred in the given log.
@@ -83,7 +84,7 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 	tf := &tarFile{}
 	pw, err := util.NewPositionWatcher(in)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to make position watcher: %v", err)
+		return nil, errors.Wrap(err, "failed to make position watcher")
 	}
 	tr := tar.NewReader(pw)
 
@@ -95,7 +96,7 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 			if err == io.EOF {
 				break
 			} else {
-				return nil, fmt.Errorf("Failed to parse tar file: %v", err)
+				return nil, errors.Wrap(err, "failed to parse tar file")
 			}
 		}
 		if h.Name == reader.PrefetchLandmark {

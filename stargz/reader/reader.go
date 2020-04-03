@@ -35,6 +35,7 @@ import (
 
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/google/crfs/stargz"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -44,12 +45,12 @@ const (
 func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*Reader, *stargz.TOCEntry, error) {
 	r, err := stargz.Open(sr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse stargz: %v", err)
+		return nil, nil, errors.Wrap(err, "failed to parse stargz")
 	}
 
 	root, ok := r.Lookup("")
 	if !ok {
-		return nil, nil, fmt.Errorf("stargz: failed to get a TOCEntry of the root")
+		return nil, nil, fmt.Errorf("failed to get a TOCEntry of the root")
 	}
 
 	return &Reader{
@@ -106,13 +107,13 @@ func (gr *Reader) PrefetchWithReader(sr *io.SectionReader) error {
 	// TODO: when prefetchSize is too large, save memory by chunking the range
 	prefetchBytes := make([]byte, prefetchSize)
 	if _, err := io.ReadFull(sr, prefetchBytes); err != nil && err != io.EOF {
-		return fmt.Errorf("failed to prefetch layer data: %v", err)
+		return errors.Wrap(err, "failed to prefetch layer data")
 	}
 
 	// Cache specified range to filesystem cache
 	err := gr.CacheTarGzWithReader(bytes.NewReader(prefetchBytes))
 	if err != io.EOF && err != io.ErrUnexpectedEOF {
-		return fmt.Errorf("error occurred during caching: %v", err)
+		return errors.Wrap(err, "error occurred during caching")
 	}
 	return nil
 }
@@ -179,7 +180,7 @@ func (gr *Reader) CacheTarGzWithReader(r io.Reader) error {
 
 				// Cache this chunk (offset: ce.ChunkOffset, size: ce.ChunkSize)
 				if _, err := io.ReadFull(tr, data); err != nil && err != io.EOF {
-					return fmt.Errorf("failed to read data: %v", err)
+					return errors.Wrap(err, "failed to read data")
 				}
 				gr.cache.Add(id, data)
 			}
@@ -212,7 +213,7 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 			data = make([]byte, int(ce.ChunkSize))
 			if _, err := sf.ra.ReadAt(data, ce.ChunkOffset); err != nil {
 				if err != io.EOF {
-					return 0, fmt.Errorf("failed to read data: %v", err)
+					return 0, errors.Wrap(err, "failed to read data")
 				}
 			}
 			sf.cache.Add(id, data)

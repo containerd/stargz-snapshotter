@@ -218,7 +218,7 @@ func (br *breakReaderAt) ReadAt(p []byte, off int64) (int, error) {
 type nopCache struct{}
 
 func (nc *nopCache) Fetch(blobHash string) ([]byte, error) {
-	return nil, fmt.Errorf("Missed cache: %s", blobHash)
+	return nil, fmt.Errorf("Missed cache: %q", blobHash)
 }
 
 func (nc *nopCache) Add(blobHash string, p []byte) {}

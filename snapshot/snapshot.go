@@ -411,7 +411,7 @@ func (o *snapshotter) cleanupSnapshotDirectory(ctx context.Context, dir string) 
 		log.G(ctx).WithError(err).WithField("dir", mp).Warn("failed to unmount remote snapshot")
 	}
 	if err := os.RemoveAll(dir); err != nil {
-		return errors.Wrapf(err, "failed to remove directory %s", dir)
+		return errors.Wrapf(err, "failed to remove directory %q", dir)
 	}
 	return nil
 }
