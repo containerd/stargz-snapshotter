@@ -40,6 +40,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/pkg/errors"
 )
 
 var contentRangeRegexp = regexp.MustCompile(`bytes ([0-9]+)-([0-9]+)/([0-9]+|\\*)`)
@@ -71,21 +72,21 @@ func (r *Blob) Check() error {
 	defer cancel()
 	req, err := http.NewRequest("GET", r.url, nil)
 	if err != nil {
-		return fmt.Errorf("check failed: failed to make request for %s: %v", r.url, err)
+		return errors.Wrapf(err, "check failed: failed to make request for %q", r.url)
 	}
 	req = req.WithContext(ctx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := r.tr.RoundTrip(req)
 	if err != nil {
-		return fmt.Errorf("check failed: failed to request to registry %s: %v", r.url, err)
+		return errors.Wrapf(err, "check failed: failed to request to registry %q", r.url)
 	}
 	defer func() {
 		io.Copy(ioutil.Discard, res.Body)
 		res.Body.Close()
 	}()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("unexpected status code %q for %s", res.StatusCode, r.url)
+		return fmt.Errorf("unexpected status code %v for %q", res.StatusCode, r.url)
 	}
 
 	return nil
@@ -156,8 +157,8 @@ func (r *Blob) ReadAt(p []byte, offset int64, opts ...Option) (int, error) {
 		}
 		return nil
 	}); err != nil {
-		return 0, fmt.Errorf("failed to gather chunks for region (%d, %d): %v",
-			allRegion.b, allRegion.e, err)
+		return 0, errors.Wrapf(err, "failed to gather chunks for region (%d, %d)",
+			allRegion.b, allRegion.e)
 	}
 	if remain := r.size - offset; int64(len(p)) > remain {
 		if remain < 0 {
@@ -219,7 +220,7 @@ func (r *Blob) appendFromRemote(ctx context.Context, tr http.RoundTripper, allDa
 	// request specified ranges.
 	req, err := http.NewRequest("GET", r.url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to make GET request for %q: %v", r.url, err)
+		return errors.Wrapf(err, "failed to make GET request for %q", r.url)
 	}
 	req = req.WithContext(ctx)
 	ranges := "bytes=0-0," // dummy range to make sure the response to be multipart
@@ -231,7 +232,7 @@ func (r *Blob) appendFromRemote(ctx context.Context, tr http.RoundTripper, allDa
 	req.Close = false
 	res, err := tr.RoundTrip(req) // NOT DefaultClient; don't want redirects
 	if err != nil {
-		return fmt.Errorf("failed to request to %q: %v", r.url, err)
+		return errors.Wrapf(err, "failed to request to %q", r.url)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
@@ -242,7 +243,7 @@ func (r *Blob) appendFromRemote(ctx context.Context, tr http.RoundTripper, allDa
 	if res.StatusCode == http.StatusOK {
 		data, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			return fmt.Errorf("Failed to read response body from %q: %v", r.url, err)
+			return errors.Wrapf(err, "Failed to read response body from %q", r.url)
 		}
 		gotSize := int64(len(data))
 		requiredSize := int64(0)
@@ -260,7 +261,7 @@ func (r *Blob) appendFromRemote(ctx context.Context, tr http.RoundTripper, allDa
 	// Get all chunks responsed as a multipart body.
 	mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
 	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
-		return fmt.Errorf("invalid media type %q for %q: %v", mediaType, r.url, err)
+		return errors.Wrapf(err, "invalid media type %q for %q", mediaType, r.url)
 	}
 	mr := multipart.NewReader(res.Body, params["boundary"])
 	mr.NextPart() // Drop the dummy range.
@@ -269,15 +270,15 @@ func (r *Blob) appendFromRemote(ctx context.Context, tr http.RoundTripper, allDa
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return fmt.Errorf("Failed to read multipart response from %q: %v", r.url, err)
+			return errors.Wrapf(err, "failed to read multipart response from %q", r.url)
 		}
 		reg, err := r.parseRange(p.Header.Get("Content-Range"))
 		if err != nil {
-			return fmt.Errorf("failed to parse Content-Range header of %q: %v", r.url, err)
+			return errors.Wrapf(err, "failed to parse Content-Range header of %q", r.url)
 		}
 		data, err := ioutil.ReadAll(p)
 		if err != nil {
-			return fmt.Errorf("failed to read multipart response data on %q: %v", r.url, err)
+			return errors.Wrapf(err, "failed to read multipart response data on %q", r.url)
 		}
 
 		// Chunk this part
@@ -300,21 +301,18 @@ func (r *Blob) appendFromRemote(ctx context.Context, tr http.RoundTripper, allDa
 	return nil
 }
 
-func (r *Blob) parseRange(header string) (reg region, err error) {
+func (r *Blob) parseRange(header string) (region, error) {
 	submatches := contentRangeRegexp.FindStringSubmatch(header)
 	if len(submatches) < 4 {
-		err = fmt.Errorf("Content-Range doesn't have enough information")
-		return
+		return region{}, fmt.Errorf("Content-Range %q doesn't have enough information", header)
 	}
 	begin, err := strconv.ParseInt(submatches[1], 10, 64)
 	if err != nil {
-		err = fmt.Errorf("failed to parse beginning offset: %v", err)
-		return
+		return region{}, errors.Wrapf(err, "failed to parse beginning offset %q", submatches[1])
 	}
 	end, err := strconv.ParseInt(submatches[2], 10, 64)
 	if err != nil {
-		err = fmt.Errorf("failed to parse end offset: %v", err)
-		return
+		return region{}, errors.Wrapf(err, "failed to parse end offset %q", submatches[2])
 	}
 
 	return region{begin, end}, nil

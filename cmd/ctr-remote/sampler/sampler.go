@@ -31,6 +31,7 @@ import (
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runc/libcontainer/user"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/pkg/errors"
 	"github.com/rs/xid"
 )
 
@@ -43,11 +44,11 @@ func Run(bundle string, config v1.Image, period int, opts ...Option) error {
 
 	spec, err := conf2spec(config.Config, GetRootfsPathUnder(bundle), opt)
 	if err != nil {
-		return fmt.Errorf("failed to convert config to spec: %v", err)
+		return errors.Wrap(err, "failed to convert config to spec")
 	}
 	sf, err := os.Create(filepath.Join(bundle, "config.json"))
 	if err = json.NewEncoder(sf).Encode(spec); err != nil {
-		return fmt.Errorf("failed to parse user: %v", err)
+		return errors.Wrap(err, "failed to parse user")
 	}
 
 	// run the container
@@ -77,7 +78,7 @@ func Run(bundle string, config v1.Image, period int, opts ...Option) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to run containers: %v", err)
+		return errors.Wrap(err, "failed to run containers")
 	}
 
 	return nil

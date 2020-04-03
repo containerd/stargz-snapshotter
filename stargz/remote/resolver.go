@@ -38,6 +38,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -87,7 +88,6 @@ func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config Blo
 		url  string
 		tr   http.RoundTripper
 		size int64
-		rErr = make(map[string]error)
 	)
 	named, err := docker.ParseDockerRef(ref)
 	if err != nil {
@@ -96,27 +96,30 @@ func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config Blo
 	hosts := append(r.config[docker.Domain(named)].Mirrors, MirrorConfig{
 		Host: docker.Domain(named),
 	})
+	var rErr error
 	for _, h := range hosts {
 		// Parse reference
 		if h.Host == "" || strings.Contains(h.Host, "/") {
-			rErr[h.Host] = fmt.Errorf("mirror must be a domain name; got %q", h.Host)
+			rErr = errors.Wrapf(rErr, "host %q: mirror must be a domain name", h.Host)
 			continue // try another host
 		}
 		var opts []name.Option
 		if h.Insecure {
 			opts = append(opts, name.Insecure)
 		}
-		nref, err = name.ParseReference(
-			fmt.Sprintf("%s/%s", h.Host, docker.Path(named)), opts...)
+		sref := fmt.Sprintf("%s/%s", h.Host, docker.Path(named))
+		nref, err = name.ParseReference(sref, opts...)
 		if err != nil {
-			rErr[h.Host] = fmt.Errorf("failed to parse ref %q (%q): %v", ref, digest, err)
+			rErr = errors.Wrapf(rErr, "host %q: failed to parse ref %q (%q): %v",
+				h.Host, sref, digest, err)
 			continue // try another host
 		}
 
 		// Resolve redirection and get blob URL
 		url, err = r.resolveReference(nref, digest)
 		if err != nil {
-			rErr[h.Host] = fmt.Errorf("failed to resolve ref %q (%q): %v", ref, digest, err)
+			rErr = errors.Wrapf(rErr, "host %q: failed to resolve ref %q (%q): %v",
+				h.Host, nref.String(), digest, err)
 			continue // try another host
 		}
 
@@ -125,23 +128,24 @@ func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config Blo
 		tr = r.trPool[nref.Name()]
 		r.trPoolMu.Unlock()
 		if tr == nil {
-			rErr[h.Host] = fmt.Errorf("transport %q is not found in the pool", nref.Name())
+			rErr = errors.Wrapf(rErr, "host %q: transport %q not found in pool",
+				h.Host, nref.Name())
 			continue
-
 		}
 
 		// Get size information
 		size, err = getSize(url, tr)
 		if err != nil {
-			rErr[h.Host] = fmt.Errorf("failed to get size of %q: %v", url, err)
+			rErr = errors.Wrapf(rErr, "host %q: failed to get size of %q: %v",
+				h.Host, url, err)
 			continue // try another host
 		}
 
-		rErr = nil
+		rErr = nil // Hit one accessible mirror
 		break
 	}
 	if rErr != nil {
-		return nil, fmt.Errorf("cannot resolve ref %q (%q): %v", ref, digest, rErr)
+		return nil, errors.Wrapf(rErr, "cannot resolve ref %q (%q)", ref, digest)
 	}
 
 	// Configure the connection
@@ -216,14 +220,14 @@ func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) 
 	// We use GET request for GCR.
 	req, err := http.NewRequest("GET", endpointURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to request to the registry of %q: %v", endpointURL, err)
+		return "", errors.Wrapf(err, "failed to request to the registry of %q", endpointURL)
 	}
 	req = req.WithContext(ctx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := tr.RoundTrip(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to request to %q: %v", endpointURL, err)
+		return "", errors.Wrapf(err, "failed to request to %q", endpointURL)
 	}
 	defer func() {
 		io.Copy(ioutil.Discard, res.Body)
@@ -269,7 +273,7 @@ func authnTransport(ref name.Reference, tr http.RoundTripper, keychain authn.Key
 	}
 	auth, err := keychain.Resolve(ref.Context())
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
+		return nil, errors.Wrapf(err, "failed to resolve the reference %q", ref)
 	}
 	return transport.New(ref.Context().Registry, auth, tr, []string{ref.Scope(transport.PullScope)})
 }

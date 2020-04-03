@@ -115,21 +115,22 @@ var OptimizeCommand = cli.Command{
 		}
 		opts, err := parseArgs(context)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to parse args")
 		}
 
 		// Convert and push image
 		srcRef, err := parseReference(src, context)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to parse source ref %q", src)
 		}
 		dstRef, err := parseReference(dst, context)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to parse destination ref %q", dst)
 		}
 		err = convert(context, srcRef, dstRef, opts...)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to convert image %q -> %q",
+				srcRef.String(), dstRef.String())
 		}
 		return nil
 	},
@@ -180,7 +181,7 @@ func parseReference(path string, clicontext *cli.Context) (name.Reference, error
 	}
 	ref, err := name.ParseReference(path, opts...)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "failed to parse reference %q", path)
 	}
 
 	return ref, nil
@@ -190,35 +191,35 @@ func convert(clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...
 	// Pull source image
 	srcImg, err := remote.Image(srcRef, remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to pull image from %q", srcRef.String())
 	}
 
 	// Optimize the image
 	// The order of the list is base layer first, top layer last.
 	layers, err := srcImg.Layers()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to get image layers")
 	}
-	if !clicontext.Bool("stargz-only") {
+	if clicontext.Bool("stargz-only") {
+		for i, l := range layers {
+			r, err := l.Uncompressed()
+			if err != nil {
+				return errors.Wrapf(err, "failed to convert layer(%d) to stargz", i)
+			}
+			layers[i] = &layer{r: r}
+		}
+	} else {
 		configData, err := srcImg.RawConfigFile()
 		if err != nil {
 			return err
 		}
 		var config imgpkg.Image
 		if err := json.Unmarshal(configData, &config); err != nil {
-			return fmt.Errorf("failed to parse image config file: %v", err)
+			return errors.Wrap(err, "failed to parse image config file")
 		}
 		layers, err = optimize(clicontext, layers, config, runopts...)
 		if err != nil {
 			return err
-		}
-	} else {
-		for i, l := range layers {
-			r, err := l.Uncompressed()
-			if err != nil {
-				return err
-			}
-			layers[i] = &layer{r: r}
 		}
 	}
 	srcCfg, err := srcImg.ConfigFile()
@@ -238,7 +239,7 @@ func convert(clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...
 
 	// Push the optimized image.
 	if err := remote.Write(dstRef, img, remote.WithAuthFromKeychain(authn.DefaultKeychain)); err != nil {
-		return err
+		return errors.Wrapf(err, "failed to push image to %q", dstRef.String())
 	}
 
 	return nil
@@ -291,7 +292,7 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 			}
 			mon := logger.NewOpenReadMonitor()
 			if _, err := logger.Mount(mp, bytes.NewReader(tarBytes), mon); err != nil {
-				return errors.Wrapf(err, "failed to mount on %s", mp)
+				return errors.Wrapf(err, "failed to mount on %q", mp)
 			}
 			addLayer[i] = func(lowers []regpkg.Layer) ([]regpkg.Layer, error) {
 				r, err := sorter.Sort(bytes.NewReader(tarBytes), mon.DumpLog())

@@ -29,6 +29,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/util"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
+	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
 
@@ -50,14 +51,14 @@ func Mount(mountPoint string, tarfile io.ReaderAt, monitor Monitor) (func() erro
 	})
 	server, err := fuse.NewServer(conn.RawFS(), mountPoint, &fuse.MountOptions{AllowOther: true})
 	if err != nil {
-		return nil, fmt.Errorf("Error: Failed failed: %v", err)
+		return nil, errors.Wrap(err, "failed to prepare filesystem server")
 	}
 	if err := root.InitNodes(); err != nil {
-		return nil, fmt.Errorf("Error: Failed to initialize nodes: %v", err)
+		return nil, errors.Wrap(err, "failed to initialize nodes")
 	}
 	go server.Serve()
 	if err := server.WaitMount(); err != nil {
-		return nil, fmt.Errorf("Error: Failed to mount filesystem: %v", err)
+		return nil, errors.Wrap(err, "failed to mount filesystem")
 	}
 
 	return func() error { return server.Unmount() }, nil
@@ -254,7 +255,7 @@ func (n *node) headerToAttr(h *tar.Header) fuse.Attr {
 func (n *node) InitNodes() error {
 	pw, err := util.NewPositionWatcher(n.tr)
 	if err != nil {
-		return fmt.Errorf("Failed to make position watcher: %v", err)
+		return errors.Wrap(err, "Failed to make position watcher")
 	}
 	tr := tar.NewReader(pw)
 
@@ -282,7 +283,7 @@ func (n *node) InitNodes() error {
 		h, err := tr.Next()
 		if err != nil {
 			if err != io.EOF {
-				return fmt.Errorf("Failed to parse tar file: %v", err)
+				return errors.Wrap(err, "failed to parse tar file")
 			}
 			break
 		}
@@ -294,7 +295,7 @@ func (n *node) InitNodes() error {
 			xattrs       = make(map[string][]byte)
 		)
 		if parentDir, err = n.walkDown(dir, getormake); err != nil {
-			return fmt.Errorf("failed to make dummy nodes: %v", err)
+			return errors.Wrap(err, "failed to make dummy nodes")
 		}
 		existingNode = parentDir.GetChild(base)
 		if h.PAXRecords != nil {
@@ -307,8 +308,7 @@ func (n *node) InitNodes() error {
 		switch {
 		case existingNode != nil:
 			if !existingNode.IsDir() {
-				return fmt.Errorf("node \"%s\" is placeholder but not a directory",
-					fullname)
+				return fmt.Errorf("node %q is placeholder but not a directory", fullname)
 			}
 			// This is "placeholder node" which has been registered in previous loop as
 			// an intermediate directory. Now we update it with real one.
@@ -343,14 +343,14 @@ func (n *node) InitNodes() error {
 			}
 		case h.Typeflag == tar.TypeLink:
 			if h.Linkname == "" {
-				return fmt.Errorf("Linkname of hardlink %s is not found", fullname)
+				return fmt.Errorf("Linkname of hardlink %q is not found", fullname)
 			}
 			// This node is a hardlink. Same as major tar tools(GNU tar etc.),
 			// we pretend that the target node of this hard link has already been appeared.
 			target, err := n.walkDown(filepath.Clean(h.Linkname), getnode)
 			if err != nil {
-				return fmt.Errorf("hardlink(%q ==> %q) is not found: %v",
-					fullname, h.Linkname, err)
+				return errors.Wrapf(err, "hardlink(%q ==> %q) is not found",
+					fullname, h.Linkname)
 			}
 			n, ok := target.Node().(*node)
 			if !ok {
@@ -385,7 +385,7 @@ func (n *node) InitNodes() error {
 		if _, err := n.walkDown(filepath.Join(dir, base[len(whiteoutPrefix):]), getnode); err != nil {
 			p, err := n.walkDown(dir, getnode)
 			if err != nil {
-				return fmt.Errorf("parent node of whiteout %q is not found", w)
+				return errors.Wrapf(err, "parent node of whiteout %q is not found", w)
 			}
 			p.NewChild(base[len(whiteoutPrefix):], false, &whiteout{nodefs.NewDefaultNode()})
 		}

@@ -314,7 +314,7 @@ func TestCheckInterval(t *testing.T) {
 
 		tr.called = false
 		if err := ur.Check(); err != nil {
-			t.Fatalf("%s: check mustn't be failed", name)
+			t.Fatalf("%q: check mustn't be failed", name)
 		}
 
 		time.Sleep(time.Millisecond)
@@ -324,7 +324,7 @@ func TestCheckInterval(t *testing.T) {
 			return ur.lastCheck, false
 		}
 		if !(ur.lastCheck.After(beforeUpdate) && ur.lastCheck.Before(afterUpdate)) {
-			t.Errorf("%s: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, ur.lastCheck)
+			t.Errorf("%q: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, ur.lastCheck)
 		}
 
 		return ur.lastCheck, true
