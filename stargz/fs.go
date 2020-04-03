@@ -57,10 +57,12 @@ import (
 	"github.com/containerd/stargz-snapshotter/cache"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/stargz/handler"
+	"github.com/containerd/stargz-snapshotter/stargz/keychain"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 	"golang.org/x/sys/unix"
@@ -78,16 +80,17 @@ const (
 )
 
 type Config struct {
-	remote.BlobConfig `toml:"blob"`
-	ResolverConfig    map[string]remote.ResolverConfig `toml:"resolver"`
-	HTTPCacheType     string                           `toml:"http_cache_type"`
-	FSCacheType       string                           `toml:"filesystem_cache_type"`
-	LRUCacheEntry     int                              `toml:"lru_max_entry"`
-	NoPrefetch        bool                             `toml:"noprefetch"`
-	Debug             bool                             `toml:"debug"`
+	remote.BlobConfig                 `toml:"blob"`
+	keychain.KubeconfigKeychainConfig `toml:"kubeconfig_keychain"`
+	ResolverConfig                    map[string]remote.ResolverConfig `toml:"resolver"`
+	HTTPCacheType                     string                           `toml:"http_cache_type"`
+	FSCacheType                       string                           `toml:"filesystem_cache_type"`
+	LRUCacheEntry                     int                              `toml:"lru_max_entry"`
+	NoPrefetch                        bool                             `toml:"noprefetch"`
+	Debug                             bool                             `toml:"debug"`
 }
 
-func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
+func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.FileSystem, error) {
 	maxEntry := config.LRUCacheEntry
 	if maxEntry == 0 {
 		maxEntry = defaultLRUCacheEntry
@@ -100,9 +103,12 @@ func NewFilesystem(root string, config *Config) (snbase.FileSystem, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	keychain := authn.NewMultiKeychain(
+		authn.DefaultKeychain,
+		keychain.NewKubeconfigKeychain(ctx, config.KubeconfigKeychainConfig),
+	)
 	return &filesystem{
-		resolver:              remote.NewResolver(config.ResolverConfig),
+		resolver:              remote.NewResolver(keychain, config.ResolverConfig),
 		blobConfig:            config.BlobConfig,
 		httpCache:             httpCache,
 		fsCache:               fsCache,

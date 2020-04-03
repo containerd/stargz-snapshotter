@@ -60,13 +60,14 @@ type BlobConfig struct {
 	ChunkSize     int64 `toml:"chunk_size"`
 }
 
-func NewResolver(config map[string]ResolverConfig) *Resolver {
+func NewResolver(keychain authn.Keychain, config map[string]ResolverConfig) *Resolver {
 	if config == nil {
 		config = make(map[string]ResolverConfig)
 	}
 	return &Resolver{
 		transport: http.DefaultTransport,
 		trPool:    make(map[string]http.RoundTripper),
+		keychain:  keychain,
 		config:    config,
 	}
 }
@@ -75,6 +76,7 @@ type Resolver struct {
 	transport http.RoundTripper
 	trPool    map[string]http.RoundTripper
 	trPoolMu  sync.Mutex
+	keychain  authn.Keychain
 	config    map[string]ResolverConfig
 }
 
@@ -162,6 +164,7 @@ func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config Blo
 
 	return &Blob{
 		ref:           nref,
+		keychain:      r.keychain,
 		url:           url,
 		tr:            tr,
 		size:          size,
@@ -191,7 +194,7 @@ func (r *Resolver) resolveReference(ref name.Reference, digest string) (string, 
 	}
 
 	// transport is unavailable/expired so refresh the transport and try again
-	tr, err := authnTransport(ref, r.transport)
+	tr, err := authnTransport(ref, r.transport, r.keychain)
 	if err != nil {
 		return "", err
 	}
@@ -260,9 +263,11 @@ func getSize(url string, tr http.RoundTripper) (int64, error) {
 	return strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
 }
 
-func authnTransport(ref name.Reference, tr http.RoundTripper) (http.RoundTripper, error) {
-	// Authn against the repository using `~/.docker/config.json`
-	auth, err := authn.DefaultKeychain.Resolve(ref.Context())
+func authnTransport(ref name.Reference, tr http.RoundTripper, keychain authn.Keychain) (http.RoundTripper, error) {
+	if keychain == nil {
+		keychain = authn.DefaultKeychain
+	}
+	auth, err := keychain.Resolve(ref.Context())
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve the reference %q: %v", ref, err)
 	}

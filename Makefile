@@ -80,3 +80,6 @@ test-optimize:
 
 benchmark:
 	@./script/make.sh benchmark
+
+test-pullsecrets:
+	@./script/make.sh test-pullsecrets

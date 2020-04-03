@@ -63,16 +63,25 @@ bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  s
 
 ## Authentication
 
-We support private repository authentication powered by [go-containerregistry](https://github.com/google/go-containerregistry) which supports `~/.docker/config.json`-based credential management.
-You can authenticate yourself to private registries with normal operations (e.g. `docker login` command) using `~/.docker/config.json`.
+We support the following methods for private repository authentication.
+- Using `DOCKER_CONFIG` or `~/.docker/config.json`
+- Using Kubernetes secrets (type = `kubernetes.io/dockerconfigjson`)
+
+Following example enables stargz snapshotter to access to private registries using `docker login` command. Stargz snapshotter gets credentials from `DOCKER_CONFIG`(or `~/.docker/config.json`).
 ```
 # docker login
 (Enter username and password)
 # ctr-remote image rpull --user <username>:<password> docker.io/<your-repository>/ubuntu:18.04
 ```
-The `--user` option is just for containerd's side which doesn't recognize `~/.docker/config.json`.
-We don't use credentials specified by this option but uses `~/.docker/config.json` instead.
-If you have no right to access the repository with credentials stored in `~/.docker/config.json`, this pull operation fallbacks to the normal one(i.e. overlayfs).
+
+Following configuration enables stargz snapshotter to access to private registries using kubernetes secrets (type = `kubernetes.io/dockerconfigjson`) in the cluster using kubeconfig files. You can specify the path of kubeconfig file to use with `kubeconfig_path` option. It's no problem that the specified file doesn't exist when this snapshotter starts. In this case, snapsohtter polls the file until actually provided. This is useful for some environments (e.g. single node cluster with containerized apiserver) where stargz snapshotter needs to start before everything, including booting containerd/kubelet/apiserver and configuring users/roles. If no `kubeconfig_path` is specified, snapshotter searches kubeconfig files from `KUBECONFIG` or `~/.kube/config`.
+```
+[kubeconfig_keychain]
+enable_keychain = true
+kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
+```
+
+We don't share credentials with containerd so credentials specified by ctr's `--user` option in the above example is just for containerd's side. If you have no right to access to the repository with credentials specified to stargz snapshotter, pull operations fall back to the normal one(i.e. overlayfs).
 
 ## Project details
 
