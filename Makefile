@@ -83,3 +83,6 @@ benchmark:
 
 test-pullsecrets:
 	@./script/make.sh test-pullsecrets
+
+test-cri:
+	@./script/make.sh test-cri

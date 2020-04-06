@@ -50,11 +50,13 @@ INTEGRATION=false
 OPTIMIZE=false
 BENCHMARK=false
 PULLSECRETS=false
+CRI_TEST=false
 for T in ${@} ; do
     case "${T}" in
         "integration" ) INTEGRATION=true ;;
         "test-optimize" ) OPTIMIZE=true ;;
         "test-pullsecrets" ) PULLSECRETS=true ;;
+        "test-cri" ) CRI_TEST=true ;;
         "benchmark" ) BENCHMARK=true ;;
         * ) TARGETS="${TARGETS} ${T}" ;;
     esac
@@ -195,6 +197,16 @@ if [ "${PULLSECRETS}" == "true" ] ; then
     rm "${DOCKER_COMPOSE_YAML}"
     rm "${KIND_KUBECONFIG}"
     rm -rf "${AUTH_DIR}"
+fi
+
+if [ "${CRI_TEST}" == "true" ] ; then
+    IMAGE_LIST=$(mktemp)
+    if ! ( "${REPO}/script/cri/build.sh" "${REPO}" && \
+               "${REPO}/script/cri/test-legacy.sh" "${IMAGE_LIST}" && \
+               "${REPO}/script/cri/test-stargz.sh" "${IMAGE_LIST}" ) ; then
+        FAIL=true
+    fi
+    rm "${IMAGE_LIST}"
 fi
 
 if [ "$TARGETS" != "" ] ; then
