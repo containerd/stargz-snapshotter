@@ -37,6 +37,7 @@
 package stargz
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -265,7 +266,10 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		EntryTimeout:    time.Second,
 		Owner:           nil, // preserve owners.
 	})
-	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{AllowOther: true})
+	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{
+		AllowOther: true,             // allow users other than root&mounter to access fs
+		Options:    []string{"suid"}, // allow setuid inside container
+	})
 	if err != nil {
 		logCtx.WithError(err).Debug("failed to make filesstem server")
 		return err
@@ -387,7 +391,7 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		// This is a normal entry.
 		normalEnts[baseName] = true
 		ents = append(ents, fuse.DirEntry{
-			Mode: fileModeToSystemMode(ent.Stat().Mode()),
+			Mode: modeOfEntry(ent),
 			Name: baseName,
 			Ino:  inodeOfEnt(ent),
 		})
@@ -480,7 +484,7 @@ func (n *node) Access(mode uint32, context *fuse.Context) fuse.Status {
 	} else {
 		shift = 0
 	}
-	if mode<<shift&fileModeToSystemMode(n.e.Stat().Mode()) != 0 {
+	if mode<<shift&modeOfEntry(n.e) != 0 {
 		return fuse.OK
 	}
 
@@ -799,17 +803,16 @@ func inodeOfEnt(e *stargz.TOCEntry) uint64 {
 
 // entryToAttr converts stargz's TOCEntry to go-fuse's Attr.
 func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) fuse.Status {
-	fi := e.Stat()
 	out.Ino = inodeOfEnt(e)
-	out.Size = uint64(fi.Size())
+	out.Size = uint64(e.Size)
 	out.Blksize = blockSize
 	out.Blocks = out.Size / uint64(out.Blksize)
 	if out.Size%uint64(out.Blksize) > 0 {
 		out.Blocks++
 	}
-	out.Mtime = uint64(fi.ModTime().Unix())
-	out.Mtimensec = uint32(fi.ModTime().UnixNano())
-	out.Mode = fileModeToSystemMode(fi.Mode())
+	out.Mtime = uint64(e.ModTime().Unix())
+	out.Mtimensec = uint32(e.ModTime().UnixNano())
+	out.Mode = modeOfEntry(e)
 	out.Owner = fuse.Owner{Uid: uint32(e.Uid), Gid: uint32(e.Gid)}
 	out.Rdev = uint32(unix.Mkdev(uint32(e.DevMajor), uint32(e.DevMinor)))
 	out.Nlink = uint32(e.NumLink)
@@ -839,36 +842,47 @@ func entryToWhAttr(e *stargz.TOCEntry, out *fuse.Attr) fuse.Status {
 	return fuse.OK
 }
 
-// fileModeToSystemMode converts os.FileMode to system's native bitmap.
-func fileModeToSystemMode(m os.FileMode) uint32 {
-	sm := uint32(m & 0777)
-	switch m & os.ModeType {
+// modeOfEntry gets system's mode bits from TOCEntry
+func modeOfEntry(e *stargz.TOCEntry) uint32 {
+	// Permission bits
+	res := uint32(e.Stat().Mode() & os.ModePerm)
+
+	// File type bits
+	switch e.Stat().Mode() & os.ModeType {
 	case os.ModeDevice:
-		sm |= syscall.S_IFBLK
+		res |= syscall.S_IFBLK
 	case os.ModeDevice | os.ModeCharDevice:
-		sm |= syscall.S_IFCHR
+		res |= syscall.S_IFCHR
 	case os.ModeDir:
-		sm |= syscall.S_IFDIR
+		res |= syscall.S_IFDIR
 	case os.ModeNamedPipe:
-		sm |= syscall.S_IFIFO
+		res |= syscall.S_IFIFO
 	case os.ModeSymlink:
-		sm |= syscall.S_IFLNK
+		res |= syscall.S_IFLNK
 	case os.ModeSocket:
-		sm |= syscall.S_IFSOCK
+		res |= syscall.S_IFSOCK
 	default: // regular file.
-		sm |= syscall.S_IFREG
-	}
-	if m&os.ModeSetgid != 0 {
-		sm |= syscall.S_ISGID
-	}
-	if m&os.ModeSetuid != 0 {
-		sm |= syscall.S_ISUID
-	}
-	if m&os.ModeSticky != 0 {
-		sm |= syscall.S_ISVTX
+		res |= syscall.S_IFREG
 	}
 
-	return sm
+	// SUID, SGID, Sticky bits
+	// Stargz package doesn't provide these bits so let's calculate them manually
+	// here. TOCEntry.Mode is a copy of tar.Header.Mode so we can understand the
+	// mode using that package.
+	// See also:
+	// - https://github.com/google/crfs/blob/71d77da419c90be7b05d12e59945ac7a8c94a543/stargz/stargz.go#L706
+	hm := (&tar.Header{Mode: e.Mode}).FileInfo().Mode()
+	if hm&os.ModeSetuid != 0 {
+		res |= syscall.S_ISUID
+	}
+	if hm&os.ModeSetgid != 0 {
+		res |= syscall.S_ISGID
+	}
+	if hm&os.ModeSticky != 0 {
+		res |= syscall.S_ISVTX
+	}
+
+	return res
 }
 
 func defaultStatfs() *fuse.StatfsOut {
