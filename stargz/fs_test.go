@@ -33,6 +33,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -283,6 +284,33 @@ func TestExistence(t *testing.T) {
 				hasStateFile(testStateLayerDigest + ".json"),
 			},
 		},
+		{
+			name: "file_suid",
+			in: []tarent{
+				regfile("test", "test", os.ModeSetuid),
+			},
+			want: []check{
+				hasExtraMode("test", os.ModeSetuid),
+			},
+		},
+		{
+			name: "dir_sgid",
+			in: []tarent{
+				directory("test/", os.ModeSetgid),
+			},
+			want: []check{
+				hasExtraMode("test/", os.ModeSetgid),
+			},
+		},
+		{
+			name: "file_sticky",
+			in: []tarent{
+				regfile("test", "test", os.ModeSticky),
+			},
+			want: []check{
+				hasExtraMode("test", os.ModeSticky),
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -398,15 +426,42 @@ type tarent struct {
 	contents []byte
 }
 
-func regfile(name string, contents string) tarent {
+// suid, guid, sticky bits for archive/tar
+// https://github.com/golang/go/blob/release-branch.go1.13/src/archive/tar/common.go#L607-L609
+const (
+	cISUID = 04000 // Set uid
+	cISGID = 02000 // Set gid
+	cISVTX = 01000 // Save text (sticky bit)
+)
+
+func extraModeToTarMode(fm os.FileMode) (tm int64) {
+	if fm&os.ModeSetuid != 0 {
+		tm |= cISUID
+	}
+	if fm&os.ModeSetgid != 0 {
+		tm |= cISGID
+	}
+	if fm&os.ModeSticky != 0 {
+		tm |= cISVTX
+	}
+	return
+}
+
+func regfile(name string, contents string, opts ...interface{}) tarent {
 	if strings.HasSuffix(name, "/") {
 		panic(fmt.Sprintf("file %q has suffix /", name))
+	}
+	var xmodes os.FileMode
+	for _, opt := range opts {
+		if v, ok := opt.(os.FileMode); ok {
+			xmodes = v
+		}
 	}
 	return tarent{
 		header: &tar.Header{
 			Typeflag: tar.TypeReg,
 			Name:     name,
-			Mode:     0644,
+			Mode:     0644 | extraModeToTarMode(xmodes),
 			Size:     int64(len(contents)),
 		},
 		contents: []byte(contents),
@@ -419,17 +474,22 @@ func directory(name string, opts ...interface{}) tarent {
 	if !strings.HasSuffix(name, "/") {
 		panic(fmt.Sprintf("dir %q hasn't suffix /", name))
 	}
-	var xattrs xAttr
+	var (
+		xattrs xAttr
+		xmodes os.FileMode
+	)
 	for _, opt := range opts {
 		if v, ok := opt.(xAttr); ok {
 			xattrs = v
+		} else if v, ok := opt.(os.FileMode); ok {
+			xmodes = v
 		}
 	}
 	return tarent{
 		header: &tar.Header{
 			Typeflag: tar.TypeDir,
 			Name:     name,
-			Mode:     0755,
+			Mode:     0755 | extraModeToTarMode(xmodes),
 			Xattrs:   xattrs,
 		},
 	}
@@ -458,6 +518,28 @@ func hasFileDigest(file string, digest string) check {
 		}
 		if n.e.Digest != digest {
 			t.Fatalf("Digest(%q) = %q, want %q", file, n.e.Digest, digest)
+		}
+	}
+}
+
+func hasExtraMode(name string, mode os.FileMode) check {
+	return func(t *testing.T, root *node) {
+		_, inode, err := getDirentAndNode(root, name)
+		if err != nil {
+			t.Fatalf("failed to get node %q: %v", name, err)
+		}
+		n, ok := inode.Node().(*node)
+		if !ok {
+			t.Fatalf("entry %q isn't a normal node", name)
+		}
+		var a fuse.Attr
+		if status := n.GetAttr(&a, nil, nil); status != fuse.OK {
+			t.Fatalf("failed to get attributes of node %q: %v", name, status)
+		}
+		gotMode := a.Mode & (syscall.S_ISUID | syscall.S_ISGID | syscall.S_ISVTX)
+		wantMode := extraModeToTarMode(mode)
+		if gotMode != uint32(wantMode) {
+			t.Fatalf("got mode = %b, want %b", gotMode, wantMode)
 		}
 	}
 }
