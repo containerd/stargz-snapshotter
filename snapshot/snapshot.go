@@ -604,6 +604,8 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, lab
 	}
 
 	if err := o.fs.Mount(o.context, o.upperPath(id), labels); err != nil {
+		log.G(ctx).WithField("key", key).
+			WithError(err).Debug("failed to prepare remote snapshot")
 		return err
 	}
 
