@@ -16,33 +16,38 @@
 
 set -euo pipefail
 
+CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REPO="${CONTEXT}../../"
 REGISTRY_HOST=registry-integration
+CONTAINERD_NODE=testenv_integration
+SNAPSHOTTER_NODE=stargz_snapshotter_integration
+DUMMYUSER=dummyuser
+DUMMYPASS=dummypass
 
-if [ "${1}" == "" ]; then
-    echo "Repository path must be provided."
-    exit 1
-fi
+source "${REPO}/script/util/utils.sh"
 
-if [ "${2}" == "" ]; then
-    echo "Authentication-replated directory path must be provided."
-    exit 1
-fi
+DOCKER_COMPOSE_YAML=$(mktemp)
+AUTH_DIR=$(mktemp -d)
+SS_ROOT_DIR=$(mktemp -d)
+function cleanup {
+    local ORG_EXIT_CODE="${1}"
+    rm "${DOCKER_COMPOSE_YAML}" || true
+    rm -rf "${AUTH_DIR}" || true
+    rm -rf "${SS_ROOT_DIR}" || true
+    exit "${ORG_EXIT_CODE}"
+}
+trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
-if [ "${3}" == "" ]; then
-    echo "Temp dir for /var/lib/containerd-stargz-grpc must be provided."
-    exit 1
-fi
+echo "Preparing creds..."
+prepare_creds "${AUTH_DIR}" "${REGISTRY_HOST}" "${DUMMYUSER}" "${DUMMYPASS}"
 
-REPO="${1}"
-AUTH="${2}"
-SS_ROOT_DIR="${3}"
-
-cat <<EOF
+echo "Preparing docker-compose.yml..."
+cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3"
 services:
-  testenv_integration:
+  ${CONTAINERD_NODE}:
     build:
-      context: "${REPO}/script/integration/containerd"
+      context: "${CONTEXT}containerd"
       dockerfile: Dockerfile
     container_name: testenv_integration
     privileged: true
@@ -59,30 +64,12 @@ services:
     - /tmp:exec,mode=777
     volumes:
     - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
-    - ${AUTH}:/auth
+    - ${AUTH_DIR}:/auth
     - "${SS_ROOT_DIR}:/var/lib/containerd-stargz-grpc:rshared"
     - ssstate:/run/containerd-stargz-grpc
-  registry:
-    image: registry:2
-    container_name: ${REGISTRY_HOST}
-    environment:
-    - HTTP_PROXY=${HTTP_PROXY:-}
-    - HTTPS_PROXY=${HTTPS_PROXY:-}
-    - http_proxy=${http_proxy:-}
-    - https_proxy=${https_proxy:-}
-    - REGISTRY_AUTH=htpasswd
-    - REGISTRY_AUTH_HTPASSWD_REALM="Registry Realm"
-    - REGISTRY_AUTH_HTPASSWD_PATH=/auth/auth/htpasswd
-    - REGISTRY_HTTP_TLS_CERTIFICATE=/auth/certs/domain.crt
-    - REGISTRY_HTTP_TLS_KEY=/auth/certs/domain.key
-    volumes:
-    - ${AUTH}:/auth
-  registry-alt:
-    image: registry:2
-    container_name: registry-alt
-  remote_snapshotter_integration:
+  ${SNAPSHOTTER_NODE}:
     build:
-      context: "${REPO}/script/integration/containerd-stargz-grpc"
+      context: "${CONTEXT}containerd-stargz-grpc"
       dockerfile: Dockerfile
     container_name: remote_snapshotter_integration
     privileged: true
@@ -98,10 +85,44 @@ services:
     - /tmp:exec,mode=777
     volumes:
     - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
-    - "${AUTH}:/auth"
+    - "${AUTH_DIR}:/auth"
     - "${SS_ROOT_DIR}:/var/lib/containerd-stargz-grpc:rshared"
     - ssstate:/run/containerd-stargz-grpc
     - /dev/fuse:/dev/fuse
+  registry:
+    image: registry:2
+    container_name: ${REGISTRY_HOST}
+    environment:
+    - HTTP_PROXY=${HTTP_PROXY:-}
+    - HTTPS_PROXY=${HTTPS_PROXY:-}
+    - http_proxy=${http_proxy:-}
+    - https_proxy=${https_proxy:-}
+    - REGISTRY_AUTH=htpasswd
+    - REGISTRY_AUTH_HTPASSWD_REALM="Registry Realm"
+    - REGISTRY_AUTH_HTPASSWD_PATH=/auth/auth/htpasswd
+    - REGISTRY_HTTP_TLS_CERTIFICATE=/auth/certs/domain.crt
+    - REGISTRY_HTTP_TLS_KEY=/auth/certs/domain.key
+    volumes:
+    - ${AUTH_DIR}:/auth
+  registry-alt:
+    image: registry:2
+    container_name: registry-alt
 volumes:
   ssstate:
 EOF
+
+echo "Testing..."
+FAIL=
+if ! ( cd "${CONTEXT}" && \
+           docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} \
+                          "${CONTAINERD_NODE}" "${SNAPSHOTTER_NODE}" && \
+           docker-compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
+    FAIL=true
+fi
+docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+if [ "${FAIL}" == "true" ] ; then
+    exit 1
+fi
+
+exit 0
+

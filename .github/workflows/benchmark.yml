@@ -16,7 +16,7 @@ jobs:
     - name: Prepare output directory
       run: mkdir "${BENCHMARK_RESULT_DIR}"
     - name: Run benchmark
-      run: ./script/make.sh benchmark
+      run: make benchmark
     - uses: actions/upload-artifact@v1
       with:
         name: benchmarking-result

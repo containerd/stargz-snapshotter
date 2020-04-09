@@ -16,10 +16,10 @@
 
 set -euo pipefail
 
-NODE_TEST_IMAGE_NAME="cri-integration-node-testimage"
-NODE_BASE_IMAGE_NAME="cri-integration-node-baseimage"
+CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REPO="${CONTEXT}../../"
 
-REPO="${1}"
+source "${CONTEXT}/const.sh"
 
 if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
@@ -27,9 +27,11 @@ if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
 fi
 
 TMP_CONTEXT=$(mktemp -d)
+IMAGE_LIST=$(mktemp)
 function cleanup {
-    ORG_EXIT_CODE="${1}"
-    rm -rf "${TMP_CONTEXT}"
+    local ORG_EXIT_CODE="${1}"
+    rm -rf "${TMP_CONTEXT}" || true
+    rm "${IMAGE_LIST}" || true
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
@@ -57,4 +59,8 @@ RUN apt install -y --no-install-recommends git make gcc build-essential && \
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
 EOF
-docker build -t "${NODE_TEST_IMAGE_NAME}" "${TMP_CONTEXT}"
+docker build -t "${NODE_TEST_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
+
+echo "Testing..."
+"${CONTEXT}/test-legacy.sh" "${IMAGE_LIST}"
+"${CONTEXT}/test-stargz.sh" "${IMAGE_LIST}"

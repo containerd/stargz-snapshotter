@@ -26,7 +26,7 @@ RETRYNUM=100
 RETRYINTERVAL=1
 TIMEOUTSEC=180
 function retry {
-    SUCCESS=false
+    local SUCCESS=false
     for i in $(seq ${RETRYNUM}) ; do
         if eval "timeout ${TIMEOUTSEC} ${@}" ; then
             SUCCESS=true
@@ -43,7 +43,7 @@ function retry {
 }
 
 function isServedAsRemoteSnapshot {
-    LOG_PATH="${1}"
+    local LOG_PATH="${1}"
     if [ "$(cat ${LOG_PATH})" == "" ] ; then
         echo "Log is empty. Something is wrong."
         return 1
@@ -89,7 +89,6 @@ mkdir -p /etc/containerd && \
 ############
 # Tests for stargz snapshotter
 reboot_containerd --log-level debug --config=/etc/containerd/config.toml
-NOTFOUND=false
 OK=$(ctr-remote plugins ls \
          | grep io.containerd.snapshotter \
          | sed -E 's/ +/ /g' \

@@ -16,96 +16,93 @@
 
 set -euo pipefail
 
-REMOTE_SNAPSHOT_LABEL="containerd.io/snapshot/remote"
-TEST_POD_NAME=testpod-$(head /dev/urandom | tr -dc a-z0-9 | head -c 10)
-TEST_POD_NS=ns1
-TEST_CONTAINER_NAME=testcontainer-$(head /dev/urandom | tr -dc a-z0-9 | head -c 10)
+CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REPO="${CONTEXT}../../"
+REGISTRY_HOST=kind-private-registry
+REGISTRY_NETWORK=kind_registry_network
+DUMMYUSER=dummyuser
+DUMMYPASS=dummypass
+TESTIMAGE="${REGISTRY_HOST}:5000/library/ubuntu:18.04"
+KIND_CLUSTER_NAME=kind-stargz-snapshotter
 
-KIND_NODENAME="${1}"
-KIND_KUBECONFIG="${2}"
-TESTIMAGE="${3}"
+source "${REPO}/script/util/utils.sh"
 
-echo "Creating testing pod...."
-cat <<EOF | KUBECONFIG="${KIND_KUBECONFIG}" kubectl apply -f -
-apiVersion: v1
-kind: Pod
-metadata:
-  name: ${TEST_POD_NAME}
-  namespace: ${TEST_POD_NS}
-spec:
-  containers:
-  - name: ${TEST_CONTAINER_NAME}
-    image: ${TESTIMAGE}
-    command: ["tail"]
-    args: ["-f", "/dev/null"]
-  imagePullSecrets:
-  - name: testsecret
+AUTH_DIR=$(mktemp -d)
+DOCKERCONFIG=$(mktemp)
+DOCKER_COMPOSE_YAML=$(mktemp)
+KIND_KUBECONFIG=$(mktemp)
+function cleanup {
+    local ORG_EXIT_CODE="${1}"
+    rm -rf "${AUTH_DIR}" || true
+    rm "${DOCKER_COMPOSE_YAML}" || true
+    rm "${DOCKERCONFIG}" || true
+    rm "${KIND_KUBECONFIG}" || true
+    exit "${ORG_EXIT_CODE}"
+}
+trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+
+echo "Preparing creds..."
+prepare_creds "${AUTH_DIR}" "${REGISTRY_HOST}" "${DUMMYUSER}" "${DUMMYPASS}"
+echo -n '{"auths":{"'"${REGISTRY_HOST}"':5000":{"auth":"'$(echo -n "${DUMMYUSER}:${DUMMYPASS}" | base64 -i -w 0)'"}}}' > "${DOCKERCONFIG}"
+
+echo "Preparing private registry..."
+cat <<EOF > "${DOCKER_COMPOSE_YAML}"
+version: "3.5"
+services:
+  testenv_registry:
+    image: registry:2
+    container_name: ${REGISTRY_HOST}
+    environment:
+    - HTTP_PROXY=${HTTP_PROXY:-}
+    - HTTPS_PROXY=${HTTPS_PROXY:-}
+    - http_proxy=${http_proxy:-}
+    - https_proxy=${https_proxy:-}
+    - REGISTRY_AUTH=htpasswd
+    - REGISTRY_AUTH_HTPASSWD_REALM="Registry Realm"
+    - REGISTRY_AUTH_HTPASSWD_PATH=/auth/auth/htpasswd
+    - REGISTRY_HTTP_TLS_CERTIFICATE=/auth/certs/domain.crt
+    - REGISTRY_HTTP_TLS_KEY=/auth/certs/domain.key
+    volumes:
+    - ${AUTH_DIR}:/auth
+networks:
+  default:
+    external:
+      name: ${REGISTRY_NETWORK}
 EOF
-
-echo "Checking created pod..."
-IDX=0
-DEADLINE=120
-for (( ; ; )) ; do
-    STATUS=$(KUBECONFIG="${KIND_KUBECONFIG}" kubectl get pods "${TEST_POD_NAME}" --namespace="${TEST_POD_NS}" -o 'jsonpath={..status.containerStatuses[0].state.running.startedAt}${..status.containerStatuses[0].state.waiting.reason}')
-    echo "Status: ${STATUS}"
-    STARTEDAT=$(echo "${STATUS}" | cut -f 1 -d '$')
-    if [ "${STARTEDAT}" != "" ] ; then
-        echo "Pod created"
-        break
-    elif [ ${IDX} -gt ${DEADLINE} ] ; then
-        echo "Deadline exeeded to wait for pod creation"
-        exit 1
-    fi
-    ((IDX+=1))
-    sleep 1
-done
-
-echo "Getting topmost layer from ${KIND_NODENAME}..."
-TARGET_CONTAINER=
-for (( RETRY=1; RETRY<=50; RETRY++ )) ; do
-    echo "[${RETRY}]Trying to get container id..."
-    TARGET_CONTAINER=$(docker exec -i "${KIND_NODENAME}" ctr-remote --namespace="k8s.io" c ls -q labels."io.kubernetes.container.name"=="${TEST_CONTAINER_NAME}" | sed -n 1p)
-    if [ "${TARGET_CONTAINER}" != "" ] ; then
-        break
-    fi
-    sleep 3
-done
-if [ "${TARGET_CONTAINER}" == "" ] ; then
-    echo "no container created for ${TESTIMAGE}"
-    docker exec -i "${KIND_NODENAME}" ctr-remote --namespace="k8s.io" c ls
+if ! ( cd "${CONTEXT}" && \
+           docker network create "${REGISTRY_NETWORK}" && \
+           docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
+           docker run --rm -i --network "${REGISTRY_NETWORK}" \
+                  -v "${AUTH_DIR}/certs/domain.crt:/usr/local/share/ca-certificates/rgst.crt:ro" \
+                  -v "${DOCKERCONFIG}:/root/.docker/config.json:ro" \
+                  -v "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro" \
+                  golang:1.13-buster /bin/bash -c "update-ca-certificates && cd /go/src/github.com/containerd/stargz-snapshotter && PREFIX=/out/ make ctr-remote && /out/ctr-remote images optimize --stargz-only ubuntu:18.04 ${TESTIMAGE}" ) ; then
+    echo "Failed to prepare private registry"
+    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+    docker network rm "${REGISTRY_NETWORK}"
     exit 1
-else
-    echo "container ${TARGET_CONTAINER} created for ${TESTIMAGE}"
 fi
-LAYER=$(docker exec -i "${KIND_NODENAME}" ctr-remote --namespace="k8s.io" \
-               c info "${TARGET_CONTAINER}" \
-            | jq -r '.SnapshotKey') # We don't check this *active* snapshot
 
-echo "Checking all layers being remote snapshots..."
-LAYERSNUM=0
-for (( ; ; )) ; do
-    LAYER=$(docker exec -i "${KIND_NODENAME}" ctr-remote --namespace="k8s.io" \
-                   snapshot --snapshotter=stargz info "${LAYER}" \
-                | jq -r '.Parent')
-    if [ "${LAYER}" == "null" ] ; then
-        break
-    elif [ ${LAYERSNUM} -gt 100 ] ; then
-        echo "testing image contains too many layes > 100"
-        exit 1
-    fi
-    ((LAYERSNUM+=1))
-    LABEL=$(docker exec -i "${KIND_NODENAME}" ctr-remote --namespace="k8s.io" \
-                   snapshots --snapshotter=stargz info "${LAYER}" \
-                | jq -r ".Labels.\"${REMOTE_SNAPSHOT_LABEL}\"")
-    echo "Checking layer ${LAYER} : ${LABEL}"
-    if [ "${LABEL}" == "null" ] ; then
-        echo "layer ${LAYER} isn't remote snapshot"
-        exit 1
-    fi
-done
+echo "Testing in kind cluster (kubeconfig: ${KIND_KUBECONFIG})..."
+FAIL=
+if ! ( "${CONTEXT}"/run-kind.sh "${KIND_CLUSTER_NAME}" \
+                 "${KIND_KUBECONFIG}" \
+                 "${AUTH_DIR}/certs/domain.crt" \
+                 "${REPO}" \
+                 "${REGISTRY_NETWORK}" \
+                 "${DOCKERCONFIG}" && \
+         echo "Waiting until secrets fullly synced..." && \
+         sleep 30 && \
+         echo "Trying to pull private image with secret..." && \
+         "${CONTEXT}"/create-pod.sh "$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sed -n 1p)" \
+                     "${KIND_KUBECONFIG}" "${TESTIMAGE}" ) ; then
+    FAIL=true
+fi
+docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+kind delete cluster --name "${KIND_CLUSTER_NAME}"
+docker network rm "${REGISTRY_NETWORK}"
 
-if [ ${LAYERSNUM} -eq 0 ] ; then
-    echo "cannot get layers"
+if [ "${FAIL}" == "true" ] ; then
     exit 1
 fi
 

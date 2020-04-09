@@ -26,7 +26,7 @@ RETRYNUM=100
 RETRYINTERVAL=1
 TIMEOUTSEC=180
 function retry {
-    SUCCESS=false
+    local SUCCESS=false
     for i in $(seq ${RETRYNUM}) ; do
         if eval "timeout ${TIMEOUTSEC} ${@}" ; then
             SUCCESS=true
@@ -43,7 +43,7 @@ function retry {
 }
 
 function prepare_context {
-    CONTEXT_DIR=$(mktemp -d)
+    local CONTEXT_DIR="${1}"
     cat <<EOF > "${CONTEXT_DIR}/Dockerfile"
 FROM scratch
 
@@ -89,7 +89,8 @@ update-ca-certificates
 retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 
 echo "Building sample image for testing..."
-prepare_context
+CONTEXT_DIR=$(mktemp -d)
+prepare_context "${CONTEXT_DIR}"
 
 echo "Preparing sample image..."
 tar zcv -C "${CONTEXT_DIR}" . \

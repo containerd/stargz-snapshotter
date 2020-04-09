@@ -16,11 +16,13 @@
 
 set -euo pipefail
 
-NODE_TEST_IMAGE_NAME="cri-integration-node-testimage"
-REGISTRY_HOST=registry-cri-validation
+CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REGISTRY_HOST="cri-registry"
+TEST_NODE_NAME="cri-testenv-container"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
-TEST_NODE_NAME=testenv_cri
 REMOTE_SNAPSHOT_FAILURE_LOG="failed to prepare remote snapshot"
+
+source "${CONTEXT}/const.sh"
 
 IMAGE_LIST="${1}"
 
@@ -45,10 +47,12 @@ trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3.3"
 services:
-  testenv:
+  cri-testenv-service:
     image: ${NODE_TEST_IMAGE_NAME}
     container_name: ${TEST_NODE_NAME}
     privileged: true
+    tmpfs:
+    - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse
     - type: volume
@@ -93,7 +97,7 @@ fi
 # Mirror and stargzify all images used in tests
 cat "${IMAGE_LIST}" | sort | uniq | while read IMAGE ; do
     MIRROR_URL="http://${REGISTRY_HOST}:5000"$(echo "${IMAGE}" | sed -E 's/^[^/]*//g' | sed -E 's/@.*//g')
-    STARGZIFY="ctr-remote images optimize --plain-http --stargz-only ${IMAGE} ${MIRROR_URL}"
+    STARGZIFY="ctr-remote images optimize --plain-http ${IMAGE} ${MIRROR_URL}"
     echo "Mirroring: ${STARGZIFY}"
     docker exec "${TEST_NODE_NAME}" /bin/bash -c "${STARGZIFY}"
 done

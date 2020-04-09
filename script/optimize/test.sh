@@ -16,23 +16,30 @@
 
 set -euo pipefail
 
+CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REPO="${CONTEXT}../../"
 REGISTRY_HOST=registry-optimize
 REPO_PATH=/go/src/github.com/containerd/stargz-snapshotter
+DUMMYUSER=dummyuser
+DUMMYPASS=dummypass
 
-if [ "${1}" == "" ]; then
-    echo "Repository path must be provided."
-    exit 1
-fi
+source "${REPO}/script/util/utils.sh"
 
-if [ "${2}" == "" ]; then
-    echo "Authentication-replated directory path must be provided."
-    exit 1
-fi
+DOCKER_COMPOSE_YAML=$(mktemp)
+AUTH_DIR=$(mktemp -d)
+function cleanup {
+    local ORG_EXIT_CODE="${1}"
+    rm "${DOCKER_COMPOSE_YAML}" || true
+    rm -rf "${AUTH_DIR}" || true
+    exit "${ORG_EXIT_CODE}"
+}
+trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
-REPO="${1}"
-AUTH="${2}"
+echo "Preparing creds..."
+prepare_creds "${AUTH_DIR}" "${REGISTRY_HOST}" "${DUMMYUSER}" "${DUMMYPASS}"
 
-cat <<EOF
+echo "Preparing docker-compose.yml..."
+cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3.3"
 services:
   docker_opt:
@@ -50,7 +57,7 @@ services:
       dockerd-entrypoint.sh
     volumes:
     - docker-client:/certs/client
-    - ${AUTH}:/registry:ro
+    - ${AUTH_DIR}:/registry:ro
   testenv_opt:
     build:
       context: "${REPO}/script/optimize/optimize"
@@ -67,7 +74,7 @@ services:
     - /tmp:exec,mode=777
     volumes:
     - "${REPO}:${REPO_PATH}:ro"
-    - ${AUTH}:/auth:ro
+    - ${AUTH_DIR}:/auth:ro
     - docker-client:/docker/client:ro
     - /dev/fuse:/dev/fuse
   registry:
@@ -80,7 +87,21 @@ services:
     - REGISTRY_HTTP_TLS_CERTIFICATE=/auth/certs/domain.crt
     - REGISTRY_HTTP_TLS_KEY=/auth/certs/domain.key
     volumes:
-    - ${AUTH}:/auth:ro
+    - ${AUTH_DIR}:/auth:ro
 volumes:
   docker-client:
 EOF
+
+echo "Testing..."
+FAIL=
+if ! ( cd "${CONTEXT}" && \
+           docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} testenv_opt && \
+           docker-compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
+    FAIL=true
+fi
+docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+if [ "${FAIL}" == "true" ] ; then
+    exit 1
+fi
+
+exit 0
