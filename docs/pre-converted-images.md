@@ -18,18 +18,18 @@ In the following table, `Image Name` column contains placeholders `{{ suffix }}`
 
 |Image Name|Optimized Workload|
 ---|---
-|`docker.io/ktokunaga/alpine:3.10.2-{{ suffix }}`|Executing `echo hello` on the shell|
-|`docker.io/ktokunaga/drupal:8.7.6-{{ suffix }}`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
-|`docker.io/ktokunaga/fedora:30-{{ suffix }}`|Executing `echo hello` on the shell|
-|`docker.io/ktokunaga/gcc:9.2.0-{{ suffix }}`|Compiling and executing a program which prints `hello`|
-|`docker.io/ktokunaga/glassfish:4.1-jdk8-{{ suffix }}`|Code execution until up and ready message (`Running GlassFish`) is printed|
-|`docker.io/ktokunaga/golang:1.12.9-{{ suffix }}`|Compiling and executing a program which prints `hello`|
-|`docker.io/ktokunaga/jenkins:2.60.3-{{ suffix }}`|Code execution until up and ready message (`Jenkins is fully up and running`) is printed|
-|`docker.io/ktokunaga/jruby:9.2.8.0-{{ suffix }}`|Printing `hello`|
-|`docker.io/ktokunaga/perl:5.30-{{ suffix }}`|Printing `hello`|
-|`docker.io/ktokunaga/php:7.3.8-{{ suffix }}`|Printing `hello`|
-|`docker.io/ktokunaga/pypy:3.5-{{ suffix }}`|Printing `hello`|
-|`docker.io/ktokunaga/python:3.7-{{ suffix }}`|Printing `hello`|
-|`docker.io/ktokunaga/r-base:3.6.1-{{ suffix }}`|Printing `hello`|
-|`docker.io/ktokunaga/redis:5.0.5-{{ suffix }}`|Code execution until up and ready message (`Ready to accept connections`) is printed|
-|`docker.io/ktokunaga/rethinkdb:2.3.6-{{ suffix }}`|Code execution until up and ready message (`Server ready`) is printed|
+|`docker.io/stargz/alpine:3.10.2-{{ suffix }}`|Executing `echo hello` on the shell|
+|`docker.io/stargz/drupal:8.7.6-{{ suffix }}`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`docker.io/stargz/fedora:30-{{ suffix }}`|Executing `echo hello` on the shell|
+|`docker.io/stargz/gcc:9.2.0-{{ suffix }}`|Compiling and executing a program which prints `hello`|
+|`docker.io/stargz/glassfish:4.1-jdk8-{{ suffix }}`|Code execution until up and ready message (`Running GlassFish`) is printed|
+|`docker.io/stargz/golang:1.12.9-{{ suffix }}`|Compiling and executing a program which prints `hello`|
+|`docker.io/stargz/jenkins:2.60.3-{{ suffix }}`|Code execution until up and ready message (`Jenkins is fully up and running`) is printed|
+|`docker.io/stargz/jruby:9.2.8.0-{{ suffix }}`|Printing `hello`|
+|`docker.io/stargz/perl:5.30-{{ suffix }}`|Printing `hello`|
+|`docker.io/stargz/php:7.3.8-{{ suffix }}`|Printing `hello`|
+|`docker.io/stargz/pypy:3.5-{{ suffix }}`|Printing `hello`|
+|`docker.io/stargz/python:3.7-{{ suffix }}`|Printing `hello`|
+|`docker.io/stargz/r-base:3.6.1-{{ suffix }}`|Printing `hello`|
+|`docker.io/stargz/redis:5.0.5-{{ suffix }}`|Code execution until up and ready message (`Ready to accept connections`) is printed|
+|`docker.io/stargz/rethinkdb:2.3.6-{{ suffix }}`|Code execution until up and ready message (`Server ready`) is printed|
