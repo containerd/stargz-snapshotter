@@ -7,7 +7,7 @@ jobs:
     name: HelloBench
     env:
       BENCHMARK_RESULT_DIR: ${{ github.workspace }}/benchmark/
-      BENCHMARK_USER: ktokunaga
+      BENCHMARK_USER: stargz
       BENCHMARK_TARGETS: python:3.7 gcc:9.2.0 rethinkdb:2.3.6 glassfish:4.1-jdk8
     steps:
     - name: Install gnuplot
