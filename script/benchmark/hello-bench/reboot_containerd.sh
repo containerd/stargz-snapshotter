@@ -28,7 +28,7 @@ RETRYNUM=30
 RETRYINTERVAL=1
 TIMEOUTSEC=180
 function retry {
-    SUCCESS=false
+    local SUCCESS=false
     for i in $(seq ${RETRYNUM}) ; do
         if eval "timeout ${TIMEOUTSEC} ${@}" ; then
             SUCCESS=true

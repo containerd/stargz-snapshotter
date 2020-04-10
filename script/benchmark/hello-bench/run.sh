@@ -40,15 +40,15 @@ function output {
 }
 
 function set_noprefetch {
-    NOPREFETCH="${1}"
+    local NOPREFETCH="${1}"
     sed -i 's/noprefetch = .*/noprefetch = '"${NOPREFETCH}"'/g' "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.stargz.toml"
 }
 
 NUM_OF_SUMPLES=1
 function measure {
-    NAME="${1}"
-    OPTION="${2}"
-    USER="${3}"
+    local NAME="${1}"
+    local OPTION="${2}"
+    local USER="${3}"
     output "\"${NAME}\": ["
     "${MEASURING_SCRIPT}" ${OPTION} --user=${USER} --op=run --experiments=${NUM_OF_SUMPLES} ${@:4}
     output "],"

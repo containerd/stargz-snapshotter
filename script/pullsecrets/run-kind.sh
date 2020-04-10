@@ -29,7 +29,7 @@ DOCKERCONFIGJSON_DATA="${6}"
 
 SN_KUBECONFIG=$(mktemp)
 function cleanup {
-    ORG_EXIT_CODE="${1}"
+    local ORG_EXIT_CODE="${1}"
     rm "${SN_KUBECONFIG}"
     exit "${ORG_EXIT_CODE}"
 }

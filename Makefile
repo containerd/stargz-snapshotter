@@ -22,7 +22,7 @@ CMD=containerd-stargz-grpc ctr-remote
 
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
 
-.PHONY: check build
+.PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-pullsecrets test-cri
 
 all: build
 
@@ -45,8 +45,8 @@ check:
 
 install-check-tools:
 	@curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.19.1
-	@go get -u github.com/vbatts/git-validation
-	@go get -u github.com/kunalkushwaha/ltag
+	@GO111MODULE=off go get -u github.com/vbatts/git-validation
+	@GO111MODULE=off go get -u github.com/kunalkushwaha/ltag
 	@git clone https://github.com/containerd/project $(GOPATH)/src/github.com/containerd/project
 
 install:
@@ -73,16 +73,16 @@ test-root:
 test-all: test-root test
 
 integration:
-	@./script/make.sh integration
+	@./script/integration/test.sh
 
 test-optimize:
-	@./script/make.sh test-optimize
+	@./script/optimize/test.sh
 
 benchmark:
-	@./script/make.sh benchmark
+	@./script/benchmark/test.sh
 
 test-pullsecrets:
-	@./script/make.sh test-pullsecrets
+	@./script/pullsecrets/test.sh
 
 test-cri:
-	@./script/make.sh test-cri
+	@./script/cri/test.sh

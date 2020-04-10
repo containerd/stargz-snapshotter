@@ -16,8 +16,10 @@
 
 set -euo pipefail
 
-NODE_TEST_IMAGE_NAME="cri-integration-node-testimage"
+CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
+
+source "${CONTEXT}/const.sh"
 
 IMAGE_LIST="${1}"
 

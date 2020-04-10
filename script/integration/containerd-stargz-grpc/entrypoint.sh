@@ -24,7 +24,7 @@ RETRYNUM=100
 RETRYINTERVAL=1
 TIMEOUTSEC=180
 function retry {
-    SUCCESS=false
+    local SUCCESS=false
     for i in $(seq ${RETRYNUM}) ; do
         if eval "timeout ${TIMEOUTSEC} ${@}" ; then
             SUCCESS=true
@@ -43,7 +43,7 @@ function retry {
 SSNAPSHOTD_PID=""  # what PID needs be killed on exit (PID of stargz snapshotter daemon).
 SSNAPSHOTD_ROOT=/var/lib/containerd-stargz-grpc/
 function cleanup {
-    ORG_EXIT_CODE="${1}"
+    local ORG_EXIT_CODE="${1}"
     if [[ "${SSNAPSHOTD_PID}" != "" ]] ; then
         kill -9 "${SSNAPSHOTD_PID}" || true
     fi
