@@ -94,7 +94,7 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *co
 		containerd.WithSchema1Conversion,
 		containerd.WithPullUnpack,
 		containerd.WithPullSnapshotter(remoteSnapshotterName),
-		containerd.WithImageHandlerWrapper(stargz.AppendInfoHandlerWrapper(ref)),
+		containerd.WithImageHandlerWrapper(stargz.AppendInfoHandlerWrapper(ref, 10*1024*1024)),
 	}...); err != nil {
 		return err
 	}

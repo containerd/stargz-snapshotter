@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	prefetchLandmarkContents = 0xf
+	landmarkContents = 0xf
 )
 
 func Sort(in io.ReaderAt, log []string) (io.Reader, error) {
@@ -46,14 +46,23 @@ func Sort(in io.ReaderAt, log []string) (io.Reader, error) {
 	for _, l := range log {
 		moveRec(l, intar, sorted)
 	}
-	if len(log) != 0 {
+	if len(log) == 0 {
+		sorted.add(&tarEntry{
+			header: &tar.Header{
+				Name:     reader.NoPrefetchLandmark,
+				Typeflag: tar.TypeReg,
+				Size:     int64(len([]byte{landmarkContents})),
+			},
+			payload: bytes.NewReader([]byte{landmarkContents}),
+		})
+	} else {
 		sorted.add(&tarEntry{
 			header: &tar.Header{
 				Name:     reader.PrefetchLandmark,
 				Typeflag: tar.TypeReg,
-				Size:     int64(len([]byte{prefetchLandmarkContents})),
+				Size:     int64(len([]byte{landmarkContents})),
 			},
-			payload: bytes.NewReader([]byte{prefetchLandmarkContents}),
+			payload: bytes.NewReader([]byte{landmarkContents}),
 		})
 	}
 
@@ -99,7 +108,7 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 				return nil, errors.Wrap(err, "failed to parse tar file")
 			}
 		}
-		if h.Name == reader.PrefetchLandmark {
+		if h.Name == reader.PrefetchLandmark || h.Name == reader.NoPrefetchLandmark {
 			// Ignore existing landmark
 			continue
 		}

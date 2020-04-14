@@ -39,7 +39,13 @@ import (
 )
 
 const (
+	// PrefetchLandmark is a file entry which indicates the end position of
+	// prefetch in the stargz file.
 	PrefetchLandmark = ".prefetch.landmark"
+
+	// NoPrefetchLandmark is a file entry which indicates that no prefetch should
+	// occur in the stargz file.
+	NoPrefetchLandmark = ".no.prefetch.landmark"
 )
 
 func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*Reader, *stargz.TOCEntry, error) {
@@ -87,20 +93,26 @@ func (gr *Reader) OpenFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *Reader) PrefetchWithReader(sr *io.SectionReader) error {
+func (gr *Reader) PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) error {
 	gr.prefetchInProgress = true
 	defer func() {
 		gr.prefetchInProgress = false
 		gr.prefetchCompletionCond.Broadcast()
 	}()
 
-	var prefetchSize int64
-	if e, ok := gr.r.Lookup(PrefetchLandmark); ok {
+	if _, ok := gr.r.Lookup(NoPrefetchLandmark); ok {
+		// do not prefetch this layer
+		return nil
+	} else if e, ok := gr.r.Lookup(PrefetchLandmark); ok {
+		// override the prefetch size with optimized value
 		if e.Offset > sr.Size() {
 			return fmt.Errorf("invalid landmark offset %d is larger than layer size %d",
 				e.Offset, sr.Size())
 		}
 		prefetchSize = e.Offset
+	} else if prefetchSize > sr.Size() {
+		// adjust prefetch size not to exceed the whole layer size
+		prefetchSize = sr.Size()
 	}
 
 	// Fetch specified range at once
@@ -155,8 +167,10 @@ func (gr *Reader) CacheTarGzWithReader(r io.Reader) error {
 			}
 			break
 		}
-		if h.Name == PrefetchLandmark || h.Name == stargz.TOCTarName {
-			// We don't need to cache PrefetchLandmark and TOC json file.
+		if h.Name == PrefetchLandmark ||
+			h.Name == NoPrefetchLandmark ||
+			h.Name == stargz.TOCTarName {
+			// We don't need to cache prefetch landmarks and TOC json file.
 			continue
 		}
 		fe, ok := gr.r.Lookup(strings.TrimSuffix(h.Name, "/"))
@@ -180,7 +194,7 @@ func (gr *Reader) CacheTarGzWithReader(r io.Reader) error {
 
 				// Cache this chunk (offset: ce.ChunkOffset, size: ce.ChunkSize)
 				if _, err := io.ReadFull(tr, data); err != nil && err != io.EOF {
-					return errors.Wrap(err, "failed to read data")
+					return err
 				}
 				gr.cache.Add(id, data)
 			}
