@@ -49,11 +49,12 @@ FROM scratch
 
 COPY ./a.txt ./b.txt accessor /
 COPY ./c.txt ./d.txt /
+COPY ./e.txt /
 
 ENTRYPOINT ["/accessor"]
 
 EOF
-    for SAMPLE in "a" "b" "c" "d" ; do
+    for SAMPLE in "a" "b" "c" "d" "e" ; do
         echo "${SAMPLE}" > "${CONTEXT_DIR}/${SAMPLE}.txt"
     done
     mkdir -p "${GOPATH}/src/test/test" && \
@@ -105,26 +106,35 @@ PREFIX=/tmp/out/ make clean && \
 
 echo "Downloading optimized image..."
 docker pull "${OPT_IMAGE_TAG}" && docker save "${OPT_IMAGE_TAG}" | tar xv -C "${WORKING_DIR}"
-BASE_LAYER="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[0]')"
-UPPER_LAYER="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[1]')"
-tar --list -f "${BASE_LAYER}" | tee "${WORKING_DIR}/base-got" && \
-    tar --list -f "${UPPER_LAYER}" | tee "${WORKING_DIR}/upper-got"
-cat <<EOF > "${WORKING_DIR}/base-want"
+LAYER_0="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[0]')"
+LAYER_1="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[1]')"
+LAYER_2="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[2]')"
+tar --list -f "${LAYER_0}" | tee "${WORKING_DIR}/0-got" && \
+    tar --list -f "${LAYER_1}" | tee "${WORKING_DIR}/1-got" && \
+    tar --list -f "${LAYER_2}" | tee "${WORKING_DIR}/2-got"
+cat <<EOF > "${WORKING_DIR}/0-want"
 accessor
 a.txt
 .prefetch.landmark
 b.txt
 stargz.index.json
 EOF
-cat <<EOF > "${WORKING_DIR}/upper-want"
+cat <<EOF > "${WORKING_DIR}/1-want"
 c.txt
 .prefetch.landmark
 d.txt
 stargz.index.json
 EOF
-echo "Validating tarball contents of base layer..."
-diff "${WORKING_DIR}/base-got" "${WORKING_DIR}/base-want"
-echo "Validating tarball contents of upper layer..."
-diff "${WORKING_DIR}/upper-got" "${WORKING_DIR}/upper-want"
+cat <<EOF > "${WORKING_DIR}/2-want"
+.no.prefetch.landmark
+e.txt
+stargz.index.json
+EOF
+echo "Validating tarball contents of layer 0 (base layer)..."
+diff "${WORKING_DIR}/0-got" "${WORKING_DIR}/0-want"
+echo "Validating tarball contents of layer 1..."
+diff "${WORKING_DIR}/1-got" "${WORKING_DIR}/1-want"
+echo "Validating tarball contents of layer 2..."
+diff "${WORKING_DIR}/2-got" "${WORKING_DIR}/2-want"
 
 exit 0

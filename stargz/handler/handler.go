@@ -18,21 +18,23 @@ package handler
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/containerd/containerd/images"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 const (
-	TargetRefLabel    = "containerd.io/snapshot/remote/stargz.reference"
-	TargetDigestLabel = "containerd.io/snapshot/remote/stargz.digest"
+	TargetRefLabel          = "containerd.io/snapshot/remote/stargz.reference"
+	TargetDigestLabel       = "containerd.io/snapshot/remote/stargz.digest"
+	TargetPrefetchSizeLabel = "containerd.io/snapshot/remote/stargz.prefetch" // optional
 )
 
 // AppendInfoHandlerWrapper makes a handler which appends image's basic
 // information to each layer descriptor as annotations during unpack. These
 // annotations will be passed to this remote snapshotter as labels and used by
 // this filesystem for searching/preparing layers.
-func AppendInfoHandlerWrapper(ref string) func(f images.Handler) images.Handler {
+func AppendInfoHandlerWrapper(ref string, prefetchSize int64) func(f images.Handler) images.Handler {
 	return func(f images.Handler) images.Handler {
 		return images.HandlerFunc(func(ctx context.Context, desc ocispec.Descriptor) ([]ocispec.Descriptor, error) {
 			children, err := f.Handle(ctx, desc)
@@ -49,6 +51,7 @@ func AppendInfoHandlerWrapper(ref string) func(f images.Handler) images.Handler 
 						}
 						c.Annotations[TargetRefLabel] = ref
 						c.Annotations[TargetDigestLabel] = c.Digest.String()
+						c.Annotations[TargetPrefetchSizeLabel] = fmt.Sprintf("%d", prefetchSize)
 					}
 				}
 			}

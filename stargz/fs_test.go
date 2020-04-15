@@ -275,6 +275,18 @@ func TestExistence(t *testing.T) {
 			},
 		},
 		{
+			name: "no_prefetch_landmark",
+			in: []tarent{
+				regfile(reader.NoPrefetchLandmark, "test"),
+				directory("foo/"),
+				regfile(fmt.Sprintf("foo/%s", reader.NoPrefetchLandmark), "test"),
+			},
+			want: []check{
+				fileNotExist(reader.NoPrefetchLandmark),
+				hasFileDigest(fmt.Sprintf("foo/%s", reader.NoPrefetchLandmark), digestFor("test")),
+			},
+		},
+		{
 			name: "state_file",
 			in: []tarent{
 				regfile("test", "test"),

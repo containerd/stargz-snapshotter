@@ -48,6 +48,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -87,6 +88,7 @@ type Config struct {
 	HTTPCacheType                     string                           `toml:"http_cache_type"`
 	FSCacheType                       string                           `toml:"filesystem_cache_type"`
 	LRUCacheEntry                     int                              `toml:"lru_max_entry"`
+	PrefetchSize                      int64                            `toml:"prefetch_size"`
 	NoPrefetch                        bool                             `toml:"noprefetch"`
 	Debug                             bool                             `toml:"debug"`
 }
@@ -113,6 +115,7 @@ func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.Fil
 		blobConfig:            config.BlobConfig,
 		httpCache:             httpCache,
 		fsCache:               fsCache,
+		prefetchSize:          config.PrefetchSize,
 		noprefetch:            config.NoPrefetch,
 		debug:                 config.Debug,
 		blobInfo:              make(map[string]blobInfo),
@@ -140,6 +143,7 @@ type filesystem struct {
 	blobConfig            remote.BlobConfig
 	httpCache             cache.BlobCache
 	fsCache               cache.BlobCache
+	prefetchSize          int64
 	noprefetch            bool
 	debug                 bool
 	blobInfo              map[string]blobInfo
@@ -207,6 +211,12 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// Check() for this layer waits for the prefetch completion. We recreate
 	// RoundTripper to avoid disturbing other NW-related operations.
 	if !fs.noprefetch {
+		prefetchSize := fs.prefetchSize
+		if prefetchSizeStr, ok := labels[handler.TargetPrefetchSizeLabel]; ok {
+			if size, err := strconv.ParseInt(prefetchSizeStr, 10, 64); err == nil {
+				prefetchSize = size
+			}
+		}
 		go func() {
 			pr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (int, error) {
 				fs.backgroundTaskManager.DoPrioritizedTask()
@@ -218,7 +228,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 				}
 				return blob.ReadAt(p, offset, remote.WithRoundTripper(tr))
 			}), 0, blob.Size())
-			if err := gr.PrefetchWithReader(pr); err != nil {
+			if err := gr.PrefetchWithReader(pr, prefetchSize); err != nil {
 				logCtx.WithError(err).Debug("failed to prefetch layer")
 				return
 			}
@@ -373,8 +383,8 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	normalEnts := map[string]bool{}
 	n.e.ForeachChild(func(baseName string, ent *stargz.TOCEntry) bool {
 
-		// We don't want to show prefetch landmark in "/".
-		if n.e.Name == "" && baseName == reader.PrefetchLandmark {
+		// We don't want to show prefetch landmarks in "/".
+		if n.e.Name == "" && (baseName == reader.PrefetchLandmark || baseName == reader.NoPrefetchLandmark) {
 			return true
 		}
 
@@ -424,8 +434,8 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 		return c, fuse.OK
 	}
 
-	// We don't want to show prefetch landmark in "/".
-	if n.e.Name == "" && name == reader.PrefetchLandmark {
+	// We don't want to show prefetch landmarks in "/".
+	if n.e.Name == "" && (name == reader.PrefetchLandmark || name == reader.NoPrefetchLandmark) {
 		return nil, fuse.ENOENT
 	}
 

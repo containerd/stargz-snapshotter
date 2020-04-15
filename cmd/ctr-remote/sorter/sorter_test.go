@@ -54,6 +54,7 @@ func TestSort(t *testing.T) {
 				regfile("bar/bar.txt", "bar"),
 			},
 			want: []tarent{
+				noPrefetchLandmark(),
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/baz.txt", "baz"),
@@ -74,7 +75,7 @@ func TestSort(t *testing.T) {
 				regfile("foo.txt", "foo"),
 				directory("bar/"),
 				regfile("bar/baz.txt", "baz"),
-				landmark(),
+				prefetchLandmark(),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
 			},
@@ -92,7 +93,7 @@ func TestSort(t *testing.T) {
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				regfile("baz.txt", "baz"),
-				landmark(),
+				prefetchLandmark(),
 				regfile("foo.txt", "foo"),
 			},
 		},
@@ -117,7 +118,7 @@ func TestSort(t *testing.T) {
 				regfile("baz/bazbaz/bazbaz_a.txt", "baz"),
 				regfile("baz/baz2.txt", "baz"),
 				regfile("foo.txt", "foo"),
-				landmark(),
+				prefetchLandmark(),
 				directory("bar/"),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
@@ -136,7 +137,7 @@ func TestSort(t *testing.T) {
 			log: []string{"baz.txt"},
 			want: []tarent{
 				regfile("baz.txt", "baz"),
-				landmark(),
+				prefetchLandmark(),
 				regfile("foo.txt", "foo"),
 				hardlink("bar.txt", "baz.txt"),
 				regfile("baa.txt", "baa"),
@@ -157,7 +158,7 @@ func TestSort(t *testing.T) {
 				directory("bar/"),
 				regfile(fmt.Sprintf("bar/%s", longname2), "test2"),
 				regfile(longname1, "test"),
-				landmark(),
+				prefetchLandmark(),
 				regfile("foo.txt", "foo"),
 				regfile("bar/bar.txt", "bar"),
 				regfile("bar/baa.txt", "baa"),
@@ -178,7 +179,7 @@ func TestSort(t *testing.T) {
 				symlink("foo2", "foo.txt"),
 				regfile("foo.txt", "foo"),
 				devblock("fooblock", 15, 20),
-				landmark(),
+				prefetchLandmark(),
 				devchar("foochar", 10, 50),
 			},
 		},
@@ -188,14 +189,14 @@ func TestSort(t *testing.T) {
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				regfile("baz.txt", "baz"),
-				landmark(),
+				prefetchLandmark(),
 				regfile("foo.txt", "foo"),
 			},
 			log: []string{"foo.txt", "bar.txt"},
 			want: []tarent{
 				regfile("foo.txt", "foo"),
 				regfile("bar.txt", "bar"),
-				landmark(),
+				prefetchLandmark(),
 				regfile("baa.txt", "baa"),
 				regfile("baz.txt", "baz"),
 			},
@@ -206,10 +207,46 @@ func TestSort(t *testing.T) {
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				regfile("baz.txt", "baz"),
-				landmark(),
+				prefetchLandmark(),
 				regfile("foo.txt", "foo"),
 			},
 			want: []tarent{
+				noPrefetchLandmark(),
+				regfile("baa.txt", "baa"),
+				regfile("bar.txt", "bar"),
+				regfile("baz.txt", "baz"),
+				regfile("foo.txt", "foo"),
+			},
+		},
+		{
+			name: "existing_noprefetch_landmark",
+			in: []tarent{
+				noPrefetchLandmark(),
+				regfile("baa.txt", "baa"),
+				regfile("bar.txt", "bar"),
+				regfile("baz.txt", "baz"),
+				regfile("foo.txt", "foo"),
+			},
+			log: []string{"foo.txt", "bar.txt"},
+			want: []tarent{
+				regfile("foo.txt", "foo"),
+				regfile("bar.txt", "bar"),
+				prefetchLandmark(),
+				regfile("baa.txt", "baa"),
+				regfile("baz.txt", "baz"),
+			},
+		},
+		{
+			name: "existing_noprefetch_landmark_nolog",
+			in: []tarent{
+				noPrefetchLandmark(),
+				regfile("baa.txt", "baa"),
+				regfile("bar.txt", "bar"),
+				regfile("baz.txt", "baz"),
+				regfile("foo.txt", "foo"),
+			},
+			want: []tarent{
+				noPrefetchLandmark(),
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
 				regfile("baz.txt", "baz"),
@@ -228,7 +265,7 @@ func TestSort(t *testing.T) {
 			want: []tarent{
 				regfile("baa.txt", "baa"),
 				regfile("bar.txt", "bar"),
-				landmark(),
+				prefetchLandmark(),
 				regfile("foo.txt", "foo"),
 				regfile("baz.txt", "baz"),
 			},
@@ -371,14 +408,25 @@ type tarent struct {
 	contents []byte
 }
 
-func landmark() tarent {
+func prefetchLandmark() tarent {
 	return tarent{
 		header: &tar.Header{
 			Name:     reader.PrefetchLandmark,
 			Typeflag: tar.TypeReg,
-			Size:     int64(len([]byte{prefetchLandmarkContents})),
+			Size:     int64(len([]byte{landmarkContents})),
 		},
-		contents: []byte{prefetchLandmarkContents},
+		contents: []byte{landmarkContents},
+	}
+}
+
+func noPrefetchLandmark() tarent {
+	return tarent{
+		header: &tar.Header{
+			Name:     reader.NoPrefetchLandmark,
+			Typeflag: tar.TypeReg,
+			Size:     int64(len([]byte{landmarkContents})),
+		},
+		contents: []byte{landmarkContents},
 	}
 }
 
