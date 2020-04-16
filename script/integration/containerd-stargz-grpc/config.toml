@@ -1,3 +1,0 @@
-[[resolver."registry-alt:5000".mirrors]]
-host = "registry-alt:5000"
-insecure = true

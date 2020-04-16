@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
+	"github.com/containerd/stargz-snapshotter/stargz/remote"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
 	"github.com/hanwen/go-fuse/fuse"
@@ -58,7 +59,7 @@ const (
 func TestCheck(t *testing.T) {
 	br := &breakRemoteInfo{}
 	fs := &filesystem{
-		blobInfo: map[string]blobInfo{
+		blob: map[string]remote.Blob{
 			"test": br,
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
@@ -78,6 +79,10 @@ type breakRemoteInfo struct {
 	success bool
 }
 
+func (r *breakRemoteInfo) Authn(tr http.RoundTripper) (http.RoundTripper, error) {
+	return nil, nil
+}
+
 func (r *breakRemoteInfo) Size() int64 {
 	return 10
 }
@@ -91,6 +96,10 @@ func (r *breakRemoteInfo) Check() error {
 		return fmt.Errorf("failed")
 	}
 	return nil
+}
+
+func (r *breakRemoteInfo) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
+	return 0, nil
 }
 
 // Tests Read method of each file node.
@@ -371,6 +380,14 @@ func (tl *testLayer) OpenFile(name string) (io.ReaderAt, error) {
 }
 
 type dummyRemoteInfo struct{}
+
+func (ri *dummyRemoteInfo) Authn(tr http.RoundTripper) (http.RoundTripper, error) {
+	return nil, nil
+}
+
+func (ri *dummyRemoteInfo) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
+	return 0, nil
+}
 
 func (ri *dummyRemoteInfo) Size() int64 {
 	return 10
