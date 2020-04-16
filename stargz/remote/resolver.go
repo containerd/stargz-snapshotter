@@ -24,9 +24,12 @@ package remote
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -81,8 +84,62 @@ type Resolver struct {
 	config    map[string]ResolverConfig
 }
 
-func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config BlobConfig) (*Blob, error) {
-	// Get blob information
+func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config BlobConfig) (Blob, error) {
+	fetcher, size, err := r.resolve(ref, digest)
+	if err != nil {
+		return nil, err
+	}
+	var (
+		chunkSize     int64
+		checkInterval time.Duration
+	)
+	chunkSize = config.ChunkSize
+	if chunkSize == 0 { // zero means "use default chunk size"
+		chunkSize = defaultChunkSize
+	}
+	if config.ValidInterval == 0 { // zero means "use default interval"
+		checkInterval = defaultValidInterval
+	} else {
+		checkInterval = time.Duration(config.ValidInterval) * time.Second
+	}
+	if config.CheckAlways {
+		checkInterval = 0
+	}
+	return &blob{
+		fetcher:       fetcher,
+		size:          size,
+		keychain:      r.keychain,
+		chunkSize:     chunkSize,
+		cache:         cache,
+		lastCheck:     time.Now(),
+		checkInterval: checkInterval,
+	}, nil
+}
+
+func (r *Resolver) Refresh(target Blob) error {
+	b, ok := target.(*blob)
+	if !ok {
+		return fmt.Errorf("invalid type of blob. must be *blob")
+	}
+
+	// refresh the fetcher
+	b.fetcherMu.Lock()
+	defer b.fetcherMu.Unlock()
+	new, newSize, err := b.fetcher.refresh()
+	if err != nil {
+		return err
+	} else if newSize != b.size {
+		return fmt.Errorf("Invalid size of new blob %d; want %d", newSize, b.size)
+	}
+
+	// update the blob's fetcher with new one
+	b.fetcher = new
+	b.lastCheck = time.Now()
+
+	return nil
+}
+
+func (r *Resolver) resolve(ref, digest string) (*fetcher, int64, error) {
 	var (
 		nref name.Reference
 		url  string
@@ -91,12 +148,12 @@ func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config Blo
 	)
 	named, err := docker.ParseDockerRef(ref)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	hosts := append(r.config[docker.Domain(named)].Mirrors, MirrorConfig{
 		Host: docker.Domain(named),
 	})
-	var rErr error
+	rErr := fmt.Errorf("failed to resolve")
 	for _, h := range hosts {
 		// Parse reference
 		if h.Host == "" || strings.Contains(h.Host, "/") {
@@ -145,38 +202,17 @@ func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config Blo
 		break
 	}
 	if rErr != nil {
-		return nil, errors.Wrapf(rErr, "cannot resolve ref %q (%q)", ref, digest)
+		return nil, 0, errors.Wrapf(rErr, "cannot resolve ref %q (%q)", ref, digest)
 	}
 
-	// Configure the connection
-	var (
-		chunkSize     int64
-		checkInterval time.Duration
-	)
-	chunkSize = config.ChunkSize
-	if chunkSize == 0 { // zero means "use default chunk size"
-		chunkSize = defaultChunkSize
-	}
-	if config.ValidInterval == 0 { // zero means "use default interval"
-		checkInterval = defaultValidInterval
-	} else {
-		checkInterval = time.Duration(config.ValidInterval) * time.Second
-	}
-	if config.CheckAlways {
-		checkInterval = 0
-	}
-
-	return &Blob{
-		ref:           nref,
-		keychain:      r.keychain,
-		url:           url,
-		tr:            tr,
-		size:          size,
-		chunkSize:     chunkSize,
-		cache:         cache,
-		checkInterval: checkInterval,
-		lastCheck:     time.Now(),
-	}, nil
+	return &fetcher{
+		resolver: r,
+		ref:      ref,
+		digest:   digest,
+		nref:     nref,
+		url:      url,
+		tr:       tr,
+	}, size, nil
 }
 
 func (r *Resolver) resolveReference(ref name.Reference, digest string) (string, error) {
@@ -214,7 +250,7 @@ func (r *Resolver) resolveReference(ref name.Reference, digest string) (string, 
 }
 
 func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// We use GET request for GCR.
@@ -248,7 +284,7 @@ func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) 
 }
 
 func getSize(url string, tr http.RoundTripper) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
@@ -271,9 +307,197 @@ func authnTransport(ref name.Reference, tr http.RoundTripper, keychain authn.Key
 	if keychain == nil {
 		keychain = authn.DefaultKeychain
 	}
-	auth, err := keychain.Resolve(ref.Context())
+	authn, err := keychain.Resolve(ref.Context())
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to resolve the reference %q", ref)
 	}
-	return transport.New(ref.Context().Registry, auth, tr, []string{ref.Scope(transport.PullScope)})
+	errCh := make(chan error)
+	var rTr http.RoundTripper
+	go func() {
+		rTr, err = transport.New(
+			ref.Context().Registry,
+			authn,
+			tr,
+			[]string{ref.Scope(transport.PullScope)},
+		)
+		errCh <- err
+	}()
+	select {
+	case err = <-errCh:
+	case <-time.After(10 * time.Second):
+		return nil, fmt.Errorf("authentication timeout")
+	}
+	return rTr, err
+}
+
+type fetcher struct {
+	resolver *Resolver
+	ref      string
+	digest   string
+	nref     name.Reference
+	url      string
+	tr       http.RoundTripper
+}
+
+func (f *fetcher) refresh() (*fetcher, int64, error) {
+	return f.resolver.resolve(f.ref, f.digest)
+}
+
+func (f *fetcher) fetch(requests []region, opts ...Option) (map[region][]byte, error) {
+	var (
+		remoteData  = map[region][]byte{}
+		opt         = options{}
+		tr          = f.tr
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+	)
+	defer cancel()
+	for _, o := range opts {
+		o(&opt)
+	}
+	if opt.ctx != nil {
+		ctx = opt.ctx
+	}
+	if opt.tr != nil {
+		tr = opt.tr
+	}
+	req, err := http.NewRequest("GET", f.url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	ranges := "bytes=0-0," // dummy range to make sure the response to be multipart
+	for _, reg := range requests {
+		ranges += fmt.Sprintf("%d-%d,", reg.b, reg.e)
+	}
+	req.Header.Add("Range", ranges[:len(ranges)-1])
+	req.Header.Add("Accept-Encoding", "identity")
+	req.Close = false
+	res, err := tr.RoundTrip(req) // NOT DefaultClient; don't want redirects
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to request to %q", f.url)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
+		return nil, fmt.Errorf("unexpected status code on %q: %v", f.url, res.Status)
+	}
+
+	if res.StatusCode == http.StatusOK {
+		// We are getting the whole blob in one part (= status 200)
+		data, err := ioutil.ReadAll(res.Body) // TODO: chunk data for saving memory
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to read response body from %q", f.url)
+		}
+		size, err := strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse Content-Length for %q", f.url)
+		}
+		if int64(len(data)) != size {
+			return nil, errors.Wrapf(err, "broken response body:got size %d; want %d for %q",
+				len(data), size, f.url)
+		}
+		remoteData[region{0, size - 1}] = data
+		return remoteData, nil
+	}
+
+	// We are getting a set of chunk as a multipart body.
+	mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
+		return nil, errors.Wrapf(err, "invalid media type %q for %q", mediaType, f.url)
+	}
+	mr := multipart.NewReader(res.Body, params["boundary"])
+	mr.NextPart() // Drop the dummy range.
+	for {
+		p, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, errors.Wrapf(err, "failed to read multipart response from %q", f.url)
+		}
+		reg, err := parseRange(p.Header.Get("Content-Range"))
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse Content-Range in %q", f.url)
+		}
+		data, err := ioutil.ReadAll(p)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to read multipart data on %q", f.url)
+		}
+		if int64(len(data)) != reg.size() {
+			return nil, errors.Wrapf(err, "broken partial body:got size %d; want %d for %q",
+				len(data), reg.size(), f.url)
+
+		}
+		remoteData[reg] = data
+	}
+
+	return remoteData, nil
+}
+
+func (f *fetcher) check() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequest("GET", f.url, nil)
+	if err != nil {
+		return errors.Wrapf(err, "check failed: failed to make request for %q", f.url)
+	}
+	req = req.WithContext(ctx)
+	req.Close = false
+	req.Header.Set("Range", "bytes=0-1")
+	res, err := f.tr.RoundTrip(req)
+	if err != nil {
+		return errors.Wrapf(err, "check failed: failed to request to registry %q", f.url)
+	}
+	defer func() {
+		io.Copy(ioutil.Discard, res.Body)
+		res.Body.Close()
+	}()
+	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("unexpected status code %v for %q", res.StatusCode, f.url)
+	}
+
+	return nil
+}
+
+func (f *fetcher) authn(tr http.RoundTripper, keychain authn.Keychain) (http.RoundTripper, error) {
+	return authnTransport(f.nref, tr, keychain)
+}
+
+func (f *fetcher) genID(reg region) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.url, reg.b, reg.e)))
+	return fmt.Sprintf("%x", sum)
+}
+
+func parseRange(header string) (region, error) {
+	submatches := contentRangeRegexp.FindStringSubmatch(header)
+	if len(submatches) < 4 {
+		return region{}, fmt.Errorf("Content-Range %q doesn't have enough information", header)
+	}
+	begin, err := strconv.ParseInt(submatches[1], 10, 64)
+	if err != nil {
+		return region{}, errors.Wrapf(err, "failed to parse beginning offset %q", submatches[1])
+	}
+	end, err := strconv.ParseInt(submatches[2], 10, 64)
+	if err != nil {
+		return region{}, errors.Wrapf(err, "failed to parse end offset %q", submatches[2])
+	}
+
+	return region{begin, end}, nil
+}
+
+type Option func(*options)
+
+type options struct {
+	ctx context.Context
+	tr  http.RoundTripper
+}
+
+func WithContext(ctx context.Context) Option {
+	return func(opts *options) {
+		opts.ctx = ctx
+	}
+}
+
+func WithRoundTripper(tr http.RoundTripper) Option {
+	return func(opts *options) {
+		opts.tr = tr
+	}
 }

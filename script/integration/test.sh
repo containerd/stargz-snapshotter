@@ -19,8 +19,8 @@ set -euo pipefail
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
 REGISTRY_HOST=registry-integration
+REGISTRY_ALT_HOST=registry-alt
 CONTAINERD_NODE=testenv_integration
-SNAPSHOTTER_NODE=stargz_snapshotter_integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
@@ -43,7 +43,7 @@ prepare_creds "${AUTH_DIR}" "${REGISTRY_HOST}" "${DUMMYUSER}" "${DUMMYPASS}"
 
 echo "Preparing docker-compose.yml..."
 cat <<EOF > "${DOCKER_COMPOSE_YAML}"
-version: "3"
+version: "3.3"
 services:
   ${CONTAINERD_NODE}:
     build:
@@ -54,41 +54,32 @@ services:
     working_dir: /go/src/github.com/containerd/stargz-snapshotter
     entrypoint: ./script/integration/containerd/entrypoint.sh
     environment:
-    - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000
+    - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000,${REGISTRY_ALT_HOST}:5000
     - HTTP_PROXY=${HTTP_PROXY:-}
     - HTTPS_PROXY=${HTTPS_PROXY:-}
     - http_proxy=${http_proxy:-}
     - https_proxy=${https_proxy:-}
     tmpfs:
-    - /var/lib/containerd
     - /tmp:exec,mode=777
     volumes:
     - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
     - ${AUTH_DIR}:/auth
-    - "${SS_ROOT_DIR}:/var/lib/containerd-stargz-grpc:rshared"
-    - ssstate:/run/containerd-stargz-grpc
-  ${SNAPSHOTTER_NODE}:
-    build:
-      context: "${CONTEXT}containerd-stargz-grpc"
-      dockerfile: Dockerfile
-    container_name: remote_snapshotter_integration
-    privileged: true
-    working_dir: /go/src/github.com/containerd/stargz-snapshotter
-    entrypoint: ./script/integration/containerd-stargz-grpc/entrypoint.sh
-    environment:
-    - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000
-    - HTTP_PROXY=${HTTP_PROXY:-}
-    - HTTPS_PROXY=${HTTPS_PROXY:-}
-    - http_proxy=${http_proxy:-}
-    - https_proxy=${https_proxy:-}
-    tmpfs:
-    - /tmp:exec,mode=777
-    volumes:
-    - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
-    - "${AUTH_DIR}:/auth"
-    - "${SS_ROOT_DIR}:/var/lib/containerd-stargz-grpc:rshared"
-    - ssstate:/run/containerd-stargz-grpc
     - /dev/fuse:/dev/fuse
+    - type: volume
+      source: containerd-data
+      target: /var/lib/containerd
+      volume:
+        nosuid: false
+    - type: volume
+      source: containerd-stargz-grpc-data
+      target: /var/lib/containerd-stargz-grpc
+      volume:
+        nosuid: false
+    - type: volume
+      source: containerd-stargz-grpc-status
+      target: /run/containerd-stargz-grpc
+      volume:
+        nosuid: false
   registry:
     image: registry:2
     container_name: ${REGISTRY_HOST}
@@ -108,14 +99,16 @@ services:
     image: registry:2
     container_name: registry-alt
 volumes:
-  ssstate:
+  containerd-data:
+  containerd-stargz-grpc-data:
+  containerd-stargz-grpc-status:
 EOF
 
 echo "Testing..."
 FAIL=
 if ! ( cd "${CONTEXT}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} \
-                          "${CONTAINERD_NODE}" "${SNAPSHOTTER_NODE}" && \
+                          "${CONTAINERD_NODE}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
     FAIL=true
 fi

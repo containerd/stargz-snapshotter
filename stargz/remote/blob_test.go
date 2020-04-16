@@ -31,7 +31,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,23 +47,6 @@ const (
 	sampleData1        = "0123456789"
 	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
 )
-
-func TestCheckWithRoundTripper(t *testing.T) {
-	tr := &breakRoundTripper{}
-	ur := &Blob{
-		url: "test",
-		tr:  tr,
-	}
-	tr.success = true
-	if err := ur.Check(); err != nil {
-		t.Errorf("connection failed; wanted to succeed")
-	}
-
-	tr.success = false
-	if err := ur.Check(); err == nil {
-		t.Errorf("connection succeeded; wanted to fail")
-	}
-}
 
 // Tests ReadAt method of each file.
 func TestReadAt(t *testing.T) {
@@ -130,7 +112,7 @@ func TestReadAt(t *testing.T) {
 							blob := []byte(sampleData1)[:blobsize]
 							r := makeBlob(t, blob, sampleChunkSize, multiRoundTripper(t, blob, cacheExcept...))
 							for _, reg := range cacheExcept {
-								r.cache.Add(r.genID(reg), []byte(sampleData1[reg.b:reg.e+1]))
+								r.cache.Add(r.fetcher.genID(reg), []byte(sampleData1[reg.b:reg.e+1]))
 							}
 							respData := make([]byte, size)
 							n, err := r.ReadAt(respData, offset)
@@ -150,7 +132,7 @@ func TestReadAt(t *testing.T) {
 							cn := 0
 							whole := region{floor(offset, r.chunkSize), ceil(offset+size-1, r.chunkSize) - 1}
 							if err := r.walkChunks(whole, func(reg region) error {
-								data, err := r.cache.Fetch(r.genID(reg))
+								data, err := r.cache.Fetch(r.fetcher.genID(reg))
 								if err != nil || int64(len(data)) != reg.size() {
 									return fmt.Errorf("missed cache of region={%d,%d}(size=%d): %v(got size=%d)", reg.b, reg.e, reg.size(), err, n)
 								}
@@ -204,70 +186,15 @@ func TestFailReadAt(t *testing.T) {
 	}
 }
 
-func makeBlob(t *testing.T, contents []byte, chunkSize int64, fn RoundTripFunc) *Blob {
-	return &Blob{
-		url:       testURL,
-		tr:        fn,
+func makeBlob(t *testing.T, contents []byte, chunkSize int64, fn RoundTripFunc) *blob {
+	return &blob{
+		fetcher: &fetcher{
+			url: testURL,
+			tr:  fn,
+		},
 		size:      int64(len(contents)),
 		chunkSize: chunkSize,
 		cache:     &testCache{membuf: map[string]string{}, t: t},
-	}
-}
-
-func TestRegionSet(t *testing.T) {
-	tests := []struct {
-		input    []region
-		expected []region
-	}{
-		{
-			input:    []region{{1, 3}, {2, 4}},
-			expected: []region{{1, 4}},
-		},
-		{
-			input:    []region{{1, 5}, {2, 4}},
-			expected: []region{{1, 5}},
-		},
-		{
-			input:    []region{{2, 4}, {1, 5}},
-			expected: []region{{1, 5}},
-		},
-		{
-			input:    []region{{2, 4}, {6, 8}, {1, 5}},
-			expected: []region{{1, 5}, {6, 8}},
-		},
-		{
-			input:    []region{{1, 2}, {1, 2}},
-			expected: []region{{1, 2}},
-		},
-		{
-			input:    []region{{1, 3}, {1, 2}},
-			expected: []region{{1, 3}},
-		},
-		{
-			input:    []region{{1, 3}, {2, 3}},
-			expected: []region{{1, 3}},
-		},
-		{
-			input:    []region{{1, 3}, {3, 6}},
-			expected: []region{{1, 6}},
-		},
-		{
-			input:    []region{{1, 3}, {4, 6}}, // region.e is inclusive
-			expected: []region{{1, 6}},
-		},
-		{
-			input:    []region{{4, 6}, {1, 3}}, // region.e is inclusive
-			expected: []region{{1, 6}},
-		},
-	}
-	for i, tt := range tests {
-		var rs regionSet
-		for _, f := range tt.input {
-			rs.add(f)
-		}
-		if !reflect.DeepEqual(tt.expected, rs.rs) {
-			t.Errorf("#%d: expected %v, got %v", i, tt.expected, rs.rs)
-		}
 	}
 }
 
@@ -297,23 +224,25 @@ func (tc *testCache) Add(blobHash string, p []byte) {
 
 func TestCheckInterval(t *testing.T) {
 	var (
-		largeInterval = time.Hour
-		tr            = &calledRoundTripper{}
-		firstTime     = time.Now()
-		ur            = &Blob{
-			tr:            tr,
-			lastCheck:     firstTime,
-			checkInterval: largeInterval,
+		tr        = &calledRoundTripper{}
+		firstTime = time.Now()
+		b         = &blob{
+			fetcher: &fetcher{
+				url: "test",
+				tr:  tr,
+			},
+			lastCheck: firstTime,
 		}
 	)
 
-	check := func(name string) (time.Time, bool) {
+	check := func(name string, checkInterval time.Duration) (time.Time, bool) {
 		beforeUpdate := time.Now()
 
 		time.Sleep(time.Millisecond)
 
 		tr.called = false
-		if err := ur.Check(); err != nil {
+		b.checkInterval = checkInterval
+		if err := b.Check(); err != nil {
 			t.Fatalf("%q: check mustn't be failed", name)
 		}
 
@@ -321,17 +250,17 @@ func TestCheckInterval(t *testing.T) {
 
 		afterUpdate := time.Now()
 		if !tr.called {
-			return ur.lastCheck, false
+			return b.lastCheck, false
 		}
-		if !(ur.lastCheck.After(beforeUpdate) && ur.lastCheck.Before(afterUpdate)) {
-			t.Errorf("%q: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, ur.lastCheck)
+		if !(b.lastCheck.After(beforeUpdate) && b.lastCheck.Before(afterUpdate)) {
+			t.Errorf("%q: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, b.lastCheck)
 		}
 
-		return ur.lastCheck, true
+		return b.lastCheck, true
 	}
 
 	// second time(not expired yet)
-	secondTime, called := check("second time")
+	secondTime, called := check("second time", time.Hour)
 	if called {
 		t.Error("mustn't be checked if not expired")
 	}
@@ -340,31 +269,9 @@ func TestCheckInterval(t *testing.T) {
 	}
 
 	// third time(expired, must be checked)
-	ur.lastCheck = time.Now().Add(-1 * largeInterval) // set to "largeInterval" ago
-	if _, called := check("third time"); !called {
+	if _, called := check("third time", 0); !called {
 		t.Error("must be called for the third time")
 	}
-}
-
-type breakRoundTripper struct {
-	success bool
-}
-
-func (b *breakRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
-	if b.success {
-		res = &http.Response{
-			StatusCode: http.StatusPartialContent,
-			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
-		}
-	} else {
-		res = &http.Response{
-			StatusCode: http.StatusInternalServerError,
-			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
-		}
-	}
-	return
 }
 
 type calledRoundTripper struct {
@@ -408,7 +315,7 @@ func multiRoundTripper(t *testing.T, contents []byte, except ...region) RoundTri
 		// check this request can be served as one whole blob.
 		var sorted []region
 		for _, part := range strings.Split(ranges[len(rangeHeaderPrefix):], ",") {
-			begin, end := parseRange(t, part)
+			begin, end := parseRangeString(t, part)
 			sorted = append(sorted, region{begin, end})
 		}
 		sort.Slice(sorted, func(i, j int) bool {
@@ -428,9 +335,11 @@ func multiRoundTripper(t *testing.T, contents []byte, except ...region) RoundTri
 			}
 			if max >= int64(len(contents)-1) && !sparse {
 				t.Logf("serving whole range %q = %d", ranges, len(contents))
+				header := make(http.Header)
+				header.Add("Content-Length", fmt.Sprintf("%d", len(contents)))
 				return &http.Response{
 					StatusCode: http.StatusOK,
-					Header:     make(http.Header),
+					Header:     header,
 					Body:       ioutil.NopCloser(bytes.NewReader(contents)),
 				}
 			}
@@ -447,7 +356,7 @@ func multiRoundTripper(t *testing.T, contents []byte, except ...region) RoundTri
 			if err != nil {
 				t.Fatalf("failed to create part: %v", err)
 			}
-			begin, end := parseRange(t, part)
+			begin, end := parseRangeString(t, part)
 			if begin >= int64(len(contents)) {
 				// skip if out of range.
 				continue
@@ -503,7 +412,7 @@ func brokenBodyRoundTripper(t *testing.T, contents []byte) RoundTripFunc {
 		// check this request can be served as one whole blob.
 		var sorted []region
 		for _, part := range strings.Split(ranges[len(rangeHeaderPrefix):], ",") {
-			begin, end := parseRange(t, part)
+			begin, end := parseRangeString(t, part)
 			sorted = append(sorted, region{begin, end})
 		}
 		sort.Slice(sorted, func(i, j int) bool {
@@ -542,7 +451,7 @@ func brokenBodyRoundTripper(t *testing.T, contents []byte) RoundTripFunc {
 			if err != nil {
 				t.Fatalf("failed to create part: %v", err)
 			}
-			begin, end := parseRange(t, part)
+			begin, end := parseRangeString(t, part)
 			if begin >= int64(len(contents)) {
 				// skip if out of range.
 				continue
@@ -578,7 +487,7 @@ func brokenHeaderRoundTripper(t *testing.T, contents []byte) RoundTripFunc {
 	}
 }
 
-func parseRange(t *testing.T, rangeString string) (int64, int64) {
+func parseRangeString(t *testing.T, rangeString string) (int64, int64) {
 	rng := strings.Split(rangeString, "-")
 	if len(rng) != 2 {
 		t.Fatalf("falied to parse range %q", rng)

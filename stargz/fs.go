@@ -67,6 +67,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
+	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
 
@@ -118,7 +119,7 @@ func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.Fil
 		prefetchSize:          config.PrefetchSize,
 		noprefetch:            config.NoPrefetch,
 		debug:                 config.Debug,
-		blobInfo:              make(map[string]blobInfo),
+		blob:                  make(map[string]remote.Blob),
 		stargzReader:          make(map[string]*reader.Reader),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
 	}, nil
@@ -132,12 +133,6 @@ func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
 	return cache.NewDirectoryCache(dir, maxEntry)
 }
 
-type blobInfo interface {
-	Size() int64
-	FetchedSize() int64
-	Check() error
-}
-
 type filesystem struct {
 	resolver              *remote.Resolver
 	blobConfig            remote.BlobConfig
@@ -146,8 +141,8 @@ type filesystem struct {
 	prefetchSize          int64
 	noprefetch            bool
 	debug                 bool
-	blobInfo              map[string]blobInfo
-	blobInfoMu            sync.Mutex
+	blob                  map[string]remote.Blob
+	blobMu                sync.Mutex
 	stargzReader          map[string]*reader.Reader
 	stargzReaderMu        sync.Mutex
 	backgroundTaskManager *task.BackgroundTaskManager
@@ -180,9 +175,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		logCtx.WithError(err).Debug("failed to resolve the reference")
 		return err
 	}
-	fs.blobInfoMu.Lock()
-	fs.blobInfo[mountpoint] = blob
-	fs.blobInfoMu.Unlock()
+	fs.blobMu.Lock()
+	fs.blob[mountpoint] = blob
+	fs.blobMu.Unlock()
 
 	// Get a reader for stargz archive.
 	// Each file's read operation is a prioritized task and all background tasks
@@ -309,26 +304,40 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 		logCtx.WithError(err).Warn("failed to sync with prefetch completion")
 	}
 
-	// Check the blob connectivity
-	fs.blobInfoMu.Lock()
-	r := fs.blobInfo[mountpoint]
-	fs.blobInfoMu.Unlock()
-	if r == nil {
+	// Check the blob connectivity and refresh the connection if possible
+	fs.blobMu.Lock()
+	b := fs.blob[mountpoint]
+	fs.blobMu.Unlock()
+	if b == nil {
 		logCtx.Debug("check failed: remote reader not registered")
 		return fmt.Errorf("remote reader not regisiterd")
 	}
-	if err := r.Check(); err != nil {
-		logCtx.WithError(err).Debug("check failed")
-		return err
+	if err := b.Check(); err != nil {
+		// Check failed. Try to refresh the connection
+		logCtx.WithError(err).Warn("failed to connect to blob; refreshing...")
+		for retry := 0; retry < 3; retry++ {
+			if iErr := fs.resolver.Refresh(b); iErr != nil {
+				logCtx.WithError(iErr).Warnf("failed to refresh connection(%d)", retry)
+				err = errors.Wrapf(err, "error(%d): %v", retry, iErr)
+				continue // retry
+			}
+			logCtx.Debug("Successfully refreshed connection")
+			err = nil
+			break
+		}
+		if err != nil {
+			logCtx.WithError(err).Debug("check failed")
+			return err
+		}
 	}
 
 	return nil
 }
 
 func (fs *filesystem) unregister(mountpoint string) {
-	fs.blobInfoMu.Lock()
-	delete(fs.blobInfo, mountpoint)
-	fs.blobInfoMu.Unlock()
+	fs.blobMu.Lock()
+	delete(fs.blob, mountpoint)
+	fs.blobMu.Unlock()
 	fs.stargzReaderMu.Lock()
 	delete(fs.stargzReader, mountpoint)
 	fs.stargzReaderMu.Unlock()
@@ -591,7 +600,7 @@ func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Conte
 
 // newState provides new state directory node.
 // It creates statFile at the same time to give it stable inode number.
-func newState(digest string, blob blobInfo) *state {
+func newState(digest string, blob remote.Blob) *state {
 	return &state{
 		Node: nodefs.NewDefaultNode(),
 		statFile: &statFile{
@@ -708,7 +717,7 @@ type statJSON struct {
 type statFile struct {
 	nodefs.Node
 	name     string
-	blob     blobInfo
+	blob     remote.Blob
 	statJSON statJSON
 	mu       sync.Mutex
 }

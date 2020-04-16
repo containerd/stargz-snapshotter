@@ -17,7 +17,7 @@ FROM golang:1.13
 # basic tools
 # docker-ce-cli is used only to log into registry with ~/.docker/config.json
 RUN apt-get update -y && \
-    apt-get --no-install-recommends install -y libbtrfs-dev libseccomp-dev \
+    apt-get --no-install-recommends install -y fuse iptables libbtrfs-dev libseccomp-dev \
             apt-transport-https gnupg2 software-properties-common && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
     add-apt-repository \
@@ -27,7 +27,7 @@ RUN apt-get update -y && \
               $GOPATH/src/github.com/google/go-containerregistry && \
     cd $GOPATH/src/github.com/google/go-containerregistry && \
     git checkout eb7c14b719c60883de5747caa25463b44f8bf896 && \
-    GO111MODULE=on go install github.com/google/go-containerregistry/cmd/gcrane
+    GO111MODULE=on go install github.com/google/go-containerregistry/cmd/crane
 
 # runtime dependencies
 RUN git clone https://github.com/opencontainers/runc \

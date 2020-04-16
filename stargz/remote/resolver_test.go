@@ -158,16 +158,16 @@ func TestMirror(t *testing.T) {
 					},
 				},
 			}
-			blob, err := r.Resolve(ref.String(), blobDigest, nil, BlobConfig{})
+			fetcher, _, err := r.resolve(ref.String(), blobDigest)
 			if err != nil {
 				if tt.error {
 					return
 				}
 				t.Fatalf("failed to resolve reference: %v", err)
 			}
-			nurl, err := url.Parse(blob.url)
+			nurl, err := url.Parse(fetcher.url)
 			if err != nil {
-				t.Fatalf("failed to parse url %q: %v", blob.url, err)
+				t.Fatalf("failed to parse url %q: %v", fetcher.url, err)
 			}
 			if nurl.Hostname() != tt.wantHost {
 				t.Errorf("invalid hostname %q(%q); want %q",
@@ -412,4 +412,42 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		Header:     make(http.Header),
 		Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
 	}, nil
+}
+
+func TestCheck(t *testing.T) {
+	tr := &breakRoundTripper{}
+	f := &fetcher{
+		url: "test",
+		tr:  tr,
+	}
+	tr.success = true
+	if err := f.check(); err != nil {
+		t.Errorf("connection failed; wanted to succeed")
+	}
+
+	tr.success = false
+	if err := f.check(); err == nil {
+		t.Errorf("connection succeeded; wanted to fail")
+	}
+}
+
+type breakRoundTripper struct {
+	success bool
+}
+
+func (b *breakRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	if b.success {
+		res = &http.Response{
+			StatusCode: http.StatusPartialContent,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
+		}
+	} else {
+		res = &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		}
+	}
+	return
 }
