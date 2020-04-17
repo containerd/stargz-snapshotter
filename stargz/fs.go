@@ -80,6 +80,11 @@ const (
 	opaqueXattrValue     = "y"
 	stateDirName         = ".stargz-snapshotter"
 	defaultLRUCacheEntry = 5000
+
+	// targetRefLabelCRI is a label which contains image reference passed from CRI plugin
+	targetRefLabelCRI = "containerd.io/snapshot/cri.image-ref"
+	// targetDigestLabelCRI is a label which contains layer digest passed from CRI plugin
+	targetDigestLabelCRI = "containerd.io/snapshot/cri.layer-digest"
 )
 
 type Config struct {
@@ -157,15 +162,10 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	logCtx := log.G(ctx).WithField("mountpoint", mountpoint)
 
 	// Get basic information of this layer.
-	ref, ok := labels[handler.TargetRefLabel]
-	if !ok {
-		logCtx.Debug("reference hasn't been passed")
-		return fmt.Errorf("reference hasn't been passed")
-	}
-	digest, ok := labels[handler.TargetDigestLabel]
-	if !ok {
-		logCtx.Debug("digest hasn't been passed")
-		return fmt.Errorf("digest hasn't been passed")
+	ref, digest, err := parseLabels(labels)
+	if err != nil {
+		logCtx.WithError(err).Debug("failed to get necessary information from labels")
+		return err
 	}
 	logCtx = logCtx.WithField("ref", ref).WithField("digest", digest)
 
@@ -341,6 +341,24 @@ func (fs *filesystem) unregister(mountpoint string) {
 	fs.stargzReaderMu.Lock()
 	delete(fs.stargzReader, mountpoint)
 	fs.stargzReaderMu.Unlock()
+}
+
+func parseLabels(labels map[string]string) (rRef string, rDigest string, _ error) {
+	if ref, ok := labels[targetRefLabelCRI]; ok {
+		rRef = ref
+	} else if ref, ok := labels[handler.TargetRefLabel]; ok {
+		rRef = ref
+	} else {
+		return "", "", fmt.Errorf("reference hasn't been passed")
+	}
+	if digest, ok := labels[targetDigestLabelCRI]; ok {
+		rDigest = digest
+	} else if digest, ok := labels[handler.TargetDigestLabel]; ok {
+		rDigest = digest
+	} else {
+		return "", "", fmt.Errorf("digest hasn't been passed")
+	}
+	return
 }
 
 func lazyTransport(trFunc func() (http.RoundTripper, error)) func() (http.RoundTripper, error) {

@@ -23,6 +23,15 @@ source "${CONTEXT}/const.sh"
 
 IMAGE_LIST="${1}"
 
+LOG_TMP=$(mktemp)
+LIST_TMP=$(mktemp)
+function cleanup {
+    ORG_EXIT_CODE="${1}"
+    rm "${LOG_TMP}" || true
+    rm "${LIST_TMP}" || true
+    exit "${ORG_EXIT_CODE}"
+}
+
 TEST_NODE_ID=$(docker run --rm -d --privileged \
                       -v /dev/fuse:/dev/fuse \
                       --tmpfs=/var/lib/containerd:suid \
@@ -49,8 +58,10 @@ if [ "${FAIL}" == "" ] ; then
 fi
 
 # Dump all names of images used in the test
-docker exec -i "${TEST_NODE_ID}" journalctl -xu containerd \
-    | grep PullImage | sed -E 's/.*PullImage \\"([^\\]*)\\".*/\1/g' | sort | uniq > "${IMAGE_LIST}"
+docker exec -i "${TEST_NODE_ID}" journalctl -xu containerd > "${LOG_TMP}"
+cat "${LOG_TMP}" | grep PullImage | sed -E 's/.*PullImage \\"([^\\]*)\\".*/\1/g' > "${LIST_TMP}"
+cat "${LOG_TMP}" | grep SandboxImage | sed -E 's/.*SandboxImage:([^ ]*).*/\1/g' >> "${LIST_TMP}"
+cat "${LIST_TMP}" | sort | uniq > "${IMAGE_LIST}"
 
 docker kill "${TEST_NODE_ID}"
 if [ "${FAIL}" != "" ] ; then
