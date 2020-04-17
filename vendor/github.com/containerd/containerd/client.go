@@ -58,12 +58,12 @@ import (
 	"github.com/containerd/containerd/snapshots"
 	snproxy "github.com/containerd/containerd/snapshots/proxy"
 	"github.com/containerd/typeurl"
-	"github.com/gogo/protobuf/types"
 	ptypes "github.com/gogo/protobuf/types"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -110,11 +110,16 @@ func New(address string, opts ...ClientOpt) (*Client, error) {
 		c.services = *copts.services
 	}
 	if address != "" {
+		backoffConfig := backoff.DefaultConfig
+		backoffConfig.MaxDelay = 3 * time.Second
+		connParams := grpc.ConnectParams{
+			Backoff: backoffConfig,
+		}
 		gopts := []grpc.DialOption{
 			grpc.WithBlock(),
 			grpc.WithInsecure(),
 			grpc.FailOnNonTempDialError(true),
-			grpc.WithBackoffMaxDelay(3 * time.Second),
+			grpc.WithConnectParams(connParams),
 			grpc.WithContextDialer(dialer.ContextDialer),
 
 			// TODO(stevvooe): We may need to allow configuration of this on the client.
@@ -313,6 +318,9 @@ type RemoteContext struct {
 	// Snapshotter used for unpacking
 	Snapshotter string
 
+	// SnapshotterOpts are additional options to be passed to a snapshotter during pull
+	SnapshotterOpts []snapshots.Opt
+
 	// Labels to be applied to the created image
 	Labels map[string]string
 
@@ -390,7 +398,11 @@ func (c *Client) Fetch(ctx context.Context, ref string, opts ...RemoteOpt) (imag
 	}
 	defer done(ctx)
 
-	return c.fetch(ctx, fetchCtx, ref, 0)
+	img, err := c.fetch(ctx, fetchCtx, ref, 0)
+	if err != nil {
+		return images.Image{}, err
+	}
+	return c.createNewImage(ctx, img)
 }
 
 // Push uploads the provided content to a remote resource
@@ -710,7 +722,7 @@ func (c *Client) Server(ctx context.Context) (ServerInfo, error) {
 	}
 	c.connMu.Unlock()
 
-	response, err := c.IntrospectionService().Server(ctx, &types.Empty{})
+	response, err := c.IntrospectionService().Server(ctx, &ptypes.Empty{})
 	if err != nil {
 		return ServerInfo{}, err
 	}

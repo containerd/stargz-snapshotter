@@ -125,7 +125,7 @@ func handleTarTypeBlockCharFifo(hdr *tar.Header, path string) error {
 func handleLChmod(hdr *tar.Header, path string, hdrInfo os.FileInfo) error {
 	if hdr.Typeflag == tar.TypeLink {
 		if fi, err := os.Lstat(hdr.Linkname); err == nil && (fi.Mode()&os.ModeSymlink == 0) {
-			if err := os.Chmod(path, hdrInfo.Mode()); err != nil {
+			if err := os.Chmod(path, hdrInfo.Mode()); err != nil && !os.IsNotExist(err) {
 				return err
 			}
 		}
@@ -176,7 +176,10 @@ func copyDirInfo(fi os.FileInfo, path string) error {
 		return errors.Wrapf(err, "failed to chmod %s", path)
 	}
 
-	timespec := []unix.Timespec{unix.Timespec(fs.StatAtime(st)), unix.Timespec(fs.StatMtime(st))}
+	timespec := []unix.Timespec{
+		unix.NsecToTimespec(syscall.TimespecToNsec(fs.StatAtime(st))),
+		unix.NsecToTimespec(syscall.TimespecToNsec(fs.StatMtime(st))),
+	}
 	if err := unix.UtimesNanoAt(unix.AT_FDCWD, path, timespec, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return errors.Wrapf(err, "failed to utime %s", path)
 	}

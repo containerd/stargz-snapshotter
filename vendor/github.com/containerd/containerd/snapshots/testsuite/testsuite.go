@@ -34,12 +34,15 @@ import (
 	"github.com/containerd/containerd/pkg/testutil"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/continuity/fs/fstest"
-	"gotest.tools/assert"
-	is "gotest.tools/assert/cmp"
+	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
 )
 
+// SnapshotterFunc is used in SnapshotterSuite
+type SnapshotterFunc func(ctx context.Context, root string) (snapshots.Snapshotter, func() error, error)
+
 // SnapshotterSuite runs a test suite on the snapshotter given a factory function.
-func SnapshotterSuite(t *testing.T, name string, snapshotterFn func(ctx context.Context, root string) (snapshots.Snapshotter, func() error, error)) {
+func SnapshotterSuite(t *testing.T, name string, snapshotterFn SnapshotterFunc) {
 	restoreMask := clearMask()
 	defer restoreMask()
 
