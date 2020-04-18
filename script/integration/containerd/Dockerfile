@@ -39,5 +39,5 @@ RUN git clone https://github.com/opencontainers/runc \
     git clone https://github.com/containerd/containerd \
               $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
-    git checkout d5714702d1f78ad1149e78e204db0b53611ddb3c && \
+    git checkout d8506bfd7b407dcb346149bcec3ed3c19244e3f1 && \
     GO111MODULE=off make -j2 && GO111MODULE=off make install

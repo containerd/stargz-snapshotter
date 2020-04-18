@@ -18,10 +18,10 @@ FROM golang:1.13-buster AS golang-base
 FROM golang-base AS containerd-builder
 RUN apt-get update -y && \
     apt-get install -y libbtrfs-dev libseccomp-dev && \
-    git clone https://github.com/ktock/containerd \
+    git clone https://github.com/containerd/containerd \
               $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
-    git checkout 7b2ddf1589694a52f5df5ff351bd2764fb1d0a3a && \
+    git checkout d8506bfd7b407dcb346149bcec3ed3c19244e3f1 && \
     GO111MODULE=off make && DESTDIR=/out/ make install
 
 # build stargz snapshotter
