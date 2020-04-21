@@ -1,6 +1,7 @@
 [Unit]
 Description=stargz snapshotter
 After=network.target
+Before=containerd.service
 
 [Service]
 Environment=HOME=/root
