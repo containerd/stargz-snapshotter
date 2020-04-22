@@ -26,6 +26,7 @@ In the following table, `Image Name` column contains placeholders `{{ suffix }}`
 |`docker.io/stargz/golang:1.12.9-{{ suffix }}`|Compiling and executing a program which prints `hello`|
 |`docker.io/stargz/jenkins:2.60.3-{{ suffix }}`|Code execution until up and ready message (`Jenkins is fully up and running`) is printed|
 |`docker.io/stargz/jruby:9.2.8.0-{{ suffix }}`|Printing `hello`|
+|`docker.io/stargz/node:13.13.0-{{ suffix }}`|Printing `hello`|
 |`docker.io/stargz/perl:5.30-{{ suffix }}`|Printing `hello`|
 |`docker.io/stargz/php:7.3.8-{{ suffix }}`|Printing `hello`|
 |`docker.io/stargz/pypy:3.5-{{ suffix }}`|Printing `hello`|

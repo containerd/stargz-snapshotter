@@ -107,6 +107,7 @@ class BenchRunner:
     CMD_ARG = {'perl:5.30': RunArgs(arg='perl -e \'print("hello\\n")\''),
                'python:3.7': RunArgs(arg='python -c \'print("hello")\''),
                'pypy:3.5': RunArgs(arg='pypy3 -c \'print("hello")\''),
+               'node:13.13.0': RunArgs(arg='node -e \'console.log("hello")\''),
     }
 
     # complete listing
@@ -126,6 +127,7 @@ class BenchRunner:
                  Bench('glassfish:4.1-jdk8', 'web-server'),
                  Bench('drupal:8.7.6'),
                  Bench('jenkins:2.60.3'),
+                 Bench('node:13.13.0'),
              ]])
 
     def __init__(self, user='library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER):
