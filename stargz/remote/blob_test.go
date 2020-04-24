@@ -68,15 +68,49 @@ func TestReadAt(t *testing.T) {
 		"in_3_chunks_blob": sampleChunkSize * 3,
 		"in_max_size_blob": int64(len(sampleData1)),
 	}
-	cacheCond := map[string][]region{
-		"with_clean_cache": nil,
-		"with_edge_filled_cache": {
-			region{0, sampleChunkSize - 1},
-			region{lastChunkOffset1, int64(len(sampleData1)) - 1},
+	type cacheCond struct {
+		reg     region
+		mustHit bool
+	}
+	transportCond := map[string]struct {
+		allowMultiRange bool
+		cacheCond       []cacheCond
+	}{
+		"with_multi_reg_with_clean_cache": {
+			allowMultiRange: true,
+			cacheCond:       nil,
 		},
-		"with_sparse_cache": {
-			region{0, sampleChunkSize - 1},
-			region{2 * sampleChunkSize, 3*sampleChunkSize - 1},
+		"with_single_reg_with_clean_cache": {
+			allowMultiRange: false,
+			cacheCond:       nil,
+		},
+		"with_multi_reg_with_edge_filled_cache": {
+			allowMultiRange: true,
+			cacheCond: []cacheCond{
+				{region{0, sampleChunkSize - 1}, true},
+				{region{lastChunkOffset1, int64(len(sampleData1)) - 1}, true},
+			},
+		},
+		"with_single_reg_with_edge_filled_cache": {
+			allowMultiRange: false,
+			cacheCond: []cacheCond{
+				{region{0, sampleChunkSize - 1}, true},
+				{region{lastChunkOffset1, int64(len(sampleData1)) - 1}, true},
+			},
+		},
+		"with_multi_reg_with_sparse_cache": {
+			allowMultiRange: true,
+			cacheCond: []cacheCond{
+				{region{0, sampleChunkSize - 1}, true},
+				{region{2 * sampleChunkSize, 3*sampleChunkSize - 1}, true},
+			},
+		},
+		"with_single_reg_with_sparse_cache": {
+			allowMultiRange: false,
+			cacheCond: []cacheCond{
+				{region{0, sampleChunkSize - 1}, true},
+				{region{2 * sampleChunkSize, 3*sampleChunkSize - 1}, false},
+			},
 		},
 	}
 
@@ -84,8 +118,8 @@ func TestReadAt(t *testing.T) {
 		for in, innero := range innerOffsetCond {
 			for bo, baseo := range baseOffsetCond {
 				for bs, blobsize := range blobSizeCond {
-					for cc, cacheExcept := range cacheCond {
-						t.Run(fmt.Sprintf("reading_%s_%s_%s_%s_%s", sn, in, bo, bs, cc), func(t *testing.T) {
+					for tc, trCond := range transportCond {
+						t.Run(fmt.Sprintf("reading_%s_%s_%s_%s_%s", sn, in, bo, bs, tc), func(t *testing.T) {
 							if blobsize > int64(len(sampleData1)) {
 								t.Fatal("sample file size is larger than sample data")
 							}
@@ -110,38 +144,20 @@ func TestReadAt(t *testing.T) {
 
 							// data we get through a remote blob.
 							blob := []byte(sampleData1)[:blobsize]
-							r := makeBlob(t, blob, sampleChunkSize, multiRoundTripper(t, blob, cacheExcept...))
-							for _, reg := range cacheExcept {
-								r.cache.Add(r.fetcher.genID(reg), []byte(sampleData1[reg.b:reg.e+1]))
-							}
-							respData := make([]byte, size)
-							n, err := r.ReadAt(respData, offset)
-							if err != nil {
-								t.Errorf("failed to read off=%d, size=%d, blobsize=%d: %v", offset, size, blobsize, err)
-								return
-							}
-							respData = respData[:n]
 
-							if !bytes.Equal(wantData, respData) {
-								t.Errorf("off=%d, blobsize=%d; read data{size=%d,data=%q}; want (size=%d,data=%q)",
-									offset, blobsize, len(respData), string(respData), wantN, string(wantData))
-								return
-							}
-
-							// check cache has valid contents.
-							cn := 0
-							whole := region{floor(offset, r.chunkSize), ceil(offset+size-1, r.chunkSize) - 1}
-							if err := r.walkChunks(whole, func(reg region) error {
-								data, err := r.cache.Fetch(r.fetcher.genID(reg))
-								if err != nil || int64(len(data)) != reg.size() {
-									return fmt.Errorf("missed cache of region={%d,%d}(size=%d): %v(got size=%d)", reg.b, reg.e, reg.size(), err, n)
+							// Check with allowing multi range requests
+							var cacheChunks []region
+							var except []region
+							for _, cond := range trCond.cacheCond {
+								cacheChunks = append(cacheChunks, cond.reg)
+								if cond.mustHit {
+									except = append(except, cond.reg)
 								}
-								cn++
-								return nil
-							}); err != nil {
-								t.Errorf("%v", err)
-								return
 							}
+							tr := multiRoundTripper(t, blob, allowMultiRange(trCond.allowMultiRange), exceptChunks(except))
+							bb := makeBlob(t, blobsize, sampleChunkSize, tr)
+							cacheAll(bb, cacheChunks)
+							checkRead(t, wantData, bb, offset, size)
 						})
 					}
 				}
@@ -150,11 +166,48 @@ func TestReadAt(t *testing.T) {
 	}
 }
 
+func cacheAll(b *blob, chunks []region) {
+	for _, reg := range chunks {
+		b.cache.Add(b.fetcher.genID(reg), []byte(sampleData1[reg.b:reg.e+1]))
+	}
+}
+
+func checkRead(t *testing.T, wantData []byte, r *blob, offset int64, wantSize int64) {
+	respData := make([]byte, wantSize)
+	n, err := r.ReadAt(respData, offset)
+	if err != nil {
+		t.Errorf("failed to read off=%d, size=%d, blobsize=%d: %v", offset, wantSize, r.Size(), err)
+		return
+	}
+	respData = respData[:n]
+
+	if !bytes.Equal(wantData, respData) {
+		t.Errorf("off=%d, blobsize=%d; read data{size=%d,data=%q}; want (size=%d,data=%q)",
+			offset, r.Size(), len(respData), string(respData), len(wantData), string(wantData))
+		return
+	}
+
+	// check cache has valid contents.
+	cn := 0
+	whole := region{floor(offset, r.chunkSize), ceil(offset+wantSize-1, r.chunkSize) - 1}
+	if err := r.walkChunks(whole, func(reg region) error {
+		data, err := r.cache.Fetch(r.fetcher.genID(reg))
+		if err != nil || int64(len(data)) != reg.size() {
+			return fmt.Errorf("missed cache of region={%d,%d}(size=%d): %v(got size=%d)", reg.b, reg.e, reg.size(), err, n)
+		}
+		cn++
+		return nil
+	}); err != nil {
+		t.Errorf("%v", err)
+		return
+	}
+}
+
 // Tests ReadAt method for failure cases.
 func TestFailReadAt(t *testing.T) {
 
 	// test failed http respose.
-	r := makeBlob(t, []byte(sampleData1), sampleChunkSize, failRoundTripper())
+	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, failRoundTripper())
 	respData := make([]byte, len(sampleData1))
 	_, err := r.ReadAt(respData, 0)
 	if err == nil || err == io.EOF {
@@ -162,37 +215,45 @@ func TestFailReadAt(t *testing.T) {
 		return
 	}
 
-	// test broken body
-	r = makeBlob(t, []byte(sampleData1), sampleChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1)))
-	respData = make([]byte, len(sampleData1))
-	_, err = r.ReadAt(respData, 0)
-	if err == nil || err == io.EOF {
-		t.Errorf("must be fail for broken full body but err=%v", err)
-		return
-	}
-	_, err = r.ReadAt(respData[0:len(sampleData1)/2], 0)
-	if err == nil || err == io.EOF {
-		t.Errorf("must be fail for broken multipart body but err=%v", err)
-		return
-	}
+	// test broken body with allowing multi range
+	checkBrokenBody(t, true)  // with allowing multi range
+	checkBrokenBody(t, false) // with prohibiting multi range
 
 	// test broken header
-	r = makeBlob(t, []byte(sampleData1), sampleChunkSize, brokenHeaderRoundTripper(t, []byte(sampleData1)))
-	respData = make([]byte, len(sampleData1))
-	_, err = r.ReadAt(respData[0:len(sampleData1)/2], 0)
-	if err == nil || err == io.EOF {
-		t.Errorf("must be fail for broken multipart header but err=%v", err)
+	checkBrokenHeader(t, true)  // with allowing multi range
+	checkBrokenHeader(t, false) // with prohibiting multi range
+}
+
+func checkBrokenBody(t *testing.T, allowMultiRange bool) {
+	respData := make([]byte, len(sampleData1))
+	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	if _, err := r.ReadAt(respData, 0); err == nil || err == io.EOF {
+		t.Errorf("must be fail for broken full body but err=%v (allowMultiRange=%v)", err, allowMultiRange)
+		return
+	}
+	r = makeBlob(t, int64(len(sampleData1)), sampleChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	if _, err := r.ReadAt(respData[0:len(sampleData1)/2], 0); err == nil || err == io.EOF {
+		t.Errorf("must be fail for broken multipart body but err=%v (allowMultiRange=%v)", err, allowMultiRange)
 		return
 	}
 }
 
-func makeBlob(t *testing.T, contents []byte, chunkSize int64, fn RoundTripFunc) *blob {
+func checkBrokenHeader(t *testing.T, allowMultiRange bool) {
+	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, brokenHeaderRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	respData := make([]byte, len(sampleData1))
+	if _, err := r.ReadAt(respData[0:len(sampleData1)/2], 0); err == nil || err == io.EOF {
+		t.Errorf("must be fail for broken multipart header but err=%v (allowMultiRange=%v)", err, allowMultiRange)
+		return
+	}
+}
+
+func makeBlob(t *testing.T, size int64, chunkSize int64, fn RoundTripFunc) *blob {
 	return &blob{
 		fetcher: &fetcher{
 			url: testURL,
 			tr:  fn,
 		},
-		size:      int64(len(contents)),
+		size:      size,
 		chunkSize: chunkSize,
 		cache:     &testCache{membuf: map[string]string{}, t: t},
 	}
@@ -294,27 +355,51 @@ func (f RoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req), nil
 }
 
-func multiRoundTripper(t *testing.T, contents []byte, except ...region) RoundTripFunc {
-	ce := map[region]bool{}
-	for _, reg := range except {
-		ce[reg] = true
+type bodyConverter func(r io.ReadCloser) io.ReadCloser
+type exceptChunks []region
+type allowMultiRange bool
+
+func multiRoundTripper(t *testing.T, contents []byte, opts ...interface{}) RoundTripFunc {
+	multiRangeEnable := true
+	doNotFetch := []region{}
+	convertBody := func(r io.ReadCloser) io.ReadCloser { return r }
+	for _, opt := range opts {
+		if v, ok := opt.(allowMultiRange); ok {
+			multiRangeEnable = bool(v)
+		} else if v, ok := opt.(exceptChunks); ok {
+			doNotFetch = []region(v)
+		} else if v, ok := opt.(bodyConverter); ok {
+			convertBody = (func(r io.ReadCloser) io.ReadCloser)(v)
+		}
 	}
+	emptyResponse := func(statusCode int) *http.Response {
+		return &http.Response{
+			StatusCode: statusCode,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		}
+	}
+
 	return func(req *http.Request) *http.Response {
 		// Validate request
 		if req.Method != "GET" || req.URL.String() != testURL {
-			return &http.Response{StatusCode: http.StatusNotFound}
+			return emptyResponse(http.StatusBadRequest)
 		}
 		ranges := req.Header.Get("Range")
 		if ranges == "" {
-			return &http.Response{StatusCode: http.StatusNotFound}
+			return emptyResponse(http.StatusBadRequest)
 		}
 		if !strings.HasPrefix(ranges, rangeHeaderPrefix) {
-			return &http.Response{StatusCode: http.StatusNotFound}
+			return emptyResponse(http.StatusBadRequest)
+		}
+		rlist := strings.Split(ranges[len(rangeHeaderPrefix):], ",")
+		if len(rlist) == 0 {
+			return emptyResponse(http.StatusBadRequest)
 		}
 
 		// check this request can be served as one whole blob.
 		var sorted []region
-		for _, part := range strings.Split(ranges[len(rangeHeaderPrefix):], ",") {
+		for _, part := range rlist {
 			begin, end := parseRangeString(t, part)
 			sorted = append(sorted, region{begin, end})
 		}
@@ -340,16 +425,42 @@ func multiRoundTripper(t *testing.T, contents []byte, except ...region) RoundTri
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Header:     header,
-					Body:       ioutil.NopCloser(bytes.NewReader(contents)),
+					Body:       convertBody(ioutil.NopCloser(bytes.NewReader(contents))),
 				}
+			}
+		}
+
+		if !multiRangeEnable {
+			if len(rlist) > 1 {
+				return emptyResponse(http.StatusBadRequest) // prohibiting multi range
+			}
+
+			// serve as single part response
+			begin, end := parseRangeString(t, rlist[0])
+			target := region{begin, end}
+			for _, reg := range doNotFetch {
+				if target.b <= reg.b && reg.e <= target.e {
+					t.Fatalf("Requested prohibited region of chunk(singlepart): (%d, %d) contained in fetching region (%d, %d)",
+						reg.b, reg.e, target.b, target.e)
+				}
+			}
+			header := make(http.Header)
+			header.Add("Content-Length", fmt.Sprintf("%d", target.size()))
+			header.Add("Content-Range",
+				fmt.Sprintf("bytes %d-%d/%d", target.b, target.e, len(contents)))
+			header.Add("Content-Type", "application/octet-stream")
+			part := contents[target.b : target.e+1]
+			return &http.Response{
+				StatusCode: http.StatusPartialContent,
+				Header:     header,
+				Body:       convertBody(ioutil.NopCloser(bytes.NewReader(part))),
 			}
 		}
 
 		// Write multipart response.
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
-		parts := strings.Split(ranges[len(rangeHeaderPrefix):], ",")
-		for _, part := range parts {
+		for _, part := range rlist {
 			mh := make(textproto.MIMEHeader)
 			mh.Set("Content-Range", fmt.Sprintf("bytes %s/%d", part, len(contents)))
 			w, err := mw.CreatePart(mh)
@@ -364,8 +475,11 @@ func multiRoundTripper(t *testing.T, contents []byte, except ...region) RoundTri
 			if end > int64(len(contents)-1) {
 				end = int64(len(contents) - 1)
 			}
-			if ce[region{begin, end}] {
-				t.Fatalf("Requested prohibited region of chunk: (%d, %d)", begin, end)
+			for _, reg := range doNotFetch {
+				if begin <= reg.b && reg.e <= end {
+					t.Fatalf("Requested prohibited region of chunk (multipart): (%d, %d) contained in fetching region (%d, %d)",
+						reg.b, reg.e, begin, end)
+				}
 			}
 			if n, err := w.Write(contents[begin : end+1]); err != nil || int64(n) != end+1-begin {
 				t.Fatalf("failed to write to part(%d-%d): %v", begin, end, err)
@@ -380,7 +494,7 @@ func multiRoundTripper(t *testing.T, contents []byte, except ...region) RoundTri
 		return &http.Response{
 			StatusCode: http.StatusPartialContent,
 			Header:     header,
-			Body:       ioutil.NopCloser(&buf),
+			Body:       convertBody(ioutil.NopCloser(&buf)),
 		}
 	}
 }
@@ -395,91 +509,23 @@ func failRoundTripper() RoundTripFunc {
 	}
 }
 
-func brokenBodyRoundTripper(t *testing.T, contents []byte) RoundTripFunc {
+func brokenBodyRoundTripper(t *testing.T, contents []byte, multiRange bool) RoundTripFunc {
+	breakReadCloser := func(r io.ReadCloser) io.ReadCloser {
+		defer r.Close()
+		data, err := ioutil.ReadAll(r)
+		if err != nil {
+			t.Fatalf("failed to break read closer faild to read original: %v", err)
+		}
+		return ioutil.NopCloser(bytes.NewReader(data[:len(data)/2]))
+	}
+	tr := multiRoundTripper(t, contents, allowMultiRange(multiRange), bodyConverter(breakReadCloser))
 	return func(req *http.Request) *http.Response {
-		// Validate request
-		if req.Method != "GET" || req.URL.String() != testURL {
-			return &http.Response{StatusCode: http.StatusNotFound}
-		}
-		ranges := req.Header.Get("Range")
-		if ranges == "" {
-			return &http.Response{StatusCode: http.StatusNotFound}
-		}
-		if !strings.HasPrefix(ranges, rangeHeaderPrefix) {
-			return &http.Response{StatusCode: http.StatusNotFound}
-		}
-
-		// check this request can be served as one whole blob.
-		var sorted []region
-		for _, part := range strings.Split(ranges[len(rangeHeaderPrefix):], ",") {
-			begin, end := parseRangeString(t, part)
-			sorted = append(sorted, region{begin, end})
-		}
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].b < sorted[j].b
-		})
-		var sparse bool
-		if sorted[0].b == 0 {
-			var max int64
-			for _, reg := range sorted {
-				if reg.e > max {
-					if max < reg.b-1 {
-						sparse = true
-						break
-					}
-					max = reg.e
-				}
-			}
-			if max >= int64(len(contents)-1) && !sparse {
-				t.Logf("serving whole range %q = %d [but broken range!]", ranges, len(contents))
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Header:     make(http.Header),
-					Body:       ioutil.NopCloser(bytes.NewReader(contents[:len(contents)/2])),
-				}
-			}
-		}
-
-		// Write multipart response.
-		var buf bytes.Buffer
-		mw := multipart.NewWriter(&buf)
-		parts := strings.Split(ranges[len(rangeHeaderPrefix):], ",")
-		for _, part := range parts {
-			mh := make(textproto.MIMEHeader)
-			mh.Set("Content-Range", fmt.Sprintf("bytes %s/%d", part, len(contents)))
-			w, err := mw.CreatePart(mh)
-			if err != nil {
-				t.Fatalf("failed to create part: %v", err)
-			}
-			begin, end := parseRangeString(t, part)
-			if begin >= int64(len(contents)) {
-				// skip if out of range.
-				continue
-			}
-			if end > int64(len(contents)-1) {
-				end = int64(len(contents) - 1)
-			}
-			brokenEnd := (end + 1) / 2
-			if n, err := w.Write(contents[begin:brokenEnd]); err != nil || int64(n) != brokenEnd-begin {
-				t.Fatalf("failed to write to part(%d-%d): %v", begin, brokenEnd, err)
-			}
-		}
-		mw.Close()
-		param := map[string]string{
-			"boundary": mw.Boundary(),
-		}
-		header := make(http.Header)
-		header.Add("Content-Type", mime.FormatMediaType("multipart/text", param))
-		return &http.Response{
-			StatusCode: http.StatusPartialContent,
-			Header:     header,
-			Body:       ioutil.NopCloser(&buf),
-		}
+		return tr(req)
 	}
 }
 
-func brokenHeaderRoundTripper(t *testing.T, contents []byte) RoundTripFunc {
-	tr := multiRoundTripper(t, contents)
+func brokenHeaderRoundTripper(t *testing.T, contents []byte, multiRange bool) RoundTripFunc {
+	tr := multiRoundTripper(t, contents, allowMultiRange(multiRange))
 	return func(req *http.Request) *http.Response {
 		res := tr(req)
 		res.Header = make(http.Header)

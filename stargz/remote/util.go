@@ -31,6 +31,19 @@ func (c region) size() int64 {
 	return c.e - c.b + 1
 }
 
+func superRegion(regs []region) region {
+	s := regs[0]
+	for _, reg := range regs {
+		if reg.b < s.b {
+			s.b = reg.b
+		}
+		if reg.e > s.e {
+			s.e = reg.e
+		}
+	}
+	return s
+}
+
 // regionSet is a set of regions
 type regionSet struct {
 	rs []region
