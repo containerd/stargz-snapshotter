@@ -184,6 +184,8 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// will be stopped during the execution so this can avoid being disturbed for
 	// NW traffic by background tasks.
 	sr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (n int, err error) {
+		fs.backgroundTaskManager.DoPrioritizedTask()
+		defer fs.backgroundTaskManager.DonePrioritizedTask()
 		return blob.ReadAt(p, offset)
 	}), 0, blob.Size())
 	gr, root, err := reader.NewReader(sr, fs.fsCache)

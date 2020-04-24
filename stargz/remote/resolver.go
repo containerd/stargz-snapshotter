@@ -254,11 +254,10 @@ func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) 
 	defer cancel()
 
 	// We use GET request for GCR.
-	req, err := http.NewRequest("GET", endpointURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpointURL, nil)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to request to the registry of %q", endpointURL)
 	}
-	req = req.WithContext(ctx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := tr.RoundTrip(req)
@@ -286,11 +285,10 @@ func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) 
 func getSize(url string, tr http.RoundTripper) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequest("HEAD", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 	if err != nil {
 		return 0, err
 	}
-	req = req.WithContext(ctx)
 	req.Close = false
 	res, err := tr.RoundTrip(req)
 	if err != nil {
@@ -331,12 +329,14 @@ func authnTransport(ref name.Reference, tr http.RoundTripper, keychain authn.Key
 }
 
 type fetcher struct {
-	resolver *Resolver
-	ref      string
-	digest   string
-	nref     name.Reference
-	url      string
-	tr       http.RoundTripper
+	resolver      *Resolver
+	ref           string
+	digest        string
+	nref          name.Reference
+	url           string
+	tr            http.RoundTripper
+	singleRange   bool
+	singleRangeMu sync.Mutex
 }
 
 func (f *fetcher) refresh() (*fetcher, int64, error) {
@@ -344,13 +344,24 @@ func (f *fetcher) refresh() (*fetcher, int64, error) {
 }
 
 func (f *fetcher) fetch(requests []region, opts ...Option) (map[region][]byte, error) {
+	if len(requests) == 0 {
+		return nil, nil
+	}
+
 	var (
-		remoteData  = map[region][]byte{}
-		opt         = options{}
-		tr          = f.tr
-		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		tr              = f.tr
+		ctx, cancel     = context.WithTimeout(context.Background(), 30*time.Second)
+		singleRangeMode = f.isSingleRangeMode()
 	)
 	defer cancel()
+
+	if singleRangeMode {
+		// Squash requests if the layer doesn't support multi range.
+		requests = []region{superRegion(requests)}
+	}
+
+	// Parse options
+	var opt options
 	for _, o := range opts {
 		o(&opt)
 	}
@@ -360,27 +371,24 @@ func (f *fetcher) fetch(requests []region, opts ...Option) (map[region][]byte, e
 	if opt.tr != nil {
 		tr = opt.tr
 	}
-	req, err := http.NewRequest("GET", f.url, nil)
+
+	// Request to the registry
+	req, err := http.NewRequestWithContext(ctx, "GET", f.url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req = req.WithContext(ctx)
-	ranges := "bytes=0-0," // dummy range to make sure the response to be multipart
+	var ranges string
 	for _, reg := range requests {
 		ranges += fmt.Sprintf("%d-%d,", reg.b, reg.e)
 	}
-	req.Header.Add("Range", ranges[:len(ranges)-1])
+	req.Header.Add("Range", fmt.Sprintf("bytes=%s", ranges[:len(ranges)-1]))
 	req.Header.Add("Accept-Encoding", "identity")
 	req.Close = false
 	res, err := tr.RoundTrip(req) // NOT DefaultClient; don't want redirects
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to request to %q", f.url)
+		return nil, err
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		return nil, fmt.Errorf("unexpected status code on %q: %v", f.url, res.Status)
-	}
-
 	if res.StatusCode == http.StatusOK {
 		// We are getting the whole blob in one part (= status 200)
 		data, err := ioutil.ReadAll(res.Body) // TODO: chunk data for saving memory
@@ -395,51 +403,76 @@ func (f *fetcher) fetch(requests []region, opts ...Option) (map[region][]byte, e
 			return nil, errors.Wrapf(err, "broken response body:got size %d; want %d for %q",
 				len(data), size, f.url)
 		}
+		remoteData := make(map[region][]byte)
 		remoteData[region{0, size - 1}] = data
 		return remoteData, nil
-	}
-
-	// We are getting a set of chunk as a multipart body.
-	mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
-	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
-		return nil, errors.Wrapf(err, "invalid media type %q for %q", mediaType, f.url)
-	}
-	mr := multipart.NewReader(res.Body, params["boundary"])
-	mr.NextPart() // Drop the dummy range.
-	for {
-		p, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, errors.Wrapf(err, "failed to read multipart response from %q", f.url)
-		}
-		reg, err := parseRange(p.Header.Get("Content-Range"))
+	} else if res.StatusCode == http.StatusPartialContent {
+		mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse Content-Range in %q", f.url)
+			return nil, errors.Wrapf(err, "invalid media type %q for %q", mediaType, f.url)
 		}
-		data, err := ioutil.ReadAll(p)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read multipart data on %q", f.url)
-		}
-		if int64(len(data)) != reg.size() {
-			return nil, errors.Wrapf(err, "broken partial body:got size %d; want %d for %q",
-				len(data), reg.size(), f.url)
 
+		if !strings.HasPrefix(mediaType, "multipart/") {
+			// We are getting partial content
+			data, err := ioutil.ReadAll(res.Body) // TODO: chunk data for saving memory
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to read response from %q", f.url)
+			}
+			reg, err := parseRange(res.Header.Get("Content-Range"))
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to parse Content-Range: %q", f.url)
+			}
+			if int64(len(data)) != reg.size() {
+				return nil, errors.Wrapf(err, "broken part resp: size %d; want %d: %q",
+					len(data), reg.size(), f.url)
+			}
+			remoteData := make(map[region][]byte)
+			remoteData[reg] = data
+			return remoteData, nil
 		}
-		remoteData[reg] = data
+
+		// We are getting a set of chunks as a multipart body.
+		remoteData := make(map[region][]byte)
+		mr := multipart.NewReader(res.Body, params["boundary"])
+		for {
+			p, err := mr.NextPart()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				return nil, errors.Wrapf(err, "failed to read multipart resp: %q", f.url)
+			}
+			reg, err := parseRange(p.Header.Get("Content-Range"))
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to parse Content-Range: %q", f.url)
+			}
+			data, err := ioutil.ReadAll(p)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to read multipart data: %q", f.url)
+			}
+			if int64(len(data)) != reg.size() {
+				return nil, errors.Wrapf(err, "broken part body: size %d; want %d: %q",
+					len(data), reg.size(), f.url)
+
+			}
+			remoteData[reg] = data
+		}
+		return remoteData, nil
+	} else if !singleRangeMode {
+		// Retry with the single range mode
+		f.singleRangeMode() // fallback to singe range request mode
+		return f.fetch(requests, opts...)
 	}
 
-	return remoteData, nil
+	return nil, fmt.Errorf("unexpected status code on %q: %v", f.url, res.Status)
 }
 
 func (f *fetcher) check() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequest("GET", f.url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", f.url, nil)
 	if err != nil {
 		return errors.Wrapf(err, "check failed: failed to make request for %q", f.url)
 	}
-	req = req.WithContext(ctx)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := f.tr.RoundTrip(req)
@@ -464,6 +497,19 @@ func (f *fetcher) authn(tr http.RoundTripper, keychain authn.Keychain) (http.Rou
 func (f *fetcher) genID(reg region) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.url, reg.b, reg.e)))
 	return fmt.Sprintf("%x", sum)
+}
+
+func (f *fetcher) singleRangeMode() {
+	f.singleRangeMu.Lock()
+	f.singleRange = true
+	f.singleRangeMu.Unlock()
+}
+
+func (f *fetcher) isSingleRangeMode() bool {
+	f.singleRangeMu.Lock()
+	r := f.singleRange
+	f.singleRangeMu.Unlock()
+	return r
 }
 
 func parseRange(header string) (region, error) {
