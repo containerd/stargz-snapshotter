@@ -31,6 +31,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/google/crfs/stargz"
 )
 
@@ -96,7 +97,7 @@ func TestPrefetch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sr := buildStargz(t, tt.in, chunkSizeInfo(sampleChunkSize))
-			gr, _, err := NewReader(sr, &testCache{membuf: map[string]string{}, t: t})
+			gr, _, err := newReader(sr, &testCache{membuf: map[string]string{}, t: t})
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
@@ -167,7 +168,7 @@ func TestFailReader(t *testing.T) {
 		success:  true,
 	}
 	bsr := io.NewSectionReader(br, 0, stargzFile.Size())
-	gr, _, err := NewReader(bsr, &nopCache{})
+	gr, _, err := newReader(bsr, &nopCache{})
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
 	}
@@ -390,7 +391,7 @@ func makeFile(t *testing.T, contents []byte, chunkSize int64) *file {
 	sr := buildStargz(t, []tarent{
 		regfile(testName, string(contents)),
 	}, chunkSizeInfo(chunkSize))
-	r, _, err := NewReader(sr, &testCache{membuf: map[string]string{}, t: t})
+	r, _, err := newReader(sr, &testCache{membuf: map[string]string{}, t: t})
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
 	}
@@ -494,4 +495,13 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) *io.SectionRe
 	}
 	b := stargzBuf.Bytes()
 	return io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b)))
+}
+
+func newReader(sr *io.SectionReader, cache cache.BlobCache) (*reader, *stargz.TOCEntry, error) {
+	var r *reader
+	gr, root, err := NewReader(sr, cache)
+	if gr != nil {
+		r = gr.(*reader)
+	}
+	return r, root, err
 }

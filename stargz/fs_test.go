@@ -57,49 +57,47 @@ const (
 )
 
 func TestCheck(t *testing.T) {
-	br := &breakRemoteInfo{}
+	bb := &breakBlob{}
 	fs := &filesystem{
-		blob: map[string]remote.Blob{
-			"test": br,
+		layer: map[string]*layer{
+			"test": {
+				blob:   bb,
+				reader: nopreader{},
+			},
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
 	}
-	br.success = true
+	bb.success = true
 	if err := fs.Check(context.TODO(), "test"); err != nil {
 		t.Errorf("connection failed; wanted to succeed")
 	}
 
-	br.success = false
+	bb.success = false
 	if err := fs.Check(context.TODO(), "test"); err == nil {
 		t.Errorf("connection succeeded; wanted to fail")
 	}
 }
 
-type breakRemoteInfo struct {
+type nopreader struct{}
+
+func (r nopreader) OpenFile(name string) (io.ReaderAt, error)                         { return nil, nil }
+func (r nopreader) PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) error { return nil }
+func (r nopreader) WaitForPrefetchCompletion(timeout time.Duration) error             { return nil }
+func (r nopreader) CacheTarGzWithReader(ir io.Reader) error                           { return nil }
+
+type breakBlob struct {
 	success bool
 }
 
-func (r *breakRemoteInfo) Authn(tr http.RoundTripper) (http.RoundTripper, error) {
-	return nil, nil
-}
-
-func (r *breakRemoteInfo) Size() int64 {
-	return 10
-}
-
-func (r *breakRemoteInfo) FetchedSize() int64 {
-	return 5
-}
-
-func (r *breakRemoteInfo) Check() error {
+func (r *breakBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error)        { return nil, nil }
+func (r *breakBlob) Size() int64                                                  { return 10 }
+func (r *breakBlob) FetchedSize() int64                                           { return 5 }
+func (r *breakBlob) ReadAt(p []byte, o int64, opts ...remote.Option) (int, error) { return 0, nil }
+func (r *breakBlob) Check() error {
 	if !r.success {
 		return fmt.Errorf("failed")
 	}
 	return nil
-}
-
-func (r *breakRemoteInfo) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
-	return 0, nil
 }
 
 // Tests Read method of each file node.
