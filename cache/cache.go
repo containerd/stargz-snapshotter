@@ -152,7 +152,7 @@ func NewMemoryCache() BlobCache {
 	}
 }
 
-// meomryCache is a cache implementation which backend is a memory.
+// memoryCache is a cache implementation which backend is a memory.
 type memoryCache struct {
 	membuf map[string]string // read-only []byte map is more ideal but we don't have it in golang...
 	mu     sync.Mutex
