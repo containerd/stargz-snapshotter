@@ -48,7 +48,14 @@ const (
 	NoPrefetchLandmark = ".no.prefetch.landmark"
 )
 
-func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*Reader, *stargz.TOCEntry, error) {
+type Reader interface {
+	OpenFile(name string) (io.ReaderAt, error)
+	PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) error
+	WaitForPrefetchCompletion(timeout time.Duration) error
+	CacheTarGzWithReader(r io.Reader) error
+}
+
+func NewReader(sr *io.SectionReader, cache cache.BlobCache) (Reader, *stargz.TOCEntry, error) {
 	r, err := stargz.Open(sr)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to parse stargz")
@@ -59,7 +66,7 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*Reader, *stargz.TO
 		return nil, nil, fmt.Errorf("failed to get a TOCEntry of the root")
 	}
 
-	return &Reader{
+	return &reader{
 		r:                      r,
 		sr:                     sr,
 		cache:                  cache,
@@ -67,7 +74,7 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*Reader, *stargz.TO
 	}, root, nil
 }
 
-type Reader struct {
+type reader struct {
 	r                      *stargz.Reader
 	sr                     *io.SectionReader
 	cache                  cache.BlobCache
@@ -75,7 +82,7 @@ type Reader struct {
 	prefetchCompletionCond *sync.Cond
 }
 
-func (gr *Reader) OpenFile(name string) (io.ReaderAt, error) {
+func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
 	sr, err := gr.r.OpenFile(name)
 	if err != nil {
 		return nil, err
@@ -93,7 +100,7 @@ func (gr *Reader) OpenFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *Reader) PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) error {
+func (gr *reader) PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) error {
 	gr.prefetchInProgress = true
 	defer func() {
 		gr.prefetchInProgress = false
@@ -130,7 +137,7 @@ func (gr *Reader) PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) e
 	return nil
 }
 
-func (gr *Reader) WaitForPrefetchCompletion(timeout time.Duration) error {
+func (gr *reader) WaitForPrefetchCompletion(timeout time.Duration) error {
 	waitUntilPrefetching := func() <-chan struct{} {
 		ch := make(chan struct{})
 		go func() {
@@ -153,7 +160,7 @@ func (gr *Reader) WaitForPrefetchCompletion(timeout time.Duration) error {
 	}
 }
 
-func (gr *Reader) CacheTarGzWithReader(r io.Reader) error {
+func (gr *reader) CacheTarGzWithReader(r io.Reader) error {
 	gzr, err := gzip.NewReader(r)
 	if err != nil {
 		return err

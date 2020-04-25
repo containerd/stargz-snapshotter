@@ -171,6 +171,9 @@ func (b *blob) fetchRange(target region, opts ...Option) (map[region][]byte, err
 		return nil, err
 	}
 
+	// Update the check timer because we succeeded to access the blob
+	b.lastCheck = time.Now()
+
 	// chunk and cache responsed data
 	// TODO: Reorganize remoteData to make it be aligned by chunk size
 	b.fetchedRegionSetMu.Lock()
