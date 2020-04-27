@@ -112,7 +112,7 @@ cat "${IMAGE_LIST}" | sed -E 's/^([^/]*).*/\1/g' | sort | uniq | while read DOMA
 endpoint = ["http://${REGISTRY_HOST}:5000"]
 EOF
     cat <<EOF >> "${SNAPSHOTTER_CONFIG}"
-[[resolver."${DOMAIN}".mirrors]]
+[[resolver.host."${DOMAIN}".mirrors]]
 host = "${REGISTRY_HOST}:5000"
 insecure = true
 EOF

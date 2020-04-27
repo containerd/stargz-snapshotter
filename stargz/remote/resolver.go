@@ -38,6 +38,7 @@ import (
 
 	"github.com/containerd/containerd/reference/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/golang/groupcache/lru"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
@@ -47,9 +48,15 @@ import (
 const (
 	defaultChunkSize     = 50000
 	defaultValidInterval = 60 * time.Second
+	defaultPoolEntry     = 3000
 )
 
 type ResolverConfig struct {
+	Host                map[string]HostConfig `toml:"host"`
+	ConnectionPoolEntry int                   `toml:"connection_pool_entry"`
+}
+
+type HostConfig struct {
 	Mirrors []MirrorConfig `toml:"mirrors"`
 }
 
@@ -64,13 +71,17 @@ type BlobConfig struct {
 	ChunkSize     int64 `toml:"chunk_size"`
 }
 
-func NewResolver(keychain authn.Keychain, config map[string]ResolverConfig) *Resolver {
-	if config == nil {
-		config = make(map[string]ResolverConfig)
+func NewResolver(keychain authn.Keychain, config ResolverConfig) *Resolver {
+	if config.Host == nil {
+		config.Host = make(map[string]HostConfig)
+	}
+	poolEntry := config.ConnectionPoolEntry
+	if poolEntry == 0 {
+		poolEntry = defaultPoolEntry
 	}
 	return &Resolver{
 		transport: http.DefaultTransport,
-		trPool:    make(map[string]http.RoundTripper),
+		trPool:    lru.New(poolEntry),
 		keychain:  keychain,
 		config:    config,
 	}
@@ -78,10 +89,10 @@ func NewResolver(keychain authn.Keychain, config map[string]ResolverConfig) *Res
 
 type Resolver struct {
 	transport http.RoundTripper
-	trPool    map[string]http.RoundTripper
+	trPool    *lru.Cache
 	trPoolMu  sync.Mutex
 	keychain  authn.Keychain
-	config    map[string]ResolverConfig
+	config    ResolverConfig
 }
 
 func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config BlobConfig) (Blob, error) {
@@ -150,7 +161,7 @@ func (r *Resolver) resolve(ref, digest string) (*fetcher, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	hosts := append(r.config[docker.Domain(named)].Mirrors, MirrorConfig{
+	hosts := append(r.config.Host[docker.Domain(named)].Mirrors, MirrorConfig{
 		Host: docker.Domain(named),
 	})
 	rErr := fmt.Errorf("failed to resolve")
@@ -173,21 +184,11 @@ func (r *Resolver) resolve(ref, digest string) (*fetcher, int64, error) {
 		}
 
 		// Resolve redirection and get blob URL
-		url, err = r.resolveReference(nref, digest)
+		url, tr, err = r.resolveReference(nref, digest)
 		if err != nil {
 			rErr = errors.Wrapf(rErr, "host %q: failed to resolve ref %q (%q): %v",
 				h.Host, nref.String(), digest, err)
 			continue // try another host
-		}
-
-		// Get authenticated RoundTripper
-		r.trPoolMu.Lock()
-		tr = r.trPool[nref.Name()]
-		r.trPoolMu.Unlock()
-		if tr == nil {
-			rErr = errors.Wrapf(rErr, "host %q: transport %q not found in pool",
-				h.Host, nref.Name())
-			continue
 		}
 
 		// Get size information
@@ -215,7 +216,7 @@ func (r *Resolver) resolve(ref, digest string) (*fetcher, int64, error) {
 	}, size, nil
 }
 
-func (r *Resolver) resolveReference(ref name.Reference, digest string) (string, error) {
+func (r *Resolver) resolveReference(ref name.Reference, digest string) (string, http.RoundTripper, error) {
 	r.trPoolMu.Lock()
 	defer r.trPoolMu.Unlock()
 
@@ -227,26 +228,29 @@ func (r *Resolver) resolveReference(ref name.Reference, digest string) (string, 
 		digest)
 
 	// Try to use cached transport (cahced per reference name)
-	if tr, ok := r.trPool[ref.Name()]; ok {
-		if url, err := redirect(endpointURL, tr); err == nil {
-			return url, nil
+	if tr, ok := r.trPool.Get(ref.Name()); ok {
+		if url, err := redirect(endpointURL, tr.(http.RoundTripper)); err == nil {
+			return url, tr.(http.RoundTripper), nil
 		}
 	}
+
+	// Remove the stale transport from cache
+	r.trPool.Remove(ref.Name())
 
 	// transport is unavailable/expired so refresh the transport and try again
 	tr, err := authnTransport(ref, r.transport, r.keychain)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	url, err := redirect(endpointURL, tr)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Update transports cache
-	r.trPool[ref.Name()] = tr
+	r.trPool.Add(ref.Name(), tr)
 
-	return url, nil
+	return url, tr, nil
 }
 
 func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) {
