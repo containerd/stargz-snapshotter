@@ -63,6 +63,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
 	"github.com/containerd/stargz-snapshotter/task"
+	"github.com/golang/groupcache/lru"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/hanwen/go-fuse/fuse"
@@ -72,14 +73,15 @@ import (
 )
 
 const (
-	blockSize            = 512
-	memoryCacheType      = "memory"
-	whiteoutPrefix       = ".wh."
-	whiteoutOpaqueDir    = whiteoutPrefix + whiteoutPrefix + ".opq"
-	opaqueXattr          = "trusted.overlay.opaque"
-	opaqueXattrValue     = "y"
-	stateDirName         = ".stargz-snapshotter"
-	defaultLRUCacheEntry = 5000
+	blockSize                 = 512
+	memoryCacheType           = "memory"
+	whiteoutPrefix            = ".wh."
+	whiteoutOpaqueDir         = whiteoutPrefix + whiteoutPrefix + ".opq"
+	opaqueXattr               = "trusted.overlay.opaque"
+	opaqueXattrValue          = "y"
+	stateDirName              = ".stargz-snapshotter"
+	defaultLRUCacheEntry      = 5000
+	defaultResolveResultEntry = 3000
 
 	// targetRefLabelCRI is a label which contains image reference passed from CRI plugin
 	targetRefLabelCRI = "containerd.io/snapshot/cri.image-ref"
@@ -88,15 +90,16 @@ const (
 )
 
 type Config struct {
+	remote.ResolverConfig             `toml:"resolver"`
 	remote.BlobConfig                 `toml:"blob"`
 	keychain.KubeconfigKeychainConfig `toml:"kubeconfig_keychain"`
-	ResolverConfig                    map[string]remote.ResolverConfig `toml:"resolver"`
-	HTTPCacheType                     string                           `toml:"http_cache_type"`
-	FSCacheType                       string                           `toml:"filesystem_cache_type"`
-	LRUCacheEntry                     int                              `toml:"lru_max_entry"`
-	PrefetchSize                      int64                            `toml:"prefetch_size"`
-	NoPrefetch                        bool                             `toml:"noprefetch"`
-	Debug                             bool                             `toml:"debug"`
+	HTTPCacheType                     string `toml:"http_cache_type"`
+	FSCacheType                       string `toml:"filesystem_cache_type"`
+	LRUCacheEntry                     int    `toml:"lru_max_entry"`
+	ResolveResultEntry                int    `toml:"resolve_result_entry"`
+	PrefetchSize                      int64  `toml:"prefetch_size"`
+	NoPrefetch                        bool   `toml:"noprefetch"`
+	Debug                             bool   `toml:"debug"`
 }
 
 func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.FileSystem, error) {
@@ -116,6 +119,10 @@ func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.Fil
 		authn.DefaultKeychain,
 		keychain.NewKubeconfigKeychain(ctx, config.KubeconfigKeychainConfig),
 	)
+	resolveResultEntry := config.ResolveResultEntry
+	if resolveResultEntry == 0 {
+		resolveResultEntry = defaultResolveResultEntry
+	}
 	return &filesystem{
 		resolver:              remote.NewResolver(keychain, config.ResolverConfig),
 		blobConfig:            config.BlobConfig,
@@ -125,7 +132,7 @@ func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.Fil
 		noprefetch:            config.NoPrefetch,
 		debug:                 config.Debug,
 		layer:                 make(map[string]*layer),
-		resolveResult:         make(map[string]*resolveResult),
+		resolveResult:         lru.New(resolveResultEntry),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
 	}, nil
 }
@@ -148,7 +155,7 @@ type filesystem struct {
 	debug                 bool
 	layer                 map[string]*layer
 	layerMu               sync.Mutex
-	resolveResult         map[string]*resolveResult
+	resolveResult         *lru.Cache
 	resolveResultMu       sync.Mutex
 	backgroundTaskManager *task.BackgroundTaskManager
 }
@@ -170,23 +177,32 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	logCtx = logCtx.WithField("ref", ref).WithField("digest", digest)
 
 	// Resolve the target layer and the all chained layers
-	target := []string{digest}
+	var (
+		resolved *resolveResult
+		target   = []string{digest}
+	)
 	if chain, ok := labels[handler.TargetChainLabel]; ok {
 		target = append(target, strings.Split(chain, ",")...)
 	}
 	for _, dgst := range target {
-		key := fmt.Sprintf("%s/%s", ref, dgst)
+		var (
+			rr  *resolveResult
+			key = fmt.Sprintf("%s/%s", ref, dgst)
+		)
 		fs.resolveResultMu.Lock()
-		if rr := fs.resolveResult[key]; rr == nil || rr.err != nil {
-			fs.resolveResult[key] = fs.resolve(ctx, ref, dgst)
+		if cached, ok := fs.resolveResult.Get(key); ok && cached.(*resolveResult).err == nil {
+			rr = cached.(*resolveResult) // hit cache
+		} else {
+			rr = fs.resolve(ctx, ref, dgst) // missed cache
+			fs.resolveResult.Add(key, rr)
+		}
+		if dgst == digest {
+			resolved = rr
 		}
 		fs.resolveResultMu.Unlock()
 	}
 
 	// Get the resolved layer
-	fs.resolveResultMu.Lock()
-	resolved := fs.resolveResult[fmt.Sprintf("%s/%s", ref, digest)]
-	fs.resolveResultMu.Unlock()
 	if resolved == nil {
 		logCtx.Debug("resolve result isn't registered")
 		return fmt.Errorf("resolve result(%q,%q) isn't registered", ref, digest)

@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/golang/groupcache/lru"
 	"github.com/google/go-containerregistry/pkg/name"
 )
 
@@ -151,10 +152,12 @@ func TestMirror(t *testing.T) {
 			}
 			r := &Resolver{
 				transport: tt.tr,
-				trPool:    make(map[string]http.RoundTripper),
-				config: map[string]ResolverConfig{
-					refHost: {
-						Mirrors: mirrors,
+				trPool:    lru.New(3000),
+				config: ResolverConfig{
+					Host: map[string]HostConfig{
+						refHost: {
+							Mirrors: mirrors,
+						},
 					},
 				},
 			}
@@ -211,18 +214,18 @@ func TestPool(t *testing.T) {
 		name  string
 		pool  http.RoundTripper
 		base  http.RoundTripper
-		check func(t *testing.T, pool http.RoundTripper, url string, err error)
+		check func(t *testing.T, pool interface{}, url string, err error)
 	}{
 		{
 			name: "create-new-tr",
 			pool: nil,
 			base: okRoundTripper,
-			check: func(t *testing.T, pool http.RoundTripper, url string, err error) {
+			check: func(t *testing.T, pool interface{}, url string, err error) {
 				if err != nil {
 					t.Errorf("want to success: %v", err)
 					return
 				}
-				if pool == nil {
+				if p, ok := pool.(http.RoundTripper); !ok || p == nil {
 					t.Error("new RoundTripper isn't pooled")
 					return
 				}
@@ -236,12 +239,12 @@ func TestPool(t *testing.T) {
 			name: "create-new-tr-with-redirect",
 			pool: nil,
 			base: redirectRoundTripper,
-			check: func(t *testing.T, pool http.RoundTripper, url string, err error) {
+			check: func(t *testing.T, pool interface{}, url string, err error) {
 				if err != nil {
 					t.Errorf("want to success: %v", err)
 					return
 				}
-				if pool == nil {
+				if p, ok := pool.(http.RoundTripper); !ok || p == nil {
 					t.Error("new RoundTripper isn't pooled")
 					return
 				}
@@ -255,7 +258,7 @@ func TestPool(t *testing.T) {
 			name: "fail-to-create-new-tr-with-unauthorized",
 			pool: nil,
 			base: unauthorizedRoundTripper,
-			check: func(t *testing.T, pool http.RoundTripper, url string, err error) {
+			check: func(t *testing.T, pool interface{}, url string, err error) {
 				if err == nil {
 					t.Error("want to fail")
 					return
@@ -266,12 +269,12 @@ func TestPool(t *testing.T) {
 			name: "use-pooled-ok-tr",
 			pool: okRoundTripper,
 			base: notFoundRoundTripper, // won't be used
-			check: func(t *testing.T, pool http.RoundTripper, url string, err error) {
+			check: func(t *testing.T, pool interface{}, url string, err error) {
 				if err != nil {
 					t.Errorf("want to success: %v", err)
 					return
 				}
-				if pool != okRoundTripper {
+				if p, ok := pool.(http.RoundTripper); !ok || p != okRoundTripper {
 					t.Error("got RoundTripper isn't same as pooled one")
 					return
 				}
@@ -285,12 +288,12 @@ func TestPool(t *testing.T) {
 			name: "use-pooled-redirect-tr",
 			pool: redirectRoundTripper,
 			base: notFoundRoundTripper, // won't be used
-			check: func(t *testing.T, pool http.RoundTripper, url string, err error) {
+			check: func(t *testing.T, pool interface{}, url string, err error) {
 				if err != nil {
 					t.Errorf("want to success: %v", err)
 					return
 				}
-				if pool != redirectRoundTripper {
+				if p, ok := pool.(http.RoundTripper); !ok || p != redirectRoundTripper {
 					t.Error("got RoundTripper isn't same as pooled one")
 					return
 				}
@@ -304,12 +307,12 @@ func TestPool(t *testing.T) {
 			name: "refresh-unauthorized-tr",
 			pool: unauthorizedRoundTripper,
 			base: okRoundTripper,
-			check: func(t *testing.T, pool http.RoundTripper, url string, err error) {
+			check: func(t *testing.T, pool interface{}, url string, err error) {
 				if err != nil {
 					t.Errorf("want to success: %v", err)
 					return
 				}
-				if pool == unauthorizedRoundTripper {
+				if p, ok := pool.(http.RoundTripper); !ok || p == unauthorizedRoundTripper {
 					t.Error("RoundTripper must be refreshed")
 					return
 				}
@@ -323,12 +326,12 @@ func TestPool(t *testing.T) {
 			name: "refresh-unauthorized-tr-with-redirect",
 			pool: unauthorizedRoundTripper,
 			base: redirectRoundTripper,
-			check: func(t *testing.T, pool http.RoundTripper, url string, err error) {
+			check: func(t *testing.T, pool interface{}, url string, err error) {
 				if err != nil {
 					t.Errorf("want to success: %v", err)
 					return
 				}
-				if pool == unauthorizedRoundTripper {
+				if p, ok := pool.(http.RoundTripper); !ok || p == unauthorizedRoundTripper {
 					t.Error("RoundTripper must be refreshed")
 					return
 				}
@@ -342,7 +345,7 @@ func TestPool(t *testing.T) {
 			name: "fail-to-refresh",
 			pool: unauthorizedRoundTripper,
 			base: notFoundRoundTripper,
-			check: func(t *testing.T, pool http.RoundTripper, url string, err error) {
+			check: func(t *testing.T, pool interface{}, url string, err error) {
 				if err == nil {
 					t.Error("want to fail")
 					return
@@ -355,16 +358,17 @@ func TestPool(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &Resolver{
 				transport: tt.base,
-				trPool:    make(map[string]http.RoundTripper),
+				trPool:    lru.New(3000),
 			}
 			if tt.pool != nil {
-				r.trPool[ref.Name()] = tt.pool
+				r.trPool.Add(ref.Name(), tt.pool)
 			}
-			url, err := r.resolveReference(ref, digest)
-			if r.trPool == nil {
-				t.Fatal("transport pool is empty")
+			url, tr, err := r.resolveReference(ref, digest)
+			cached, ok := r.trPool.Get(ref.Name())
+			if ok && cached.(http.RoundTripper) != tr {
+				t.Errorf("Invalid cached transport")
 			}
-			tt.check(t, r.trPool[ref.Name()], url, err)
+			tt.check(t, cached, url, err)
 		})
 	}
 }
