@@ -19,7 +19,7 @@ require (
 	github.com/gogo/googleapis v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20191027212112-611e8accdfc9
 	github.com/google/crfs v0.0.0-20191108021818-71d77da419c9
-	github.com/google/go-containerregistry v0.0.0-20200320200342-35f57d7d4930
+	github.com/google/go-containerregistry v0.0.0-20200425101607-48f605c3b60a
 	github.com/hanwen/go-fuse v1.0.0
 	github.com/imdario/mergo v0.3.9 // indirect
 	github.com/opencontainers/go-digest v1.0.0-rc1.0.20180430190053-c9281466c8b2 // indirect
