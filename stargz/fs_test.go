@@ -45,8 +45,8 @@ import (
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
-	"github.com/hanwen/go-fuse/fuse"
-	"github.com/hanwen/go-fuse/fuse/nodefs"
+	fusefs "github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"golang.org/x/sys/unix"
 )
 
@@ -149,8 +149,8 @@ func TestNodeRead(t *testing.T) {
 						// data we get from the file node.
 						f := makeNodeReader(t, []byte(sampleData1)[:filesize], sampleChunkSize)
 						tmpbuf := make([]byte, size) // fuse library can request bigger than remain
-						rr, status := f.Read(tmpbuf, offset)
-						if status != fuse.OK {
+						rr, errno := f.Read(context.Background(), tmpbuf, offset)
+						if errno != 0 {
 							t.Errorf("failed to read off=%d, size=%d, filesize=%d: %v", offset, size, filesize, err)
 							return
 						}
@@ -159,8 +159,8 @@ func TestNodeRead(t *testing.T) {
 							return
 						}
 						tmpbuf = make([]byte, len(tmpbuf))
-						respData, status := rr.Bytes(tmpbuf)
-						if status != fuse.OK {
+						respData, fs := rr.Bytes(tmpbuf)
+						if fs != fuse.OK {
 							t.Errorf("failed to read result data for off=%d, size=%d, filesize=%d: %v", offset, size, filesize, err)
 						}
 
@@ -185,19 +185,14 @@ func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 		t.Fatal("failed to make stargz")
 	}
 	rootNode := getRootNode(t, r)
-	var attr fuse.Attr
-	inode, status := rootNode.Lookup(&attr, testName, nil)
-	if status != fuse.OK {
-		t.Fatalf("failed to lookup test node; status: %v", status)
+	var eo fuse.EntryOut
+	inode, errno := rootNode.Lookup(context.Background(), testName, &eo)
+	if errno != 0 {
+		t.Fatalf("failed to lookup test node; errno: %v", errno)
 	}
-	ni := inode.Node()
-	node, ok := ni.(*node)
-	if !ok {
-		t.Fatalf("test node is invalid")
-	}
-	f, status := node.Open(0, nil)
-	if status != fuse.OK {
-		t.Fatalf("failed to open test file; status: %v", status)
+	f, _, errno := inode.Operations().(fusefs.NodeOpener).Open(context.Background(), 0)
+	if errno != 0 {
+		t.Fatalf("failed to open test file; errno: %v", errno)
 	}
 	return f.(*file)
 }
@@ -299,7 +294,7 @@ func TestExistence(t *testing.T) {
 			},
 			want: []check{
 				hasFileDigest("test", digestFor("test")),
-				hasStateFile(testStateLayerDigest + ".json"),
+				hasStateFile(t, testStateLayerDigest+".json"),
 			},
 		},
 		{
@@ -353,18 +348,11 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 		t.Fatalf("failed to find root in stargz")
 	}
 	rootNode := &node{
-		Node:  nodefs.NewDefaultNode(),
 		layer: &testLayer{r},
 		e:     root,
 		s:     newState(testStateLayerDigest, &dummyBlob{}),
 	}
-	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
-		NegativeTimeout: 0,
-		AttrTimeout:     time.Second,
-		EntryTimeout:    time.Second,
-		Owner:           nil, // preserve owners.
-	})
-
+	fusefs.NewNodeFS(rootNode, &fusefs.Options{})
 	return rootNode
 }
 
@@ -512,8 +500,7 @@ type check func(*testing.T, *node)
 
 func fileNotExist(file string) check {
 	return func(t *testing.T, root *node) {
-		ent, inode, err := getDirentAndNode(root, file)
-		if err == nil || ent != nil || inode != nil {
+		if _, _, err := getDirentAndNode(t, root, file); err == nil {
 			t.Errorf("Node %q exists", file)
 		}
 	}
@@ -521,34 +508,27 @@ func fileNotExist(file string) check {
 
 func hasFileDigest(file string, digest string) check {
 	return func(t *testing.T, root *node) {
-		_, inode, err := getDirentAndNode(root, file)
+		_, n, err := getDirentAndNode(t, root, file)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", file, err)
 		}
-		n, ok := inode.Node().(*node)
-		if !ok {
-			t.Fatalf("entry %q isn't a normal node", file)
-		}
-		if n.e.Digest != digest {
-			t.Fatalf("Digest(%q) = %q, want %q", file, n.e.Digest, digest)
+		if ndgst := n.Operations().(*node).e.Digest; ndgst != digest {
+			t.Fatalf("Digest(%q) = %q, want %q", file, ndgst, digest)
 		}
 	}
 }
 
 func hasExtraMode(name string, mode os.FileMode) check {
 	return func(t *testing.T, root *node) {
-		_, inode, err := getDirentAndNode(root, name)
+		_, n, err := getDirentAndNode(t, root, name)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", name, err)
 		}
-		n, ok := inode.Node().(*node)
-		if !ok {
-			t.Fatalf("entry %q isn't a normal node", name)
+		var ao fuse.AttrOut
+		if errno := n.Operations().(fusefs.NodeGetattrer).Getattr(context.Background(), nil, &ao); errno != 0 {
+			t.Fatalf("failed to get attributes of node %q: %v", name, errno)
 		}
-		var a fuse.Attr
-		if status := n.GetAttr(&a, nil, nil); status != fuse.OK {
-			t.Fatalf("failed to get attributes of node %q: %v", name, status)
-		}
+		a := ao.Attr
 		gotMode := a.Mode & (syscall.S_ISUID | syscall.S_ISGID | syscall.S_ISVTX)
 		wantMode := extraModeToTarMode(mode)
 		if gotMode != uint32(wantMode) {
@@ -559,18 +539,15 @@ func hasExtraMode(name string, mode os.FileMode) check {
 
 func hasValidWhiteout(name string) check {
 	return func(t *testing.T, root *node) {
-		ent, inode, err := getDirentAndNode(root, name)
+		ent, n, err := getDirentAndNode(t, root, name)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", name, err)
 		}
-		n, ok := inode.Node().(*whiteout)
-		if !ok {
-			t.Fatalf("entry %q isn't a whiteout node", name)
+		var ao fuse.AttrOut
+		if errno := n.Operations().(fusefs.NodeGetattrer).Getattr(context.Background(), nil, &ao); errno != 0 {
+			t.Fatalf("failed to get attributes of file %q: %v", name, errno)
 		}
-		var a fuse.Attr
-		if status := n.GetAttr(&a, nil, nil); status != fuse.OK {
-			t.Fatalf("failed to get attributes of file %q: %v", name, status)
-		}
+		a := ao.Attr
 		if a.Ino != ent.Ino {
 			t.Errorf("inconsistent inodes %d(Node) != %d(Dirent)", a.Ino, ent.Ino)
 			return
@@ -598,20 +575,18 @@ func hasValidWhiteout(name string) check {
 
 func hasNodeXattrs(entry, name, value string) check {
 	return func(t *testing.T, root *node) {
-		_, inode, err := getDirentAndNode(root, entry)
+		_, n, err := getDirentAndNode(t, root, entry)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", entry, err)
 		}
-		n, ok := inode.Node().(*node)
-		if !ok {
-			t.Fatalf("entry %q isn't a normal node", entry)
-		}
 
 		// check xattr exists in the xattrs list.
-		attrs, status := n.ListXAttr(nil)
-		if status != fuse.OK {
+		buf := make([]byte, 1000)
+		nb, errno := n.Operations().(fusefs.NodeListxattrer).Listxattr(context.Background(), buf)
+		if errno != 0 {
 			t.Fatalf("failed to get xattrs list of node %q: %v", entry, err)
 		}
+		attrs := strings.Split(string(buf[:nb]), "\x00")
 		var found bool
 		for _, x := range attrs {
 			if x == name {
@@ -624,9 +599,14 @@ func hasNodeXattrs(entry, name, value string) check {
 		}
 
 		// check the xattr has valid value.
-		v, status := n.GetXAttr(name, nil)
-		if status != fuse.OK {
+		v := make([]byte, len(value))
+		nv, errno := n.Operations().(fusefs.NodeGetxattrer).Getxattr(context.Background(), name, v)
+		if errno != 0 {
 			t.Fatalf("failed to get xattr %q of node %q: %v", name, entry, err)
+		}
+		if int(nv) != len(value) {
+			t.Fatalf("invalid xattr size for file %q, value %q got %d; want %d",
+				name, value, nv, len(value))
 		}
 		if string(v) != value {
 			t.Errorf("node %q has an invalid xattr %q; want %q", entry, v, value)
@@ -635,58 +615,62 @@ func hasNodeXattrs(entry, name, value string) check {
 	}
 }
 
-func hasStateFile(id string) check {
-	isExist := func(name string, ents []fuse.DirEntry) bool {
-		for _, e := range ents {
-			if e.Name == name {
-				return true
-			}
+func hasEntry(t *testing.T, name string, ents fusefs.DirStream) (fuse.DirEntry, bool) {
+	for ents.HasNext() {
+		de, errno := ents.Next()
+		if errno != 0 {
+			t.Fatalf("faield to read entries for %q", name)
 		}
-		return false
+		if de.Name == name {
+			return de, true
+		}
 	}
+	return fuse.DirEntry{}, false
+}
 
+func hasStateFile(t *testing.T, id string) check {
 	return func(t *testing.T, root *node) {
 
 		// Check the state dir is hidden on OpenDir for "/"
-		ents, status := root.OpenDir(nil)
-		if status != fuse.OK {
-			t.Errorf("failed to open root directory: %v", status)
+		ents, errno := root.Readdir(context.Background())
+		if errno != 0 {
+			t.Errorf("failed to open root directory: %v", errno)
 			return
 		}
-		if isExist(stateDirName, ents) {
+		if _, ok := hasEntry(t, stateDirName, ents); ok {
 			t.Errorf("state direntry %q should not be listed", stateDirName)
 			return
 		}
 
 		// Check existence of state dir
-		var attr fuse.Attr
-		sti, status := root.Lookup(&attr, stateDirName, nil)
-		if status != fuse.OK {
-			t.Errorf("failed to lookup directory %q: %v", stateDirName, status)
+		var eo fuse.EntryOut
+		sti, errno := root.Lookup(context.Background(), stateDirName, &eo)
+		if errno != 0 {
+			t.Errorf("failed to lookup directory %q: %v", stateDirName, errno)
 			return
 		}
-		st, ok := sti.Node().(*state)
+		st, ok := sti.Operations().(*state)
 		if !ok {
 			t.Errorf("directory %q isn't a state node", stateDirName)
 			return
 		}
 
 		// Check existence of state file
-		ents, status = st.OpenDir(nil)
-		if status != fuse.OK {
-			t.Errorf("failed to open directory %q: %v", stateDirName, status)
+		ents, errno = st.Readdir(context.Background())
+		if errno != 0 {
+			t.Errorf("failed to open directory %q: %v", stateDirName, errno)
 			return
 		}
-		if !isExist(id, ents) {
+		if _, ok := hasEntry(t, id, ents); !ok {
 			t.Errorf("direntry %q not found in %q", id, stateDirName)
 			return
 		}
-		inode, status := st.Lookup(&attr, id, nil)
-		if status != fuse.OK {
-			t.Errorf("failed to lookup node %q in %q: %v", id, stateDirName, status)
+		inode, errno := st.Lookup(context.Background(), id, &eo)
+		if errno != 0 {
+			t.Errorf("failed to lookup node %q in %q: %v", id, stateDirName, errno)
 			return
 		}
-		n, ok := inode.Node().(*statFile)
+		n, ok := inode.Operations().(*statFile)
 		if !ok {
 			t.Errorf("entry %q isn't a normal node", id)
 			return
@@ -700,22 +684,24 @@ func hasStateFile(id string) check {
 		root.s.report(wantErr)
 
 		// obtain file size (check later)
-		status = n.GetAttr(&attr, nil, nil)
-		if status != fuse.OK {
-			t.Errorf("failed to get attr of state file: %v", status)
+		var ao fuse.AttrOut
+		errno = n.Operations().(fusefs.NodeGetattrer).Getattr(context.Background(), nil, &ao)
+		if errno != 0 {
+			t.Errorf("failed to get attr of state file: %v", errno)
 			return
 		}
+		attr := ao.Attr
 
 		// get data via state file
 		tmp := make([]byte, 4096)
-		res, status := n.Read(nil, tmp, 0, nil)
-		if status != fuse.OK {
-			t.Errorf("failed to read state file: %v", status)
+		res, errno := n.Read(context.Background(), nil, tmp, 0)
+		if errno != 0 {
+			t.Errorf("failed to read state file: %v", errno)
 			return
 		}
 		gotState, status := res.Bytes(nil)
 		if status != fuse.OK {
-			t.Errorf("failed to get result bytes of state file: %v", status)
+			t.Errorf("failed to get result bytes of state file: %v", errno)
 			return
 		}
 		if attr.Size != uint64(len(string(gotState))) {
@@ -737,23 +723,23 @@ func hasStateFile(id string) check {
 
 // getDirentAndNode gets dirent and node at the specified path at once and makes
 // sure that the both of them exist.
-func getDirentAndNode(root *node, path string) (ent *fuse.DirEntry, n *nodefs.Inode, err error) {
+func getDirentAndNode(t *testing.T, root *node, path string) (ent fuse.DirEntry, n *fusefs.Inode, err error) {
 	dir, base := filepath.Split(filepath.Clean(path))
 
 	// get the target's parent directory.
-	var attr fuse.Attr
+	var eo fuse.EntryOut
 	d := root
 	for _, name := range strings.Split(dir, "/") {
 		if len(name) == 0 {
 			continue
 		}
-		di, status := d.Lookup(&attr, name, nil)
-		if status != fuse.OK {
-			err = fmt.Errorf("failed to lookup directory %q: %v", name, status)
+		di, errno := d.Lookup(context.Background(), name, &eo)
+		if errno != 0 {
+			err = fmt.Errorf("failed to lookup directory %q: %v", name, errno)
 			return
 		}
 		var ok bool
-		if d, ok = di.Node().(*node); !ok {
+		if d, ok = di.Operations().(*node); !ok {
 			err = fmt.Errorf("directory %q isn't a normal node", name)
 			return
 		}
@@ -761,25 +747,19 @@ func getDirentAndNode(root *node, path string) (ent *fuse.DirEntry, n *nodefs.In
 	}
 
 	// get the target's direntry.
-	var ents []fuse.DirEntry
-	ents, status := d.OpenDir(nil)
-	if status != fuse.OK {
-		err = fmt.Errorf("failed to open directory %q: %v", path, status)
+	ents, errno := d.Readdir(context.Background())
+	if errno != 0 {
+		err = fmt.Errorf("failed to open directory %q: %v", path, errno)
 	}
-	var found bool
-	for _, e := range ents {
-		if e.Name == base {
-			ent, found = &e, true
-		}
-	}
-	if !found {
+	ent, ok := hasEntry(t, base, ents)
+	if !ok {
 		err = fmt.Errorf("direntry %q not found in the parent directory of %q", base, path)
 	}
 
 	// get the target's node.
-	n, status = d.Lookup(&attr, base, nil)
-	if status != fuse.OK {
-		err = fmt.Errorf("failed to lookup node %q: %v", path, status)
+	n, errno = d.Lookup(context.Background(), base, &eo)
+	if errno != 0 {
+		err = fmt.Errorf("failed to lookup node %q: %v", path, errno)
 	}
 
 	return
