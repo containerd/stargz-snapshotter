@@ -53,8 +53,7 @@ func NewDirectoryCache(directory string, memCacheSize int, opts ...DirOption) (B
 	for _, o := range opts {
 		opt = o(opt)
 	}
-	err := os.MkdirAll(directory, os.ModePerm)
-	if err != nil {
+	if err := os.MkdirAll(directory, os.ModePerm); err != nil {
 		return nil, err
 	}
 	dc := &directoryCache{
@@ -70,15 +69,15 @@ func NewDirectoryCache(directory string, memCacheSize int, opts ...DirOption) (B
 // directoryCache is a cache implementation which backend is a directory.
 type directoryCache struct {
 	cache     *lru.Cache
+	cacheMu   sync.Mutex
 	directory string
 	syncAdd   bool
-	mmu       sync.Mutex
-	fmu       sync.Mutex
+	fileMu    sync.Mutex
 }
 
 func (dc *directoryCache) Fetch(blobHash string) (p []byte, err error) {
-	dc.mmu.Lock()
-	defer dc.mmu.Unlock()
+	dc.cacheMu.Lock()
+	defer dc.cacheMu.Unlock()
 
 	if cache, ok := dc.cache.Get(blobHash); ok {
 		p, ok := cache.([]byte)
@@ -107,14 +106,14 @@ func (dc *directoryCache) Fetch(blobHash string) (p []byte, err error) {
 }
 
 func (dc *directoryCache) Add(blobHash string, p []byte) {
-	dc.mmu.Lock()
-	defer dc.mmu.Unlock()
+	dc.cacheMu.Lock()
+	defer dc.cacheMu.Unlock()
 
 	dc.cache.Add(blobHash, p)
 
 	addFunc := func() {
-		dc.fmu.Lock()
-		defer dc.fmu.Unlock()
+		dc.fileMu.Lock()
+		defer dc.fileMu.Unlock()
 
 		// Check if cache exists.
 		c := filepath.Join(dc.directory, blobHash[:2], blobHash)
