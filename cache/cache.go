@@ -106,10 +106,14 @@ func (dc *directoryCache) Fetch(blobHash string) (p []byte, err error) {
 }
 
 func (dc *directoryCache) Add(blobHash string, p []byte) {
-	dc.cacheMu.Lock()
-	defer dc.cacheMu.Unlock()
+	// Copy the original data for avoiding the cached contents to be edited accidentally
+	p2 := make([]byte, len(p))
+	copy(p2, p)
+	p = p2
 
+	dc.cacheMu.Lock()
 	dc.cache.Add(blobHash, p)
+	dc.cacheMu.Unlock()
 
 	addFunc := func() {
 		dc.fileMu.Lock()

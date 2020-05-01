@@ -66,17 +66,17 @@ services:
     - ${AUTH_DIR}:/auth
     - /dev/fuse:/dev/fuse
     - type: volume
-      source: containerd-data
+      source: integration-containerd-data
       target: /var/lib/containerd
       volume:
         nosuid: false
     - type: volume
-      source: containerd-stargz-grpc-data
+      source: integration-containerd-stargz-grpc-data
       target: /var/lib/containerd-stargz-grpc
       volume:
         nosuid: false
     - type: volume
-      source: containerd-stargz-grpc-status
+      source: integration-containerd-stargz-grpc-status
       target: /run/containerd-stargz-grpc
       volume:
         nosuid: false
@@ -99,9 +99,9 @@ services:
     image: registry:2
     container_name: registry-alt
 volumes:
-  containerd-data:
-  containerd-stargz-grpc-data:
-  containerd-stargz-grpc-status:
+  integration-containerd-data:
+  integration-containerd-stargz-grpc-data:
+  integration-containerd-stargz-grpc-status:
 EOF
 
 echo "Testing..."

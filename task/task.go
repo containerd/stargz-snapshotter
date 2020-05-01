@@ -33,7 +33,8 @@ func NewBackgroundTaskManager(concurrency int64, period time.Duration) *Backgrou
 	return &BackgroundTaskManager{
 		backgroundSem:                semaphore.NewWeighted(concurrency),
 		prioritizedTaskSilencePeriod: period,
-		prioritizedTaskCond:          sync.NewCond(&sync.Mutex{}),
+		prioritizedTaskStartNotify:   make(chan struct{}),
+		prioritizedTaskDoneCond:      sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -62,20 +63,32 @@ type BackgroundTaskManager struct {
 	prioritizedTasks             int64
 	backgroundSem                *semaphore.Weighted
 	prioritizedTaskSilencePeriod time.Duration
-	prioritizedTaskCond          *sync.Cond
+	prioritizedTaskStartNotify   chan struct{}
+	prioritizedTaskStartNotifyMu sync.Mutex
+	prioritizedTaskDoneCond      *sync.Cond
 }
 
 // DoPrioritizedTask tells the manager that we are running a prioritized task
 // and don't want background tasks to disturb resources(CPU, NW, etc...)
 func (ts *BackgroundTaskManager) DoPrioritizedTask() {
+	// Notify the prioritized task execution to background tasks.
+	ts.prioritizedTaskStartNotifyMu.Lock()
 	atomic.AddInt64(&ts.prioritizedTasks, 1)
-	ts.prioritizedTaskCond.Broadcast()
+	close(ts.prioritizedTaskStartNotify)
+	ts.prioritizedTaskStartNotify = make(chan struct{})
+	ts.prioritizedTaskStartNotifyMu.Unlock()
 }
 
 // DonePrioritizedTask tells the manager that we've done a prioritized task
 // and don't want background tasks to disturb resources(CPU, NW, etc...)
 func (ts *BackgroundTaskManager) DonePrioritizedTask() {
-	atomic.AddInt64(&ts.prioritizedTasks, -1)
+	go func() {
+		// Notify the task completion after `ts.prioritizedTaskSilencePeriod`
+		// so that background tasks aren't invoked immediately.
+		time.Sleep(ts.prioritizedTaskSilencePeriod)
+		atomic.AddInt64(&ts.prioritizedTasks, -1)
+		ts.prioritizedTaskDoneCond.Broadcast()
+	}()
 }
 
 // InvokeBackgroundTask invokes a background task. The task is started only when
@@ -83,58 +96,58 @@ func (ts *BackgroundTaskManager) DonePrioritizedTask() {
 // execution of all background tasks. Background task must be able to be
 // cancelled via context.Context argument and be able to be restarted again.
 func (ts *BackgroundTaskManager) InvokeBackgroundTask(do func(context.Context), timeout time.Duration) {
-	waitUntilPrioritizedTaskRunning := func() <-chan int64 {
-		ch := make(chan int64)
-		go func() {
+	for {
+		// Wait until all prioritized tasks are done
+		for {
 			if ts.prioritizedTasks <= 0 {
-				// waits until prioritized tasks are started
-				ts.prioritizedTaskCond.L.Lock()
-				ts.prioritizedTaskCond.Wait()
-				ts.prioritizedTaskCond.L.Unlock()
+				break
 			}
-			ch <- ts.prioritizedTasks
-		}()
-		return ch
-	}
 
-try:
-	// if nobody add prioritized tasks in specified period, this is a
-	// chance for us to do some background tasks
-	select {
-	case <-time.After(ts.prioritizedTaskSilencePeriod):
-	case <-waitUntilPrioritizedTaskRunning():
-		time.Sleep(time.Second)
-		goto try
-	}
+			// waits until a prioritized task is done
+			ts.prioritizedTaskDoneCond.L.Lock()
+			if ts.prioritizedTasks > 0 {
+				ts.prioritizedTaskDoneCond.Wait()
+			}
+			ts.prioritizedTaskDoneCond.L.Unlock()
+		}
 
-	complete := func() bool {
 		// limited number of background tasks can run at once.
 		// if prioritized tasks are running, cancel this task.
-		ts.backgroundSem.Acquire(context.Background(), 1)
-		defer ts.backgroundSem.Release(1)
-		if ts.prioritizedTasks > 0 {
-			return false
-		}
+		if func() bool {
+			ts.backgroundSem.Acquire(context.Background(), 1)
+			defer ts.backgroundSem.Release(1)
 
-		// read required range. if some prioritized tasks added during
-		// reading, cancel the work and wait again.
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		done := make(chan struct{})
-		go func() {
-			do(ctx)
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-waitUntilPrioritizedTaskRunning():
-			cancel()
-			return false
-		}
-		return true
-	}()
+			// Get notify the prioritized tasks execution.
+			ts.prioritizedTaskStartNotifyMu.Lock()
+			ch := ts.prioritizedTaskStartNotify
+			tasks := ts.prioritizedTasks
+			ts.prioritizedTaskStartNotifyMu.Unlock()
+			if tasks > 0 {
+				return false
+			}
 
-	if !complete {
-		goto try
+			// Invoke the background task. if some prioritized tasks added during
+			// execution, cancel it and try it later.
+			var (
+				done        = make(chan struct{})
+				ctx, cancel = context.WithTimeout(context.Background(), timeout)
+			)
+			defer cancel()
+			go func() {
+				do(ctx)
+				close(done)
+			}()
+
+			// Wait until the background task is done or canceled.
+			select {
+			case <-ch: // some prioritized tasks started; retry it later
+				cancel()
+				return false
+			case <-done: // All tasks completed
+			}
+			return true
+		}() {
+			break
+		}
 	}
 }

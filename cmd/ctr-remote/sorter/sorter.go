@@ -25,7 +25,7 @@ import (
 	"strings"
 
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/util"
-	"github.com/containerd/stargz-snapshotter/stargz/reader"
+	"github.com/containerd/stargz-snapshotter/stargz"
 	"github.com/pkg/errors"
 )
 
@@ -49,7 +49,7 @@ func Sort(in io.ReaderAt, log []string) (io.Reader, error) {
 	if len(log) == 0 {
 		sorted.add(&tarEntry{
 			header: &tar.Header{
-				Name:     reader.NoPrefetchLandmark,
+				Name:     stargz.NoPrefetchLandmark,
 				Typeflag: tar.TypeReg,
 				Size:     int64(len([]byte{landmarkContents})),
 			},
@@ -58,7 +58,7 @@ func Sort(in io.ReaderAt, log []string) (io.Reader, error) {
 	} else {
 		sorted.add(&tarEntry{
 			header: &tar.Header{
-				Name:     reader.PrefetchLandmark,
+				Name:     stargz.PrefetchLandmark,
 				Typeflag: tar.TypeReg,
 				Size:     int64(len([]byte{landmarkContents})),
 			},
@@ -108,7 +108,7 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 				return nil, errors.Wrap(err, "failed to parse tar file")
 			}
 		}
-		if h.Name == reader.PrefetchLandmark || h.Name == reader.NoPrefetchLandmark {
+		if h.Name == stargz.PrefetchLandmark || h.Name == stargz.NoPrefetchLandmark {
 			// Ignore existing landmark
 			continue
 		}

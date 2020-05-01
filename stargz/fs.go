@@ -38,7 +38,6 @@ package stargz
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -80,8 +79,8 @@ const (
 	opaqueXattr               = "trusted.overlay.opaque"
 	opaqueXattrValue          = "y"
 	stateDirName              = ".stargz-snapshotter"
-	defaultLRUCacheEntry      = 5000
-	defaultResolveResultEntry = 3000
+	defaultLRUCacheEntry      = 100
+	defaultResolveResultEntry = 100
 
 	// targetRefLabelCRI is a label which contains image reference passed from CRI plugin
 	targetRefLabelCRI = "containerd.io/snapshot/cri.image-ref"
@@ -90,6 +89,14 @@ const (
 	// targetImageLayersLabel is a label which contains layer digests contained in
 	// the target image and is passed from CRI plugin.
 	targetImageLayersLabel = "containerd.io/snapshot/cri.image-layers"
+
+	// PrefetchLandmark is a file entry which indicates the end position of
+	// prefetch in the stargz file.
+	PrefetchLandmark = ".prefetch.landmark"
+
+	// NoPrefetchLandmark is a file entry which indicates that no prefetch should
+	// occur in the stargz file.
+	NoPrefetchLandmark = ".no.prefetch.landmark"
 )
 
 type Config struct {
@@ -233,18 +240,15 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// RoundTripper to avoid disturbing other NW-related operations.
 	if !fs.noprefetch {
 		go func() {
-			pr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (int, error) {
-				fs.backgroundTaskManager.DoPrioritizedTask()
-				defer fs.backgroundTaskManager.DonePrioritizedTask()
-				tr, err := fetchTr()
-				if err != nil {
-					logCtx.WithError(err).Debug("failed to prepare transport for prefetch")
-					return 0, err
-				}
-				return l.blob.ReadAt(p, offset, remote.WithRoundTripper(tr))
-			}), 0, l.blob.Size())
-			if err := l.reader.PrefetchWithReader(pr, prefetchSize); err != nil {
-				logCtx.WithError(err).Debug("failed to prefetch layer")
+			fs.backgroundTaskManager.DoPrioritizedTask()
+			defer fs.backgroundTaskManager.DonePrioritizedTask()
+			tr, err := fetchTr()
+			if err != nil {
+				logCtx.WithError(err).Debug("failed to prepare transport for prefetch")
+				return
+			}
+			if err := l.prefetch(prefetchSize, remote.WithRoundTripper(tr)); err != nil {
+				logCtx.WithError(err).Debug("failed to prefetched layer")
 				return
 			}
 			logCtx.Debug("completed to prefetch")
@@ -269,7 +273,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			}, 120*time.Second)
 			return
 		}), 0, l.blob.Size())
-		if err := l.reader.CacheTarGzWithReader(bufio.NewReaderSize(br, 1<<29)); err != nil {
+		if err := l.reader.CacheTarGzWithReader(br); err != nil {
 			logCtx.WithError(err).Debug("failed to fetch whole layer")
 			return
 		}
@@ -306,22 +310,14 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 }
 
 func (fs *filesystem) resolve(ctx context.Context, ref, digest string) *resolveResult {
-	rr := &resolveResult{
-		resolveCompletionCond: sync.NewCond(&sync.Mutex{}),
-	}
-	rr.doingResolve()
-
-	go func() {
-		defer rr.doneResolve()
-
+	return newResolveResult(func() (*layer, error) {
 		log.G(ctx).Debugf("resolving (%q, %q)", ref, digest)
 		defer log.G(ctx).Debugf("resolved (%q, %q)", ref, digest)
 
 		// Resolve the reference and digest
 		blob, err := fs.resolver.Resolve(ref, digest, fs.httpCache, fs.blobConfig)
 		if err != nil {
-			rr.err = errors.Wrap(err, "failed to resolve the reference")
-			return
+			return nil, errors.Wrap(err, "failed to resolve the reference")
 		}
 
 		// Get a reader for stargz archive.
@@ -335,18 +331,11 @@ func (fs *filesystem) resolve(ctx context.Context, ref, digest string) *resolveR
 		}), 0, blob.Size())
 		gr, root, err := reader.NewReader(sr, fs.fsCache)
 		if err != nil {
-			rr.err = errors.Wrap(err, "failed to read layer")
-			return
+			return nil, errors.Wrap(err, "failed to read layer")
 		}
 
-		rr.layer = &layer{
-			blob:   blob,
-			reader: gr,
-			root:   root,
-		}
-	}()
-
-	return rr
+		return newLayer(blob, gr, root), nil
+	})
 }
 
 func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
@@ -367,7 +356,7 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	}
 
 	// Wait for prefetch compeletion
-	if err := l.reader.WaitForPrefetchCompletion(10 * time.Second); err != nil {
+	if err := l.waitForPrefetchCompletion(10 * time.Second); err != nil {
 		logCtx.WithError(err).Warn("failed to sync with prefetch completion")
 	}
 
@@ -466,48 +455,124 @@ func lazyTransport(trFunc func() (http.RoundTripper, error)) func() (http.RoundT
 	}
 }
 
-type layer struct {
-	blob   remote.Blob
-	reader reader.Reader
-	root   *stargz.TOCEntry
+func newResolveResult(init func() (*layer, error)) *resolveResult {
+	rr := &resolveResult{
+		progress: newWaiter(),
+	}
+	rr.progress.start()
+
+	go func() {
+		rr.layer, rr.err = init()
+		rr.progress.done()
+	}()
+
+	return rr
 }
 
 type resolveResult struct {
-	layer                 *layer
-	err                   error
-	resolveInProgress     bool
-	resolveCompletionCond *sync.Cond
-}
-
-func (rr *resolveResult) doingResolve() {
-	rr.resolveInProgress = true
-}
-
-func (rr *resolveResult) doneResolve() {
-	rr.resolveInProgress = false
-	rr.resolveCompletionCond.Broadcast()
+	layer    *layer
+	err      error
+	progress *waiter
 }
 
 func (rr *resolveResult) get(timeout time.Duration) (*layer, error) {
-	waitUntilResolved := func() <-chan struct{} {
+	if err := rr.progress.wait(timeout); err != nil {
+		return nil, err
+	} else if rr.layer == nil && rr.err == nil {
+		return nil, fmt.Errorf("failed to get result")
+	}
+	return rr.layer, rr.err
+}
+
+func newLayer(blob remote.Blob, r reader.Reader, root *stargz.TOCEntry) *layer {
+	return &layer{
+		blob:           blob,
+		reader:         r,
+		root:           root,
+		prefetchWaiter: newWaiter(),
+	}
+}
+
+type layer struct {
+	blob           remote.Blob
+	reader         reader.Reader
+	root           *stargz.TOCEntry
+	prefetchWaiter *waiter
+}
+
+func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
+	l.prefetchWaiter.start()
+	defer l.prefetchWaiter.done()
+
+	if _, ok := l.reader.Lookup(NoPrefetchLandmark); ok {
+		// do not prefetch this layer
+		return nil
+	} else if e, ok := l.reader.Lookup(PrefetchLandmark); ok {
+		// override the prefetch size with optimized value
+		prefetchSize = e.Offset
+	} else if prefetchSize > l.blob.Size() {
+		// adjust prefetch size not to exceed the whole layer size
+		prefetchSize = l.blob.Size()
+	}
+
+	if err := l.blob.Cache(0, prefetchSize, opts...); err != nil {
+		return errors.Wrap(err, "failed to prefetch layer")
+	}
+	pr := io.NewSectionReader(readerAtFunc(func(p []byte, off int64) (int, error) {
+		return l.blob.ReadAt(p, off, opts...)
+	}), 0, prefetchSize)
+	err := l.reader.CacheTarGzWithReader(pr)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return errors.Wrap(err, "failed to cache prefetched layer")
+	}
+
+	return nil
+}
+
+func (l *layer) waitForPrefetchCompletion(timeout time.Duration) error {
+	return l.prefetchWaiter.wait(timeout)
+}
+
+func newWaiter() *waiter {
+	return &waiter{
+		completionCond: sync.NewCond(&sync.Mutex{}),
+	}
+}
+
+type waiter struct {
+	inProgress     bool
+	completionCond *sync.Cond
+}
+
+func (w *waiter) start() {
+	w.inProgress = true
+}
+
+func (w *waiter) done() {
+	w.inProgress = false
+	w.completionCond.Broadcast()
+}
+
+func (w *waiter) wait(timeout time.Duration) error {
+	wait := func() <-chan struct{} {
 		ch := make(chan struct{})
 		go func() {
-			if rr.resolveInProgress {
-				rr.resolveCompletionCond.L.Lock()
-				rr.resolveCompletionCond.Wait()
-				rr.resolveCompletionCond.L.Unlock()
+			w.completionCond.L.Lock()
+			if w.inProgress {
+				w.completionCond.Wait()
 			}
+			w.completionCond.L.Unlock()
 			ch <- struct{}{}
 		}()
 		return ch
 	}
 	select {
 	case <-time.After(timeout):
-		rr.resolveInProgress = false
-		rr.resolveCompletionCond.Broadcast()
-		return nil, fmt.Errorf("timeout(%v)", timeout)
-	case <-waitUntilResolved():
-		return rr.layer, rr.err
+		w.inProgress = false
+		w.completionCond.Broadcast()
+		return fmt.Errorf("timeout(%v)", timeout)
+	case <-wait():
+		return nil
 	}
 }
 
@@ -541,7 +606,7 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	n.e.ForeachChild(func(baseName string, ent *stargz.TOCEntry) bool {
 
 		// We don't want to show prefetch landmarks in "/".
-		if n.e.Name == "" && (baseName == reader.PrefetchLandmark || baseName == reader.NoPrefetchLandmark) {
+		if n.e.Name == "" && (baseName == PrefetchLandmark || baseName == NoPrefetchLandmark) {
 			return true
 		}
 
@@ -592,7 +657,7 @@ func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*node
 	}
 
 	// We don't want to show prefetch landmarks in "/".
-	if n.e.Name == "" && (name == reader.PrefetchLandmark || name == reader.NoPrefetchLandmark) {
+	if n.e.Name == "" && (name == PrefetchLandmark || name == NoPrefetchLandmark) {
 		return nil, fuse.ENOENT
 	}
 

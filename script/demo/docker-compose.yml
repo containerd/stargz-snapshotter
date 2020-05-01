@@ -1,4 +1,4 @@
-version: "3"
+version: "3.4"
 services:
   containerd_demo:
     build: .
@@ -16,13 +16,25 @@ services:
     - https_proxy=${https_proxy}
     - GOPATH=/go
     tmpfs:
-    - /var/lib/containerd
-    - /var/lib/containerd-stargz-grpc
-    - /run/containerd-stargz-grpc
     - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse
     - "${GOPATH}/src/github.com/containerd/stargz-snapshotter:/go/src/github.com/containerd/stargz-snapshotter:ro"
+    - type: volume
+      source: demo-containerd-data
+      target: /var/lib/containerd
+      volume:
+        nosuid: false
+    - type: volume
+      source: demo-containerd-stargz-grpc-data
+      target: /var/lib/containerd-stargz-grpc
+      volume:
+        nosuid: false
+    - type: volume
+      source: demo-containerd-stargz-grpc-status
+      target: /run/containerd-stargz-grpc
+      volume:
+        nosuid: false
   registry2:
     image: registry:2
     container_name: registry2
@@ -31,3 +43,7 @@ services:
     - HTTPS_PROXY=${HTTPS_PROXY}
     - http_proxy=${http_proxy}
     - https_proxy=${https_proxy}
+volumes:
+  demo-containerd-data:
+  demo-containerd-stargz-grpc-data:
+  demo-containerd-stargz-grpc-status:

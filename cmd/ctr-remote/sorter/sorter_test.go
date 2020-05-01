@@ -32,7 +32,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/containerd/stargz-snapshotter/stargz/reader"
+	"github.com/containerd/stargz-snapshotter/stargz"
 )
 
 func TestSort(t *testing.T) {
@@ -411,7 +411,7 @@ type tarent struct {
 func prefetchLandmark() tarent {
 	return tarent{
 		header: &tar.Header{
-			Name:     reader.PrefetchLandmark,
+			Name:     stargz.PrefetchLandmark,
 			Typeflag: tar.TypeReg,
 			Size:     int64(len([]byte{landmarkContents})),
 		},
@@ -422,7 +422,7 @@ func prefetchLandmark() tarent {
 func noPrefetchLandmark() tarent {
 	return tarent{
 		header: &tar.Header{
-			Name:     reader.NoPrefetchLandmark,
+			Name:     stargz.NoPrefetchLandmark,
 			Typeflag: tar.TypeReg,
 			Size:     int64(len([]byte{landmarkContents})),
 		},

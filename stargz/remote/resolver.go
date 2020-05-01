@@ -347,22 +347,20 @@ func (f *fetcher) refresh() (*fetcher, int64, error) {
 	return f.resolver.resolve(f.ref, f.digest)
 }
 
-func (f *fetcher) fetch(requests []region, opts ...Option) (map[region][]byte, error) {
-	if len(requests) == 0 {
-		return nil, nil
+type multipartReadCloser interface {
+	Next() (region, io.Reader, error)
+	Close() error
+}
+
+func (f *fetcher) fetch(ctx context.Context, rs []region, opts ...Option) (multipartReadCloser, error) {
+	if len(rs) == 0 {
+		return nil, fmt.Errorf("no request queried")
 	}
 
 	var (
 		tr              = f.tr
-		ctx, cancel     = context.WithTimeout(context.Background(), 30*time.Second)
 		singleRangeMode = f.isSingleRangeMode()
 	)
-	defer cancel()
-
-	if singleRangeMode {
-		// Squash requests if the layer doesn't support multi range.
-		requests = []region{superRegion(requests)}
-	}
 
 	// Parse options
 	var opt options
@@ -374,6 +372,20 @@ func (f *fetcher) fetch(requests []region, opts ...Option) (map[region][]byte, e
 	}
 	if opt.tr != nil {
 		tr = opt.tr
+	}
+
+	// squash requesting chunks for reducing the total size of request header
+	// (servers generally have limits for the size of headers)
+	// TODO: when our request has too many ranges, we need to divide it into
+	//       multiple requests to avoid huge header.
+	var s regionSet
+	for _, reg := range rs {
+		s.add(reg)
+	}
+	requests := s.rs
+	if singleRangeMode {
+		// Squash requests if the layer doesn't support multi range.
+		requests = []region{superRegion(requests)}
 	}
 
 	// Request to the registry
@@ -392,79 +404,32 @@ func (f *fetcher) fetch(requests []region, opts ...Option) (map[region][]byte, e
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
 	if res.StatusCode == http.StatusOK {
 		// We are getting the whole blob in one part (= status 200)
-		data, err := ioutil.ReadAll(res.Body) // TODO: chunk data for saving memory
-		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to read response body from %q", f.url)
-		}
 		size, err := strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to parse Content-Length for %q", f.url)
 		}
-		if int64(len(data)) != size {
-			return nil, errors.Wrapf(err, "broken response body:got size %d; want %d for %q",
-				len(data), size, f.url)
-		}
-		remoteData := make(map[region][]byte)
-		remoteData[region{0, size - 1}] = data
-		return remoteData, nil
+		return singlePartReader(region{0, size - 1}, res.Body), nil
 	} else if res.StatusCode == http.StatusPartialContent {
 		mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
 		if err != nil {
 			return nil, errors.Wrapf(err, "invalid media type %q for %q", mediaType, f.url)
 		}
-
-		if !strings.HasPrefix(mediaType, "multipart/") {
-			// We are getting partial content
-			data, err := ioutil.ReadAll(res.Body) // TODO: chunk data for saving memory
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to read response from %q", f.url)
-			}
-			reg, err := parseRange(res.Header.Get("Content-Range"))
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to parse Content-Range: %q", f.url)
-			}
-			if int64(len(data)) != reg.size() {
-				return nil, errors.Wrapf(err, "broken part resp: size %d; want %d: %q",
-					len(data), reg.size(), f.url)
-			}
-			remoteData := make(map[region][]byte)
-			remoteData[reg] = data
-			return remoteData, nil
+		if strings.HasPrefix(mediaType, "multipart/") {
+			// We are getting a set of chunks as a multipart body.
+			return multiPartReader(res.Body, params["boundary"]), nil
 		}
 
-		// We are getting a set of chunks as a multipart body.
-		remoteData := make(map[region][]byte)
-		mr := multipart.NewReader(res.Body, params["boundary"])
-		for {
-			p, err := mr.NextPart()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return nil, errors.Wrapf(err, "failed to read multipart resp: %q", f.url)
-			}
-			reg, err := parseRange(p.Header.Get("Content-Range"))
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to parse Content-Range: %q", f.url)
-			}
-			data, err := ioutil.ReadAll(p)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to read multipart data: %q", f.url)
-			}
-			if int64(len(data)) != reg.size() {
-				return nil, errors.Wrapf(err, "broken part body: size %d; want %d: %q",
-					len(data), reg.size(), f.url)
-
-			}
-			remoteData[reg] = data
+		// We are getting single range
+		reg, err := parseRange(res.Header.Get("Content-Range"))
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse Content-Range: %q", f.url)
 		}
-		return remoteData, nil
+		return singlePartReader(reg, res.Body), nil
 	} else if !singleRangeMode {
-		// Retry with the single range mode
-		f.singleRangeMode() // fallback to singe range request mode
-		return f.fetch(requests, opts...)
+		f.singleRangeMode()              // fallbacks to singe range request mode
+		return f.fetch(ctx, rs, opts...) // retries with the single range mode
 	}
 
 	return nil, fmt.Errorf("unexpected status code on %q: %v", f.url, res.Status)
@@ -514,6 +479,53 @@ func (f *fetcher) isSingleRangeMode() bool {
 	r := f.singleRange
 	f.singleRangeMu.Unlock()
 	return r
+}
+
+func singlePartReader(reg region, rc io.ReadCloser) multipartReadCloser {
+	return &singlepartReader{
+		r:      rc,
+		Closer: rc,
+		reg:    reg,
+	}
+}
+
+type singlepartReader struct {
+	io.Closer
+	r      io.Reader
+	reg    region
+	called bool
+}
+
+func (sr *singlepartReader) Next() (region, io.Reader, error) {
+	if !sr.called {
+		sr.called = true
+		return sr.reg, sr.r, nil
+	}
+	return region{}, nil, io.EOF
+}
+
+func multiPartReader(rc io.ReadCloser, boundary string) multipartReadCloser {
+	return &multipartReader{
+		m:      multipart.NewReader(rc, boundary),
+		Closer: rc,
+	}
+}
+
+type multipartReader struct {
+	io.Closer
+	m *multipart.Reader
+}
+
+func (sr *multipartReader) Next() (region, io.Reader, error) {
+	p, err := sr.m.NextPart()
+	if err != nil {
+		return region{}, nil, err
+	}
+	reg, err := parseRange(p.Header.Get("Content-Range"))
+	if err != nil {
+		return region{}, nil, errors.Wrapf(err, "failed to parse Content-Range")
+	}
+	return reg, p, nil
 }
 
 func parseRange(header string) (region, error) {
