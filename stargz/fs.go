@@ -87,6 +87,9 @@ const (
 	targetRefLabelCRI = "containerd.io/snapshot/cri.image-ref"
 	// targetDigestLabelCRI is a label which contains layer digest passed from CRI plugin
 	targetDigestLabelCRI = "containerd.io/snapshot/cri.layer-digest"
+	// targetImageLayersLabel is a label which contains layer digests contained in
+	// the target image and is passed from CRI plugin.
+	targetImageLayersLabel = "containerd.io/snapshot/cri.image-layers"
 )
 
 type Config struct {
@@ -169,7 +172,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	logCtx := log.G(ctx).WithField("mountpoint", mountpoint)
 
 	// Get basic information of this layer.
-	ref, digest, err := parseLabels(labels)
+	ref, digest, layers, prefetchSize, err := fs.parseLabels(labels)
 	if err != nil {
 		logCtx.WithError(err).Debug("failed to get necessary information from labels")
 		return err
@@ -179,11 +182,8 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// Resolve the target layer and the all chained layers
 	var (
 		resolved *resolveResult
-		target   = []string{digest}
+		target   = append([]string{digest}, layers...)
 	)
-	if chain, ok := labels[handler.TargetChainLabel]; ok {
-		target = append(target, strings.Split(chain, ",")...)
-	}
 	for _, dgst := range target {
 		var (
 			rr  *resolveResult
@@ -232,12 +232,6 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// Check() for this layer waits for the prefetch completion. We recreate
 	// RoundTripper to avoid disturbing other NW-related operations.
 	if !fs.noprefetch {
-		prefetchSize := fs.prefetchSize
-		if prefetchSizeStr, ok := labels[handler.TargetPrefetchSizeLabel]; ok {
-			if size, err := strconv.ParseInt(prefetchSizeStr, 10, 64); err == nil {
-				prefetchSize = size
-			}
-		}
 		go func() {
 			pr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (int, error) {
 				fs.backgroundTaskManager.DoPrioritizedTask()
@@ -416,21 +410,39 @@ func (fs *filesystem) unregister(mountpoint string) {
 	fs.layerMu.Unlock()
 }
 
-func parseLabels(labels map[string]string) (rRef string, rDigest string, _ error) {
+func (fs *filesystem) parseLabels(labels map[string]string) (rRef, rDigest string, rLayers []string, rPrefetchSize int64, _ error) {
+
+	// mandatory labels
 	if ref, ok := labels[targetRefLabelCRI]; ok {
 		rRef = ref
 	} else if ref, ok := labels[handler.TargetRefLabel]; ok {
 		rRef = ref
 	} else {
-		return "", "", fmt.Errorf("reference hasn't been passed")
+		return "", "", nil, 0, fmt.Errorf("reference hasn't been passed")
 	}
 	if digest, ok := labels[targetDigestLabelCRI]; ok {
 		rDigest = digest
 	} else if digest, ok := labels[handler.TargetDigestLabel]; ok {
 		rDigest = digest
 	} else {
-		return "", "", fmt.Errorf("digest hasn't been passed")
+		return "", "", nil, 0, fmt.Errorf("digest hasn't been passed")
 	}
+	if l, ok := labels[targetImageLayersLabel]; ok {
+		rLayers = strings.Split(l, ",")
+	} else if l, ok := labels[handler.TargetImageLayersLabel]; ok {
+		rLayers = strings.Split(l, ",")
+	} else {
+		return "", "", nil, 0, fmt.Errorf("image layers hasn't been passed")
+	}
+
+	// optional label
+	rPrefetchSize = fs.prefetchSize
+	if psStr, ok := labels[handler.TargetPrefetchSizeLabel]; ok {
+		if ps, err := strconv.ParseInt(psStr, 10, 64); err == nil {
+			rPrefetchSize = ps
+		}
+	}
+
 	return
 }
 

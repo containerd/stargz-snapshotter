@@ -27,7 +27,7 @@ import (
 const (
 	TargetRefLabel          = "containerd.io/snapshot/remote/stargz.reference"
 	TargetDigestLabel       = "containerd.io/snapshot/remote/stargz.digest"
-	TargetChainLabel        = "containerd.io/snapshot/remote/stargz.chain"    // optional
+	TargetImageLayersLabel  = "containerd.io/snapshot/remote/stargz.layers"
 	TargetPrefetchSizeLabel = "containerd.io/snapshot/remote/stargz.prefetch" // optional
 )
 
@@ -44,14 +44,14 @@ func AppendInfoHandlerWrapper(ref string, prefetchSize int64) func(f images.Hand
 			}
 			switch desc.MediaType {
 			case ocispec.MediaTypeImageManifest, images.MediaTypeDockerSchema2Manifest:
-				var chain string
+				var layers string
 				for _, c := range children {
 					if images.IsLayerType(c.MediaType) {
-						chain += fmt.Sprintf("%s,", c.Digest.String())
+						layers += fmt.Sprintf("%s,", c.Digest.String())
 					}
 				}
-				if len(chain) >= 1 {
-					chain = chain[:len(chain)-1]
+				if len(layers) >= 1 {
+					layers = layers[:len(layers)-1]
 				}
 				for i := range children {
 					c := &children[i]
@@ -61,7 +61,7 @@ func AppendInfoHandlerWrapper(ref string, prefetchSize int64) func(f images.Hand
 						}
 						c.Annotations[TargetRefLabel] = ref
 						c.Annotations[TargetDigestLabel] = c.Digest.String()
-						c.Annotations[TargetChainLabel] = chain
+						c.Annotations[TargetImageLayersLabel] = layers
 						c.Annotations[TargetPrefetchSizeLabel] = fmt.Sprintf("%d", prefetchSize)
 					}
 				}
