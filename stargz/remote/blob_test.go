@@ -48,7 +48,7 @@ const (
 	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
 )
 
-// Tests ReadAt method of each file.
+// Tests ReadAt and Cache method of each file.
 func TestReadAt(t *testing.T) {
 	sizeCond := map[string]int64{
 		"single_chunk": sampleChunkSize - sampleMiddleOffset,
@@ -155,9 +155,16 @@ func TestReadAt(t *testing.T) {
 								}
 							}
 							tr := multiRoundTripper(t, blob, allowMultiRange(trCond.allowMultiRange), exceptChunks(except))
-							bb := makeBlob(t, blobsize, sampleChunkSize, tr)
-							cacheAll(bb, cacheChunks)
-							checkRead(t, wantData, bb, offset, size)
+
+							// Check ReadAt method
+							bb1 := makeBlob(t, blobsize, sampleChunkSize, tr)
+							cacheAll(bb1, cacheChunks)
+							checkRead(t, wantData, bb1, offset, size)
+
+							// Check Cache method
+							bb2 := makeBlob(t, blobsize, sampleChunkSize, tr)
+							cacheAll(bb2, cacheChunks)
+							checkCache(t, bb2, offset, size)
 						})
 					}
 				}
@@ -174,6 +181,7 @@ func cacheAll(b *blob, chunks []region) {
 
 func checkRead(t *testing.T, wantData []byte, r *blob, offset int64, wantSize int64) {
 	respData := make([]byte, wantSize)
+	t.Logf("reading offset:%d, size:%d", offset, wantSize)
 	n, err := r.ReadAt(respData, offset)
 	if err != nil {
 		t.Errorf("failed to read off=%d, size=%d, blobsize=%d: %v", offset, wantSize, r.Size(), err)
@@ -188,12 +196,27 @@ func checkRead(t *testing.T, wantData []byte, r *blob, offset int64, wantSize in
 	}
 
 	// check cache has valid contents.
+	checkAllCached(t, r, offset, wantSize)
+}
+
+func checkCache(t *testing.T, r *blob, offset int64, size int64) {
+	if err := r.Cache(offset, size); err != nil {
+		t.Errorf("failed to cache off=%d, size=%d, blobsize=%d: %v", offset, size, r.Size(), err)
+		return
+	}
+
+	// check cache has valid contents.
+	checkAllCached(t, r, offset, size)
+}
+
+func checkAllCached(t *testing.T, r *blob, offset, size int64) {
 	cn := 0
-	whole := region{floor(offset, r.chunkSize), ceil(offset+wantSize-1, r.chunkSize) - 1}
+	whole := region{floor(offset, r.chunkSize), ceil(offset+size-1, r.chunkSize) - 1}
 	if err := r.walkChunks(whole, func(reg region) error {
 		data, err := r.cache.Fetch(r.fetcher.genID(reg))
 		if err != nil || int64(len(data)) != reg.size() {
-			return fmt.Errorf("missed cache of region={%d,%d}(size=%d): %v(got size=%d)", reg.b, reg.e, reg.size(), err, n)
+			return fmt.Errorf("missed cache of region={%d,%d}(size=%d): %v",
+				reg.b, reg.e, reg.size(), err)
 		}
 		cn++
 		return nil

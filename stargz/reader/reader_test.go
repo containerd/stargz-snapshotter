@@ -39,129 +39,14 @@ const (
 	sampleChunkSize    = 3
 	sampleMiddleOffset = sampleChunkSize / 2
 	sampleData1        = "0123456789"
-	sampleData2        = "abcdefghij"
 	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
 )
-
-// Tests prefetch method of each stargz file.
-func TestPrefetch(t *testing.T) {
-	prefetchLandmarkFile := regfile(PrefetchLandmark, "test")
-	noPrefetchLandmarkFile := regfile(NoPrefetchLandmark, "test")
-	prefetchSize := int64(10000)
-	tests := []struct {
-		name    string
-		in      []tarent
-		wantNum int      // number of chunks wanted in the cache
-		wants   []string // filenames to compare
-	}{
-		{
-			name: "default_prefetch",
-			in: []tarent{
-				regfile("foo.txt", sampleData1),
-			},
-			wantNum: chunkNum(sampleData1),
-			wants:   []string{"foo.txt"},
-		},
-		{
-			name: "no_prefetch",
-			in: []tarent{
-				noPrefetchLandmarkFile,
-				regfile("foo.txt", sampleData1),
-			},
-			wantNum: 0,
-		},
-		{
-			name: "prefetch",
-			in: []tarent{
-				regfile("foo.txt", sampleData1),
-				prefetchLandmarkFile,
-				regfile("bar.txt", sampleData2),
-			},
-			wantNum: chunkNum(sampleData1),
-			wants:   []string{"foo.txt"},
-		},
-		{
-			name: "with_dir",
-			in: []tarent{
-				directory("foo/"),
-				regfile("foo/bar.txt", sampleData1),
-				prefetchLandmarkFile,
-				directory("buz/"),
-				regfile("buz/buzbuz.txt", sampleData2),
-			},
-			wantNum: chunkNum(sampleData1),
-			wants:   []string{"foo/bar.txt"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sr := buildStargz(t, tt.in, chunkSizeInfo(sampleChunkSize))
-			gr, _, err := newReader(sr, &testCache{membuf: map[string]string{}, t: t})
-			if err != nil {
-				t.Fatalf("failed to make stargz reader: %v", err)
-			}
-			if err := gr.PrefetchWithReader(sr, prefetchSize); err != nil {
-				t.Errorf("failed to prefetch: %v", err)
-				return
-			}
-			if tt.wantNum != len(gr.cache.(*testCache).membuf) {
-				t.Errorf("number of chunks in the cache %d; want %d: %v", len(gr.cache.(*testCache).membuf), tt.wantNum, err)
-				return
-			}
-
-			for _, file := range tt.wants {
-				wantFile, err := gr.r.OpenFile(file)
-				if err != nil {
-					t.Fatalf("failed to open file %q: %v", file, err)
-				}
-				fe, ok := gr.r.Lookup(file)
-				if !ok {
-					t.Fatalf("failed to get TOCEntry of %q", file)
-				}
-				var nr int64
-				for {
-					ce, ok := gr.r.ChunkEntryForOffset(file, nr)
-					if !ok {
-						break
-					}
-					data, err := gr.cache.Fetch(genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize))
-					if err != nil {
-						t.Errorf("failed to read cache data of %q: %v", file, err)
-						return
-					}
-					wantData := make([]byte, ce.ChunkSize)
-					wn, err := wantFile.ReadAt(wantData, ce.ChunkOffset)
-					if err != nil {
-						t.Errorf("failed to read want data of %q: %v", file, err)
-						return
-					}
-					if len(data) != wn {
-						t.Errorf("size of cached data %d; want %d", len(data), wn)
-						return
-					}
-					if !bytes.Equal(data, wantData) {
-						t.Errorf("cached data %q; want %q", string(data), string(wantData))
-						return
-					}
-
-					nr += ce.ChunkSize
-				}
-			}
-		})
-	}
-}
-
-func chunkNum(data string) int {
-	return (len(data)-1)/sampleChunkSize + 1
-}
 
 // Tests Reader for failure cases.
 func TestFailReader(t *testing.T) {
 	testFileName := "test"
 	stargzFile := buildStargz(t, []tarent{
 		regfile(testFileName, sampleData1),
-		regfile(PrefetchLandmark, "test"),
 	}, chunkSizeInfo(sampleChunkSize))
 	br := &breakReaderAt{
 		ReaderAt: stargzFile,
@@ -198,19 +83,6 @@ func TestFailReader(t *testing.T) {
 	_, err = fr.ReadAt(p, 0)
 	if err == nil {
 		t.Errorf("succeeded to read data but wanted to fail")
-		return
-	}
-
-	// tests for prefetch
-	br.success = true
-	if err = gr.PrefetchWithReader(bsr, 0); err != nil {
-		t.Errorf("failed to prefetch but wanted to succeed: %v", err)
-		return
-	}
-
-	br.success = false
-	if err = gr.PrefetchWithReader(bsr, 0); err == nil {
-		t.Errorf("succeeded to prefetch but wanted to fail")
 		return
 	}
 }
@@ -423,28 +295,6 @@ func regfile(name string, contents string) tarent {
 			Size:     int64(len(contents)),
 		},
 		contents: []byte(contents),
-	}
-}
-
-type xAttr map[string]string
-
-func directory(name string, opts ...interface{}) tarent {
-	if !strings.HasSuffix(name, "/") {
-		panic(fmt.Sprintf("dir %q hasn't suffix /", name))
-	}
-	var xattrs xAttr
-	for _, opt := range opts {
-		if v, ok := opt.(xAttr); ok {
-			xattrs = v
-		}
-	}
-	return tarent{
-		header: &tar.Header{
-			Typeflag: tar.TypeDir,
-			Name:     name,
-			Mode:     0755,
-			Xattrs:   xattrs,
-		},
 	}
 }
 

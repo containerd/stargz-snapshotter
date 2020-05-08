@@ -36,6 +36,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -53,6 +54,7 @@ const (
 	sampleChunkSize    = 3
 	sampleMiddleOffset = sampleChunkSize / 2
 	sampleData1        = "0123456789"
+	sampleData2        = "abcdefghij"
 	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
 )
 
@@ -60,10 +62,7 @@ func TestCheck(t *testing.T) {
 	bb := &breakBlob{}
 	fs := &filesystem{
 		layer: map[string]*layer{
-			"test": {
-				blob:   bb,
-				reader: nopreader{},
-			},
+			"test": newLayer(bb, nopreader{}, nil),
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
 	}
@@ -80,19 +79,19 @@ func TestCheck(t *testing.T) {
 
 type nopreader struct{}
 
-func (r nopreader) OpenFile(name string) (io.ReaderAt, error)                         { return nil, nil }
-func (r nopreader) PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) error { return nil }
-func (r nopreader) WaitForPrefetchCompletion(timeout time.Duration) error             { return nil }
-func (r nopreader) CacheTarGzWithReader(ir io.Reader) error                           { return nil }
+func (r nopreader) OpenFile(name string) (io.ReaderAt, error)   { return nil, nil }
+func (r nopreader) Lookup(name string) (*stargz.TOCEntry, bool) { return nil, false }
+func (r nopreader) CacheTarGzWithReader(ir io.Reader) error     { return nil }
 
 type breakBlob struct {
 	success bool
 }
 
-func (r *breakBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error)        { return nil, nil }
-func (r *breakBlob) Size() int64                                                  { return 10 }
-func (r *breakBlob) FetchedSize() int64                                           { return 5 }
-func (r *breakBlob) ReadAt(p []byte, o int64, opts ...remote.Option) (int, error) { return 0, nil }
+func (r *breakBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error)         { return nil, nil }
+func (r *breakBlob) Size() int64                                                   { return 10 }
+func (r *breakBlob) FetchedSize() int64                                            { return 5 }
+func (r *breakBlob) ReadAt(p []byte, o int64, opts ...remote.Option) (int, error)  { return 0, nil }
+func (r *breakBlob) Cache(offset int64, size int64, option ...remote.Option) error { return nil }
 func (r *breakBlob) Check() error {
 	if !r.success {
 		return fmt.Errorf("failed")
@@ -272,25 +271,25 @@ func TestExistence(t *testing.T) {
 		{
 			name: "prefetch_landmark",
 			in: []tarent{
-				regfile(reader.PrefetchLandmark, "test"),
+				regfile(PrefetchLandmark, "test"),
 				directory("foo/"),
-				regfile(fmt.Sprintf("foo/%s", reader.PrefetchLandmark), "test"),
+				regfile(fmt.Sprintf("foo/%s", PrefetchLandmark), "test"),
 			},
 			want: []check{
-				fileNotExist(reader.PrefetchLandmark),
-				hasFileDigest(fmt.Sprintf("foo/%s", reader.PrefetchLandmark), digestFor("test")),
+				fileNotExist(PrefetchLandmark),
+				hasFileDigest(fmt.Sprintf("foo/%s", PrefetchLandmark), digestFor("test")),
 			},
 		},
 		{
 			name: "no_prefetch_landmark",
 			in: []tarent{
-				regfile(reader.NoPrefetchLandmark, "test"),
+				regfile(NoPrefetchLandmark, "test"),
 				directory("foo/"),
-				regfile(fmt.Sprintf("foo/%s", reader.NoPrefetchLandmark), "test"),
+				regfile(fmt.Sprintf("foo/%s", NoPrefetchLandmark), "test"),
 			},
 			want: []check{
-				fileNotExist(reader.NoPrefetchLandmark),
-				hasFileDigest(fmt.Sprintf("foo/%s", reader.NoPrefetchLandmark), digestFor("test")),
+				fileNotExist(NoPrefetchLandmark),
+				hasFileDigest(fmt.Sprintf("foo/%s", NoPrefetchLandmark), digestFor("test")),
 			},
 		},
 		{
@@ -357,7 +356,7 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 		Node:  nodefs.NewDefaultNode(),
 		layer: &testLayer{r},
 		e:     root,
-		s:     newState(testStateLayerDigest, &dummyRemoteInfo{}),
+		s:     newState(testStateLayerDigest, &dummyBlob{}),
 	}
 	_ = nodefs.NewFileSystemConnector(rootNode, &nodefs.Options{
 		NegativeTimeout: 0,
@@ -377,27 +376,14 @@ func (tl *testLayer) OpenFile(name string) (io.ReaderAt, error) {
 	return tl.r.OpenFile(name)
 }
 
-type dummyRemoteInfo struct{}
+type dummyBlob struct{}
 
-func (ri *dummyRemoteInfo) Authn(tr http.RoundTripper) (http.RoundTripper, error) {
-	return nil, nil
-}
-
-func (ri *dummyRemoteInfo) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
-	return 0, nil
-}
-
-func (ri *dummyRemoteInfo) Size() int64 {
-	return 10
-}
-
-func (ri *dummyRemoteInfo) FetchedSize() int64 {
-	return 5
-}
-
-func (ri *dummyRemoteInfo) Check() error {
-	return nil
-}
+func (db *dummyBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error)             { return nil, nil }
+func (db *dummyBlob) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) { return 0, nil }
+func (db *dummyBlob) Size() int64                                                       { return 10 }
+func (db *dummyBlob) FetchedSize() int64                                                { return 5 }
+func (db *dummyBlob) Check() error                                                      { return nil }
+func (db *dummyBlob) Cache(offset int64, size int64, option ...remote.Option) error     { return nil }
 
 type chunkSizeInfo int
 
@@ -844,4 +830,205 @@ func (tr *okRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err 
 		Header:     make(http.Header),
 		Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
 	}, nil
+}
+
+// Tests prefetch method of each stargz file.
+func TestPrefetch(t *testing.T) {
+	prefetchLandmarkFile := regfile(PrefetchLandmark, "test")
+	noPrefetchLandmarkFile := regfile(NoPrefetchLandmark, "test")
+	defaultPrefetchSize := int64(10000)
+	landmarkPosition := func(l *layer) int64 {
+		if e, ok := l.reader.Lookup(PrefetchLandmark); ok {
+			return e.Offset
+		}
+		return defaultPrefetchSize
+	}
+	defaultPrefetchPosition := func(l *layer) int64 {
+		return l.blob.Size()
+	}
+	tests := []struct {
+		name         string
+		in           []tarent
+		wantNum      int      // number of chunks wanted in the cache
+		wants        []string // filenames to compare
+		prefetchSize func(*layer) int64
+	}{
+		{
+			name: "default_prefetch",
+			in: []tarent{
+				regfile("foo.txt", sampleData1),
+			},
+			wantNum:      chunkNum(sampleData1),
+			wants:        []string{"foo.txt"},
+			prefetchSize: defaultPrefetchPosition,
+		},
+		{
+			name: "no_prefetch",
+			in: []tarent{
+				noPrefetchLandmarkFile,
+				regfile("foo.txt", sampleData1),
+			},
+			wantNum: 0,
+		},
+		{
+			name: "prefetch",
+			in: []tarent{
+				regfile("foo.txt", sampleData1),
+				prefetchLandmarkFile,
+				regfile("bar.txt", sampleData2),
+			},
+			wantNum:      chunkNum(sampleData1),
+			wants:        []string{"foo.txt"},
+			prefetchSize: landmarkPosition,
+		},
+		{
+			name: "with_dir",
+			in: []tarent{
+				directory("foo/"),
+				regfile("foo/bar.txt", sampleData1),
+				prefetchLandmarkFile,
+				directory("buz/"),
+				regfile("buz/buzbuz.txt", sampleData2),
+			},
+			wantNum:      chunkNum(sampleData1),
+			wants:        []string{"foo/bar.txt"},
+			prefetchSize: landmarkPosition,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := buildStargz(t, tt.in, chunkSizeInfo(sampleChunkSize))
+			blob := newBlob(sr)
+			cache := &testCache{membuf: map[string]string{}, t: t}
+			gr, _, err := reader.NewReader(sr, cache)
+			if err != nil {
+				t.Fatalf("failed to make stargz reader: %v", err)
+			}
+			l := newLayer(blob, gr, nil)
+			prefetchSize := int64(0)
+			if tt.prefetchSize != nil {
+				prefetchSize = tt.prefetchSize(l)
+			}
+			if err := l.prefetch(defaultPrefetchSize); err != nil {
+				t.Errorf("failed to prefetch: %v", err)
+				return
+			}
+			if blob.calledPrefetchOffset != 0 {
+				t.Errorf("invalid prefetch offset %d; want %d",
+					blob.calledPrefetchOffset, 0)
+			}
+			if blob.calledPrefetchSize != prefetchSize {
+				t.Errorf("invalid prefetch size %d; want %d",
+					blob.calledPrefetchSize, prefetchSize)
+			}
+			if tt.wantNum != len(cache.membuf) {
+				t.Errorf("number of chunks in the cache %d; want %d: %v", len(cache.membuf), tt.wantNum, err)
+				return
+			}
+
+			for _, file := range tt.wants {
+				e, ok := gr.Lookup(file)
+				if !ok {
+					t.Fatalf("failed to lookup %q", file)
+				}
+				wantFile, err := gr.OpenFile(file)
+				if err != nil {
+					t.Fatalf("failed to open file %q", file)
+				}
+				blob.readCalled = false
+				if _, err := io.Copy(ioutil.Discard, io.NewSectionReader(wantFile, 0, e.Size)); err != nil {
+					t.Fatalf("failed to read file %q", file)
+				}
+				if blob.readCalled {
+					t.Errorf("chunks of file %q aren't cached", file)
+					return
+				}
+			}
+		})
+	}
+}
+
+func chunkNum(data string) int {
+	return (len(data)-1)/sampleChunkSize + 1
+}
+
+func newBlob(sr *io.SectionReader) *sampleBlob {
+	return &sampleBlob{
+		r: sr,
+	}
+}
+
+type sampleBlob struct {
+	r                    *io.SectionReader
+	readCalled           bool
+	calledPrefetchOffset int64
+	calledPrefetchSize   int64
+}
+
+func (sb *sampleBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error) { return nil, nil }
+func (sb *sampleBlob) Check() error                                          { return nil }
+func (sb *sampleBlob) Size() int64                                           { return sb.r.Size() }
+func (sb *sampleBlob) FetchedSize() int64                                    { return 0 }
+func (sb *sampleBlob) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
+	sb.readCalled = true
+	return sb.r.ReadAt(p, offset)
+}
+func (sb *sampleBlob) Cache(offset int64, size int64, option ...remote.Option) error {
+	sb.calledPrefetchOffset = offset
+	sb.calledPrefetchSize = size
+	return nil
+}
+
+type testCache struct {
+	membuf map[string]string
+	t      *testing.T
+	mu     sync.Mutex
+}
+
+func (tc *testCache) Fetch(blobHash string) ([]byte, error) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	cache, ok := tc.membuf[blobHash]
+	if !ok {
+		return nil, fmt.Errorf("Missed cache: %q", blobHash)
+	}
+	return []byte(cache), nil
+}
+
+func (tc *testCache) Add(blobHash string, p []byte) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.membuf[blobHash] = string(p)
+	tc.t.Logf("  cached [%s...]: %q", blobHash[:8], string(p))
+}
+
+func TestWaiter(t *testing.T) {
+	var (
+		w         = newWaiter()
+		waitTime  = time.Second
+		startTime = time.Now()
+		doneTime  time.Time
+		done      = make(chan struct{})
+	)
+
+	w.start()
+
+	go func() {
+		defer close(done)
+		if err := w.wait(10 * time.Second); err != nil {
+			t.Errorf("failed to wait: %v", err)
+			return
+		}
+		doneTime = time.Now()
+	}()
+
+	time.Sleep(waitTime)
+	w.done()
+	<-done
+
+	if doneTime.Sub(startTime) < waitTime {
+		t.Errorf("wait time is too short: %v; want %v", doneTime.Sub(startTime), waitTime)
+	}
 }

@@ -24,34 +24,20 @@ package reader
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"fmt"
 	"io"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/google/crfs/stargz"
 	"github.com/pkg/errors"
 )
 
-const (
-	// PrefetchLandmark is a file entry which indicates the end position of
-	// prefetch in the stargz file.
-	PrefetchLandmark = ".prefetch.landmark"
-
-	// NoPrefetchLandmark is a file entry which indicates that no prefetch should
-	// occur in the stargz file.
-	NoPrefetchLandmark = ".no.prefetch.landmark"
-)
-
 type Reader interface {
 	OpenFile(name string) (io.ReaderAt, error)
-	PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) error
-	WaitForPrefetchCompletion(timeout time.Duration) error
+	Lookup(name string) (*stargz.TOCEntry, bool)
 	CacheTarGzWithReader(r io.Reader) error
 }
 
@@ -67,19 +53,16 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache) (Reader, *stargz.TOC
 	}
 
 	return &reader{
-		r:                      r,
-		sr:                     sr,
-		cache:                  cache,
-		prefetchCompletionCond: sync.NewCond(&sync.Mutex{}),
+		r:     r,
+		sr:    sr,
+		cache: cache,
 	}, root, nil
 }
 
 type reader struct {
-	r                      *stargz.Reader
-	sr                     *io.SectionReader
-	cache                  cache.BlobCache
-	prefetchInProgress     bool
-	prefetchCompletionCond *sync.Cond
+	r     *stargz.Reader
+	sr    *io.SectionReader
+	cache cache.BlobCache
 }
 
 func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
@@ -100,64 +83,8 @@ func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *reader) PrefetchWithReader(sr *io.SectionReader, prefetchSize int64) error {
-	gr.prefetchInProgress = true
-	defer func() {
-		gr.prefetchInProgress = false
-		gr.prefetchCompletionCond.Broadcast()
-	}()
-
-	if _, ok := gr.r.Lookup(NoPrefetchLandmark); ok {
-		// do not prefetch this layer
-		return nil
-	} else if e, ok := gr.r.Lookup(PrefetchLandmark); ok {
-		// override the prefetch size with optimized value
-		if e.Offset > sr.Size() {
-			return fmt.Errorf("invalid landmark offset %d is larger than layer size %d",
-				e.Offset, sr.Size())
-		}
-		prefetchSize = e.Offset
-	} else if prefetchSize > sr.Size() {
-		// adjust prefetch size not to exceed the whole layer size
-		prefetchSize = sr.Size()
-	}
-
-	// Fetch specified range at once
-	// TODO: when prefetchSize is too large, save memory by chunking the range
-	prefetchBytes := make([]byte, prefetchSize)
-	if _, err := io.ReadFull(sr, prefetchBytes); err != nil && err != io.EOF {
-		return errors.Wrap(err, "failed to prefetch layer data")
-	}
-
-	// Cache specified range to filesystem cache
-	err := gr.CacheTarGzWithReader(bytes.NewReader(prefetchBytes))
-	if err != io.EOF && err != io.ErrUnexpectedEOF {
-		return errors.Wrap(err, "error occurred during caching")
-	}
-	return nil
-}
-
-func (gr *reader) WaitForPrefetchCompletion(timeout time.Duration) error {
-	waitUntilPrefetching := func() <-chan struct{} {
-		ch := make(chan struct{})
-		go func() {
-			if gr.prefetchInProgress {
-				gr.prefetchCompletionCond.L.Lock()
-				gr.prefetchCompletionCond.Wait()
-				gr.prefetchCompletionCond.L.Unlock()
-			}
-			ch <- struct{}{}
-		}()
-		return ch
-	}
-	select {
-	case <-time.After(timeout):
-		gr.prefetchInProgress = false
-		gr.prefetchCompletionCond.Broadcast()
-		return fmt.Errorf("timeout(%v)", timeout)
-	case <-waitUntilPrefetching():
-		return nil
-	}
+func (gr *reader) Lookup(name string) (*stargz.TOCEntry, bool) {
+	return gr.r.Lookup(name)
 }
 
 func (gr *reader) CacheTarGzWithReader(r io.Reader) error {
@@ -165,6 +92,7 @@ func (gr *reader) CacheTarGzWithReader(r io.Reader) error {
 	if err != nil {
 		return err
 	}
+	defer gzr.Close()
 	tr := tar.NewReader(gzr)
 	for {
 		h, err := tr.Next()
@@ -174,9 +102,7 @@ func (gr *reader) CacheTarGzWithReader(r io.Reader) error {
 			}
 			break
 		}
-		if h.Name == PrefetchLandmark ||
-			h.Name == NoPrefetchLandmark ||
-			h.Name == stargz.TOCTarName {
+		if h.Name == stargz.TOCTarName {
 			// We don't need to cache prefetch landmarks and TOC json file.
 			continue
 		}
@@ -229,25 +155,52 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 			break
 		}
 		id := genID(sf.digest, ce.ChunkOffset, ce.ChunkSize)
-		data, err := sf.cache.Fetch(id)
-		if err != nil || len(data) != int(ce.ChunkSize) {
-			data = make([]byte, int(ce.ChunkSize))
-			if _, err := sf.ra.ReadAt(data, ce.ChunkOffset); err != nil {
-				if err != io.EOF {
-					return 0, errors.Wrap(err, "failed to read data")
+		if cached, err := sf.cache.Fetch(id); err == nil && int64(len(cached)) == ce.ChunkSize {
+			nr += copy(p[nr:], cached[offset+int64(nr)-ce.ChunkOffset:])
+		} else {
+			var (
+				ip          []byte
+				tmp         bool
+				lowerUnread = positive(offset - ce.ChunkOffset)
+				upperUnread = positive(ce.ChunkOffset + ce.ChunkSize - (offset + int64(len(p))))
+			)
+			if lowerUnread == 0 && upperUnread == 0 {
+				ip = p[nr : int64(nr)+ce.ChunkSize]
+			} else {
+				// Use temporally buffer for aligning this chunk
+				ip = make([]byte, ce.ChunkSize)
+				tmp = true
+			}
+			n, err := sf.ra.ReadAt(ip, ce.ChunkOffset)
+			if err != nil && err != io.EOF {
+				return 0, errors.Wrap(err, "failed to read data")
+			} else if int64(n) != ce.ChunkSize {
+				return 0, fmt.Errorf("invalid chunk size %d; want %d", n, ce.ChunkSize)
+			}
+			if tmp {
+				// Write temporally buffer to resulting slice
+				n = copy(p[nr:], ip[lowerUnread:ce.ChunkSize-upperUnread])
+				if int64(n) != ce.ChunkSize-upperUnread-lowerUnread {
+					return 0, fmt.Errorf("unexpected final data size %d; want %d",
+						n, ce.ChunkSize-upperUnread-lowerUnread)
 				}
 			}
-			sf.cache.Add(id, data)
+			sf.cache.Add(id, ip)
+			nr += n
 		}
-		n := copy(p[nr:], data[offset+int64(nr)-ce.ChunkOffset:])
-		nr += n
 	}
-	p = p[:nr]
 
-	return len(p), nil
+	return nr, nil
 }
 
 func genID(digest string, offset, size int64) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", digest, offset, size)))
 	return fmt.Sprintf("%x", sum)
+}
+
+func positive(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
