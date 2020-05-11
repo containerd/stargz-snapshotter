@@ -229,6 +229,9 @@ func (b *blob) fetchRange(allData map[region]io.Writer, opts ...Option) error {
 				return err
 			}
 			b.cache.Add(fr.genID(chunk), data)
+			b.fetchedRegionSetMu.Lock()
+			b.fetchedRegionSet.add(chunk)
+			b.fetchedRegionSetMu.Unlock()
 			if _, ok := fetched[chunk]; ok {
 				fetched[chunk] = true
 				if n, err := io.Copy(allData[chunk], bytes.NewReader(data)); err != nil {
@@ -237,9 +240,6 @@ func (b *blob) fetchRange(allData map[region]io.Writer, opts ...Option) error {
 					return fmt.Errorf("unexpected fetched data size %d; want %d",
 						n, chunk.size())
 				}
-				b.fetchedRegionSetMu.Lock()
-				b.fetchedRegionSet.add(chunk)
-				b.fetchedRegionSetMu.Unlock()
 			}
 			return nil
 		}); err != nil {
