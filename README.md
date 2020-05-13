@@ -20,6 +20,8 @@ Stargz Snapshotter is a **non-core** sub-project of containerd.
 For using stargz snapshotter on kubernetes nodes, you need the following configuration to containerd as well as run stargz snapshotter daemon on the node. We assume that you are using containerd newer than at least [commit `d8506bf`](https://github.com/containerd/containerd/commit/d8506bfd7b407dcb346149bcec3ed3c19244e3f1) as a CRI runtime.
 
 ```toml
+version = 2
+
 # Plug stargz snapshotter into containerd
 # Containerd recognizes stargz snapshotter through specified socket address.
 # The specified address below is the default which stargz snapshotter listen to.
@@ -72,6 +74,9 @@ $ curl 127.0.0.1:8080
 Hello World!
 ```
 
+Stargz snapshotter also supports further configuration including private registry authentication, mirror registries, etc.
+For more details, refer to the [overview doc](./docs/overview.md).
+
 ## Creating stargz images and further optimization
 
 For lazy pulling images, you need to prepare stargz images first. You can use [CRFS-official `stargzify`](https://github.com/google/crfs/tree/master/stargz/stargzify) command or our `ctr-remote` command which has further optimization functionality. You can also try our pre-converted images listed in [this doc](./docs/pre-converted-images.md). For more details about stargz and the optimization, refer to [this doc](./docs/stargz-estargz.md)
@@ -106,30 +111,6 @@ fetching sha256:80026893... application/vnd.docker.container.image.v1+json
 root@8dab301bd68d:/# ls
 bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
 ```
-
-## Authentication
-
-We support the following methods for private repository authentication.
-- Using `DOCKER_CONFIG` or `~/.docker/config.json`
-- Using Kubernetes secrets (type = `kubernetes.io/dockerconfigjson`)
-
-Following example enables stargz snapshotter to access to private registries using `docker login` command. Stargz snapshotter gets credentials from `DOCKER_CONFIG`(or `~/.docker/config.json`).
-
-```console
-# docker login
-(Enter username and password)
-# ctr-remote image rpull --user <username>:<password> docker.io/<your-repository>/ubuntu:18.04
-```
-
-Following configuration enables stargz snapshotter to access to private registries using kubernetes secrets (type = `kubernetes.io/dockerconfigjson`) in the cluster using kubeconfig files. You can specify the path of kubeconfig file to use with `kubeconfig_path` option. It's no problem that the specified file doesn't exist when this snapshotter starts. In this case, snapsohtter polls the file until actually provided. This is useful for some environments (e.g. single node cluster with containerized apiserver) where stargz snapshotter needs to start before everything, including booting containerd/kubelet/apiserver and configuring users/roles. If no `kubeconfig_path` is specified, snapshotter searches kubeconfig files from `KUBECONFIG` or `~/.kube/config`.
-
-```toml
-[kubeconfig_keychain]
-enable_keychain = true
-kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
-```
-
-We don't share credentials with containerd so credentials specified by ctr's `--user` option in the above example is just for containerd's side. If you have no right to access to the repository with credentials specified to stargz snapshotter, pull operations fall back to the normal one(i.e. overlayfs).
 
 ## Project details
 
