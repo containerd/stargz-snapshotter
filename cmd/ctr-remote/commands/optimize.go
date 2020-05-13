@@ -33,6 +33,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
@@ -360,9 +361,13 @@ type layer struct {
 	diff *regpkg.Hash // registered after compression completed
 	hash *hash.Hash   // registered after compression completed
 	size *int64       // registered after compression completed
+	mu   sync.Mutex
 }
 
 func (l *layer) Digest() (regpkg.Hash, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if l.hash == nil {
 		return regpkg.Hash{}, stream.ErrNotComputed
 	}
@@ -373,6 +378,9 @@ func (l *layer) Digest() (regpkg.Hash, error) {
 }
 
 func (l *layer) Size() (int64, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if l.size == nil {
 		return -1, stream.ErrNotComputed
 	}
@@ -380,6 +388,9 @@ func (l *layer) Size() (int64, error) {
 }
 
 func (l *layer) DiffID() (regpkg.Hash, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if l.diff == nil {
 		return regpkg.Hash{}, stream.ErrNotComputed
 	}
@@ -419,9 +430,12 @@ func (l *layer) Compressed() (io.ReadCloser, error) {
 		}
 
 		// registers all computed information
+		l.mu.Lock()
 		l.diff = &diff
 		l.hash = &h
 		l.size = &size
+		l.mu.Unlock()
+
 		pw.Close()
 	}()
 	return ioutil.NopCloser(pr), nil

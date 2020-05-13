@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -35,10 +36,10 @@ func TestBackgroundTasks(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	wait := func(t *testing.T, name string, c *bool) {
+	wait := func(t *testing.T, name string, done func() bool) {
 		ch := make(chan struct{})
 		go func() {
-			for !*c {
+			for !done() {
 				time.Sleep(10 * time.Millisecond)
 			}
 			ch <- struct{}{}
@@ -76,9 +77,9 @@ func TestBackgroundTasks(t *testing.T) {
 			checkInterval: time.Duration(0), // We don't care prioritized tasks now
 			context: func(t *testing.T, pm *BackgroundTaskManager, task1, task2, task3, task4 *sampleTask) {
 				doGo(func() { pm.InvokeBackgroundTask(task1.do, 24*time.Hour) })
-				wait(t, "task1 started", &task1.started)
+				wait(t, "task1 started", task1.checkStarted())
 				doGo(func() { pm.InvokeBackgroundTask(task2.do, 24*time.Hour) })
-				wait(t, "task2 started", &task2.started)
+				wait(t, "task2 started", task2.checkStarted())
 				doGo(func() { pm.InvokeBackgroundTask(task3.do, 24*time.Hour) })
 				doGo(func() { pm.InvokeBackgroundTask(task4.do, 24*time.Hour) })
 				time.Sleep(300 * time.Millisecond) // wait for long time...
@@ -96,12 +97,12 @@ func TestBackgroundTasks(t *testing.T) {
 			checkInterval: 100 * time.Millisecond,
 			context: func(t *testing.T, pm *BackgroundTaskManager, task1, task2, task3, task4 *sampleTask) {
 				doGo(func() { pm.InvokeBackgroundTask(task1.do, 24*time.Hour) })
-				wait(t, "task1 started", &task1.started)
+				wait(t, "task1 started", task1.checkStarted())
 				doGo(func() { pm.InvokeBackgroundTask(task2.do, 24*time.Hour) })
-				wait(t, "task2 started", &task2.started)
+				wait(t, "task2 started", task2.checkStarted())
 				pm.DoPrioritizedTask()
-				wait(t, "task1 canceled", &task1.canceled)
-				wait(t, "task2 canceled", &task2.canceled)
+				wait(t, "task1 canceled", task1.checkCanceled())
+				wait(t, "task2 canceled", task2.checkCanceled())
 			},
 			assert: func(task1, task2, task3, task4 *sampleTask) bool {
 				return (task1.assert(true, false, true) &&
@@ -114,17 +115,17 @@ func TestBackgroundTasks(t *testing.T) {
 			checkInterval: 100 * time.Millisecond,
 			context: func(t *testing.T, pm *BackgroundTaskManager, task1, task2, task3, task4 *sampleTask) {
 				doGo(func() { pm.InvokeBackgroundTask(task1.do, 24*time.Hour) })
-				wait(t, "task1 started", &task1.started)
+				wait(t, "task1 started", task1.checkStarted())
 				doGo(func() { pm.InvokeBackgroundTask(task2.do, 24*time.Hour) })
-				wait(t, "task2 started", &task2.started)
+				wait(t, "task2 started", task2.checkStarted())
 				pm.DoPrioritizedTask()
-				wait(t, "task1 canceled", &task1.canceled)
-				wait(t, "task2 canceled", &task2.canceled)
+				wait(t, "task1 canceled", task1.checkCanceled())
+				wait(t, "task2 canceled", task2.checkCanceled())
 				task1.reset()
 				task2.reset()
 				pm.DonePrioritizedTask()
-				wait(t, "task1 resumed", &task1.started)
-				wait(t, "task2 resumed", &task2.started)
+				wait(t, "task1 resumed", task1.checkStarted())
+				wait(t, "task2 resumed", task2.checkStarted())
 			},
 			assert: func(task1, task2, task3, task4 *sampleTask) bool {
 				return (task1.assert(true, false, false) &&
@@ -137,11 +138,11 @@ func TestBackgroundTasks(t *testing.T) {
 			checkInterval: time.Duration(0), // We don't care prioritized tasks now
 			context: func(t *testing.T, pm *BackgroundTaskManager, task1, task2, task3, task4 *sampleTask) {
 				doGo(func() { pm.InvokeBackgroundTask(task1.do, 24*time.Hour) })
-				wait(t, "task1 started", &task1.started)
+				wait(t, "task1 started", task1.checkStarted())
 				doGo(func() { pm.InvokeBackgroundTask(task2.do, 24*time.Hour) })
 				task1.finish()
-				wait(t, "task1 done", &task1.done)
-				wait(t, "task2 started", &task2.started)
+				wait(t, "task1 done", task1.checkDone())
+				wait(t, "task2 started", task2.checkStarted())
 			},
 			assert: func(task1, task2, task3, task4 *sampleTask) bool {
 				return (task1.assert(true, true, false) &&
@@ -154,13 +155,13 @@ func TestBackgroundTasks(t *testing.T) {
 			checkInterval: time.Duration(0), // We don't care prioritized tasks now
 			context: func(t *testing.T, pm *BackgroundTaskManager, task1, task2, task3, task4 *sampleTask) {
 				doGo(func() { pm.InvokeBackgroundTask(task1.do, 24*time.Hour) })
-				wait(t, "task1 started", &task1.started)
+				wait(t, "task1 started", task1.checkStarted())
 				doGo(func() { pm.InvokeBackgroundTask(task2.do, 24*time.Hour) })
 				task1.finish()
-				wait(t, "task1 done", &task1.done)
-				wait(t, "task2 started", &task2.started)
+				wait(t, "task1 done", task1.checkDone())
+				wait(t, "task2 started", task2.checkStarted())
 				task2.finish()
-				wait(t, "task2 done", &task2.done)
+				wait(t, "task2 done", task2.checkDone())
 			},
 			assert: func(task1, task2, task3, task4 *sampleTask) bool {
 				return (task1.assert(true, true, false) &&
@@ -192,6 +193,8 @@ type sampleTask struct {
 	started  bool
 	done     bool
 	canceled bool
+	mu       sync.Mutex
+
 	finishCh chan struct{}
 }
 
@@ -201,13 +204,43 @@ func newSampleTask() *sampleTask {
 	}
 }
 
+func (st *sampleTask) checkStarted() func() bool {
+	return func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.started
+	}
+}
+
+func (st *sampleTask) checkDone() func() bool {
+	return func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.done
+	}
+}
+
+func (st *sampleTask) checkCanceled() func() bool {
+	return func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.canceled
+	}
+}
+
 func (st *sampleTask) do(ctx context.Context) {
+	st.mu.Lock()
 	st.started = true
+	st.mu.Unlock()
 	select {
 	case <-st.finishCh:
+		st.mu.Lock()
 		st.done = true
+		st.mu.Unlock()
 	case <-ctx.Done():
+		st.mu.Lock()
 		st.canceled = true
+		st.mu.Unlock()
 	}
 }
 
@@ -216,14 +249,20 @@ func (st *sampleTask) finish() {
 }
 
 func (st *sampleTask) reset() {
+	st.mu.Lock()
 	st.started, st.done, st.canceled = false, false, false
+	st.mu.Unlock()
 	st.finishCh = make(chan struct{})
 }
 
 func (st *sampleTask) dumpStatus() string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	return fmt.Sprintf("started=%v,done=%v,canceled=%v", st.started, st.done, st.canceled)
 }
 
 func (st *sampleTask) assert(started, done, canceled bool) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	return (st.started == started) && (st.done == done) && (st.canceled == canceled)
 }

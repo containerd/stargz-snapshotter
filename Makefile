@@ -31,10 +31,10 @@ build: $(CMD)
 FORCE:
 
 containerd-stargz-grpc: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/containerd-stargz-grpc
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) -v ./cmd/containerd-stargz-grpc
 
 ctr-remote: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ -v ./cmd/ctr-remote
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) -v ./cmd/ctr-remote
 
 # TODO: git-validation
 check:
@@ -64,11 +64,11 @@ clean:
 
 test:
 	@echo "$@"
-	@GO111MODULE=$(GO111MODULE_VALUE) go test ./...
+	@GO111MODULE=$(GO111MODULE_VALUE) go test -race ./...
 
 test-root:
 	@echo "$@"
-	@GO111MODULE=$(GO111MODULE_VALUE) go test ./snapshot -test.root
+	@GO111MODULE=$(GO111MODULE_VALUE) go test -race ./snapshot -test.root
 
 test-all: test-root test
 

@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -448,18 +449,25 @@ func NewOpenReadMonitor() Monitor {
 }
 
 type OpenReadMonitor struct {
-	log []string
+	log   []string
+	logMu sync.Mutex
 }
 
 func (m *OpenReadMonitor) OnOpen(name string) {
+	m.logMu.Lock()
 	m.log = append(m.log, name)
+	m.logMu.Unlock()
 }
 
 func (m *OpenReadMonitor) OnRead(name string, off, size int64) {
+	m.logMu.Lock()
 	m.log = append(m.log, name)
+	m.logMu.Unlock()
 }
 
 func (m *OpenReadMonitor) DumpLog() []string {
+	m.logMu.Lock()
+	defer m.logMu.Unlock()
 	return m.log
 }
 
