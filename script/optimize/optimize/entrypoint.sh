@@ -100,9 +100,9 @@ tar zcv -C "${CONTEXT_DIR}" . \
 
 echo "Optimizing image..."
 WORKING_DIR=$(mktemp -d)
-PREFIX=/tmp/out/ make clean && \
-    PREFIX=/tmp/out/ make ctr-remote && \
-    /tmp/out/ctr-remote image optimize -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
+PREFIX=/tmp/out/ make clean
+PREFIX=/tmp/out/ GO_BUILD_FLAGS="-race" make ctr-remote # Check data race
+/tmp/out/ctr-remote image optimize -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
 
 echo "Downloading optimized image..."
 docker pull "${OPT_IMAGE_TAG}" && docker save "${OPT_IMAGE_TAG}" | tar xv -C "${WORKING_DIR}"

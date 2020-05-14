@@ -197,10 +197,15 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			key = fmt.Sprintf("%s/%s", ref, dgst)
 		)
 		fs.resolveResultMu.Lock()
-		if cached, ok := fs.resolveResult.Get(key); ok && cached.(*resolveResult).err == nil {
-			rr = cached.(*resolveResult) // hit cache
-		} else {
-			rr = fs.resolve(ctx, ref, dgst) // missed cache
+		if c, ok := fs.resolveResult.Get(key); ok {
+			if c.(*resolveResult).isInProgress() {
+				rr = c.(*resolveResult) // resolving in progress
+			} else if _, err := c.(*resolveResult).get(); err == nil {
+				rr = c.(*resolveResult) // hit successfully resolved cache
+			}
+		}
+		if rr == nil { // missed cache
+			rr = fs.resolve(ctx, ref, dgst)
 			fs.resolveResult.Add(key, rr)
 		}
 		if dgst == digest {
@@ -214,7 +219,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		logCtx.Debug("resolve result isn't registered")
 		return fmt.Errorf("resolve result(%q,%q) isn't registered", ref, digest)
 	}
-	l, err := resolved.get(30 * time.Second) // get layer with timeout
+	l, err := resolved.waitAndGet(30 * time.Second) // get layer with timeout
 	if err != nil {
 		logCtx.WithError(err).Debug("failed to resolve layer")
 		return errors.Wrapf(err, "failed to resolve layer(%q,%q)", ref, digest)
@@ -462,7 +467,9 @@ func newResolveResult(init func() (*layer, error)) *resolveResult {
 	rr.progress.start()
 
 	go func() {
+		rr.resultMu.Lock()
 		rr.layer, rr.err = init()
+		rr.resultMu.Unlock()
 		rr.progress.done()
 	}()
 
@@ -472,16 +479,28 @@ func newResolveResult(init func() (*layer, error)) *resolveResult {
 type resolveResult struct {
 	layer    *layer
 	err      error
+	resultMu sync.Mutex
 	progress *waiter
 }
 
-func (rr *resolveResult) get(timeout time.Duration) (*layer, error) {
+func (rr *resolveResult) waitAndGet(timeout time.Duration) (*layer, error) {
 	if err := rr.progress.wait(timeout); err != nil {
 		return nil, err
-	} else if rr.layer == nil && rr.err == nil {
+	}
+	return rr.get()
+}
+
+func (rr *resolveResult) get() (*layer, error) {
+	rr.resultMu.Lock()
+	defer rr.resultMu.Unlock()
+	if rr.layer == nil && rr.err == nil {
 		return nil, fmt.Errorf("failed to get result")
 	}
 	return rr.layer, rr.err
+}
+
+func (rr *resolveResult) isInProgress() bool {
+	return rr.progress.isInProgress()
 }
 
 func newLayer(blob remote.Blob, r reader.Reader, root *stargz.TOCEntry) *layer {
@@ -541,24 +560,39 @@ func newWaiter() *waiter {
 
 type waiter struct {
 	inProgress     bool
+	inProgressMu   sync.Mutex
 	completionCond *sync.Cond
 }
 
 func (w *waiter) start() {
+	w.inProgressMu.Lock()
 	w.inProgress = true
+	w.inProgressMu.Unlock()
 }
 
 func (w *waiter) done() {
+	w.inProgressMu.Lock()
 	w.inProgress = false
+	w.inProgressMu.Unlock()
 	w.completionCond.Broadcast()
+}
+
+func (w *waiter) isInProgress() bool {
+	w.inProgressMu.Lock()
+	defer w.inProgressMu.Unlock()
+	return w.inProgress
 }
 
 func (w *waiter) wait(timeout time.Duration) error {
 	wait := func() <-chan struct{} {
 		ch := make(chan struct{})
 		go func() {
+			w.inProgressMu.Lock()
+			inProgress := w.inProgress
+			w.inProgressMu.Unlock()
+
 			w.completionCond.L.Lock()
-			if w.inProgress {
+			if inProgress {
 				w.completionCond.Wait()
 			}
 			w.completionCond.L.Unlock()
@@ -568,7 +602,9 @@ func (w *waiter) wait(timeout time.Duration) error {
 	}
 	select {
 	case <-time.After(timeout):
+		w.inProgressMu.Lock()
 		w.inProgress = false
+		w.inProgressMu.Unlock()
 		w.completionCond.Broadcast()
 		return fmt.Errorf("timeout(%v)", timeout)
 	case <-wait():

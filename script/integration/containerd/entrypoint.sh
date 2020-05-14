@@ -118,7 +118,8 @@ retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 
 echo "Installing snapshotter..."
 PREFIX="${TMP_DIR}/" make clean
-PREFIX="${TMP_DIR}/" make -j2
+PREFIX="${TMP_DIR}/" GO_BUILD_FLAGS="-race" make containerd-stargz-grpc # Check data race
+PREFIX="${TMP_DIR}/" make ctr-remote
 PREFIX="${TMP_DIR}/" make install
 mkdir -p /etc/containerd /etc/containerd-stargz-grpc
 cp ./script/integration/containerd/config.containerd.toml /etc/containerd/config.toml
