@@ -34,9 +34,7 @@ FROM kindest/node:v1.18.0
 # install containerd and snapshotter plugin from building stages
 COPY --from=containerd-builder /out/bin/* /usr/local/bin/
 COPY --from=snapshotter-builder /out/* /usr/local/bin/
-COPY ./script/pullsecrets/config/stargz-snapshotter.service /etc/systemd/system/
-COPY ./script/pullsecrets/config/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
-COPY ./script/pullsecrets/config/config.containerd.toml /etc/containerd/config.toml
+COPY ./script/config/ /
 RUN apt-get update -y && apt-get install --no-install-recommends -y fuse && \
     systemctl enable stargz-snapshotter
 

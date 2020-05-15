@@ -1,3 +1,0 @@
-[kubeconfig_keychain]
-enable_keychain = true
-kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
