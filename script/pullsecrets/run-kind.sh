@@ -17,6 +17,7 @@
 set -euo pipefail
 
 NODE_IMAGE_NAME="stargz-snapshotter-node:1"
+NODE_BASE_IMAGE_NAME="stargz-snapshotter-node-base:1"
 SNAPSHOTTER_KUBECONFIG_PATH=/etc/kubernetes/snapshotter/config.conf
 
 # Arguments
@@ -27,19 +28,36 @@ REPO="${4}"
 REGISTRY_NETWORK="${5}"
 DOCKERCONFIGJSON_DATA="${6}"
 
+TMP_CONTEXT=$(mktemp -d)
 SN_KUBECONFIG=$(mktemp)
 function cleanup {
     local ORG_EXIT_CODE="${1}"
     rm "${SN_KUBECONFIG}"
+    rm -rf "${TMP_CONTEXT}"
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 if [ "${KIND_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
-    docker build -t "${NODE_IMAGE_NAME}" "${REPO}"
+    docker build -t "${NODE_BASE_IMAGE_NAME}" "${REPO}"
 fi
-    
+
+# Prepare the testing node with enabling k8s keychain
+cat <<'EOF' > "${TMP_CONTEXT}/config.stargz.append.toml"
+[kubeconfig_keychain]
+enable_keychain = true
+kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
+EOF
+cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
+FROM ${NODE_BASE_IMAGE_NAME}
+
+COPY ./config.stargz.append.toml /tmp/config.toml
+RUN cat /tmp/config.toml >> /etc/containerd-stargz-grpc/config.toml
+
+EOF
+docker build -t "${NODE_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
+
 # cluster must be single node
 echo "Cleating kind cluster and connecting to the registry network..."
 kind create cluster --name "${KIND_CLUSTER_NAME}" \
