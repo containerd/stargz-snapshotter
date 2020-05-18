@@ -104,7 +104,7 @@ The following example converts the legacy `library/ubuntu:18.04` image into star
 Finally, the following commands pull the stargz image lazily. Stargz snapshotter prefetches files that are most likely accessed in the optimized workload, which hopefully increases the cache hit rate for that workload and mitigates runtime overheads as shown in the benchmarking result shown top of this doc.
 
 ```console
-# time ctr-remote images rpull --plain-http registry2:5000/ubuntu:18.04
+# ctr-remote images rpull --plain-http registry2:5000/ubuntu:18.04
 fetching sha256:728332a6... application/vnd.docker.distribution.manifest.v2+json
 fetching sha256:80026893... application/vnd.docker.container.image.v1+json
 # ctr-remote run --rm -t --snapshotter=stargz registry2:5000/ubuntu:18.04 test /bin/bash
