@@ -14,7 +14,7 @@
 
 FROM golang:1.13-buster AS golang-base
 
-# build customized version of containerd which supports remote snapshots via CRI
+# build containerd
 FROM golang-base AS containerd-builder
 RUN apt-get update -y && \
     apt-get install -y libbtrfs-dev libseccomp-dev && \
