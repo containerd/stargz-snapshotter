@@ -16,6 +16,15 @@
 
 set -euo pipefail
 
+CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REPO="${CONTEXT}../../../"
+
+# NOTE: The entire contents of containerd/stargz-snapshotter are located in
+# the testing container so utils.sh is visible from this script during runtime.
+# TODO: Refactor the code dependencies and pack them in the container without
+#       expecting and relying on volumes.
+source "${REPO}/script/util/utils.sh"
+
 PLUGIN=stargz
 REGISTRY_HOST=registry-integration
 REGISTRY_ALT_HOST=registry-alt
@@ -30,7 +39,7 @@ USR_NOMALSN_UNSTARGZ=$(mktemp -d)
 USR_NOMALSN_STARGZ=$(mktemp -d)
 USR_STARGZSN_UNSTARGZ=$(mktemp -d)
 USR_STARGZSN_STARGZ=$(mktemp -d)
-PULL_LOG=$(mktemp)
+LOG_FILE=$(mktemp)
 function cleanup {
     ORG_EXIT_CODE="${1}"
     rm -rf "${TMP_DIR}" || true
@@ -42,7 +51,7 @@ function cleanup {
     rm -rf "${USR_NOMALSN_STARGZ}" || true
     rm -rf "${USR_STARGZSN_UNSTARGZ}" || true
     rm -rf "${USR_STARGZSN_STARGZ}" || true
-    rm "${PULL_LOG}"
+    rm "${LOG_FILE}"
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
@@ -65,21 +74,6 @@ function retry {
     else
         return 1
     fi
-}
-
-function isServedAsRemoteSnapshot {
-    local LOG_PATH="${1}"
-    if [ "$(cat ${LOG_PATH})" == "" ] ; then
-        echo "Log is empty. Something is wrong."
-        return 1
-    fi
-
-    RES=$(cat "${LOG_PATH}" | grep -e 'application/vnd.oci.image.layer.\|application/vnd.docker.image.rootfs.')
-    if [ "${RES}" != "" ] ; then
-        echo "Some layer have been downloaded by containerd"
-        return 1
-    fi
-    return 0
 }
 
 function kill_all {
@@ -105,7 +99,8 @@ function reboot_containerd {
     rm -rf "${REMOTE_SNAPSHOTTER_ROOT}"*
     containerd-stargz-grpc --log-level=debug \
                            --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
-                           --config=/etc/containerd-stargz-grpc/config.toml &
+                           --config=/etc/containerd-stargz-grpc/config.toml \
+                           2>&1 | tee -a "${LOG_FILE}" & # Dump all log
     retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
     containerd --log-level debug --config=/etc/containerd/config.toml &
     retry ctr version
@@ -156,13 +151,9 @@ ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000
 ctr-remote run --rm "${REGISTRY_HOST}:5000/alpine:stargz" test tar -c /usr | tar -xC "${USR_ORG}"
 
 echo "Getting image with stargz snapshotter..."
-echo "" > "${PULL_LOG}"
-ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/alpine:stargz" \
-    | tee "${PULL_LOG}"
-if ! isServedAsRemoteSnapshot "${PULL_LOG}" ; then
-    echo "Failed to serve all layers as remote snapshots"
-    exit 1
-fi
+echo -n "" > "${LOG_FILE}"
+ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/alpine:stargz"
+check_remote_snapshots "${LOG_FILE}"
 
 REGISTRY_HOST_IP=$(getent hosts "${REGISTRY_HOST}" | awk '{ print $1 }')
 REGISTRY_ALT_HOST_IP=$(getent hosts "${REGISTRY_ALT_HOST}" | awk '{ print $1 }')
@@ -222,13 +213,10 @@ ctr-remote run --rm "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr \
 
 reboot_containerd
 echo "Getting stargz image with stargz snapshotter..."
-echo "" > "${PULL_LOG}"
-ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:stargz" \
-    | tee "${PULL_LOG}"
-if ! isServedAsRemoteSnapshot "${PULL_LOG}" ; then
-    echo "Failed to serve all layers as remote snapshots"
-    exit 1
-fi
+echo -n "" > "${LOG_FILE}"
+ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:stargz"
+check_remote_snapshots "${LOG_FILE}"
+
 ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr \
     | tar -xC "${USR_STARGZSN_STARGZ}"
 

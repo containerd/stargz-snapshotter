@@ -16,7 +16,7 @@ FROM golang:1.13
 
 # basic tools
 RUN apt-get update -y && \
-    apt-get install --no-install-recommends -y libbtrfs-dev libseccomp-dev fuse python \
+    apt-get install --no-install-recommends -y libbtrfs-dev libseccomp-dev fuse python jq \
             apt-transport-https software-properties-common && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
     add-apt-repository \
