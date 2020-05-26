@@ -22,8 +22,6 @@ REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.soc
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
 REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/containerd-stargz-grpc/
 
-NOSNAPSHOTTER="${1:-}"
-
 RETRYNUM=30
 RETRYINTERVAL=1
 TIMEOUTSEC=180
@@ -46,7 +44,11 @@ function retry {
 
 function kill_all {
     if [ "${1}" != "" ] ; then
-        ps aux | grep "${1}" | grep -v grep | grep -v $(basename ${0}) | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {} || true
+        ps aux | grep "${1}" \
+            | grep -v grep \
+            | grep -v "hello.py" \
+            | grep -v $(basename ${0}) \
+            | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {} || true
     fi
 }
 
@@ -66,13 +68,17 @@ echo "cleaning up the environment..."
 kill_all "containerd"
 kill_all "containerd-stargz-grpc"
 cleanup
-if [ "${NOSNAPSHOTTER}" == "-nosnapshotter" ] ; then
+if [ "${NO_STARGZ_SNAPSHOTTER:-}" == "true" ] ; then
     echo "DO NOT RUN remote snapshotter"
 else
     echo "running remote snaphsotter..."
+    if [ "${LOG_FILE:-}" == "" ] ; then
+        LOG_FILE=/dev/null
+    fi
     containerd-stargz-grpc --log-level=debug \
                            --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
-                           --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.stargz.toml" &
+                           --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.stargz.toml" \
+                           2>&1 | tee -a "${LOG_FILE}" & # Dump all log
     retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
 fi
 echo "running containerd..."

@@ -27,3 +27,27 @@ function prepare_creds {
             -x509 -days 365 -out "${OUTPUT}/certs/domain.crt"
     docker run --entrypoint htpasswd registry:2 -Bbn "${USER}" "${PASS}" > "${OUTPUT}/auth/htpasswd"
 }
+
+# Check if all snapshots logged in the specified file are prepared as remote snapshots.
+# Whether a snapshot is prepared as a remote snapshot must be logged with the key
+# "remote-snapshot-prepared" in JSON-formatted log.
+# See also /snapshot/snapshot.go in this repo.
+LOG_REMOTE_SNAPSHOT="remote-snapshot-prepared"
+function check_remote_snapshots {
+    local LOG_FILE="${1}"
+    local REMOTE=0
+    local LOCAL=0
+
+    REMOTE=$(jq -r 'select(."'"${LOG_REMOTE_SNAPSHOT}"'" == "true")' "${LOG_FILE}" | wc -l)
+    LOCAL=$(jq -r 'select(."'"${LOG_REMOTE_SNAPSHOT}"'" == "false")' "${LOG_FILE}" | wc -l)
+    if [[ ${LOCAL} -gt 0 ]] ; then
+        echo "some local snapshots creation have been reported (local:${LOCAL},remote:${REMOTE})"
+        return 1
+    elif [[ ${REMOTE} -gt 0 ]] ; then
+        echo "all layers have been reported as remote snapshots (local:${LOCAL},remote:${REMOTE})"
+        return 0
+    else
+        echo "no log for checking remote snapshot was provided; Is the log-level = debug?"
+        return 1
+    fi
+}

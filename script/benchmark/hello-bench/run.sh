@@ -20,9 +20,18 @@ LEGACY_MODE="legacy"
 STARGZ_MODE="stargz"
 ESTARGZ_MODE="estargz"
 
-MEASURING_SCRIPT=./script/benchmark/hello-bench/src/hello.py
-REBOOT_CONTAINERD_SCRIPT=./script/benchmark/hello-bench/reboot_containerd.sh
-REPO_CONFIG_DIR=./script/benchmark/hello-bench/config/
+CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REPO="${CONTEXT}../../../"
+
+# NOTE: The entire contents of containerd/stargz-snapshotter are located in
+# the testing container so utils.sh is visible from this script during runtime.
+# TODO: Refactor the code dependencies and pack them in the container without
+#       expecting and relying on volumes.
+source "${REPO}/script/util/utils.sh"
+
+MEASURING_SCRIPT="${REPO}/script/benchmark/hello-bench/src/hello.py"
+REBOOT_CONTAINERD_SCRIPT="${REPO}/script/benchmark/hello-bench/reboot_containerd.sh"
+REPO_CONFIG_DIR="${REPO}/script/benchmark/hello-bench/config/"
 CONTAINERD_CONFIG_DIR=/etc/containerd/
 REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/containerd-stargz-grpc/
 
@@ -34,6 +43,14 @@ if [ $# -lt 1 ] ; then
 fi
 TARGET_REPOUSER="${1}"
 TARGET_IMAGES=${@:2}
+
+TMP_LOG_FILE=$(mktemp)
+function cleanup {
+    local ORG_EXIT_CODE="${1}"
+    rm "${TMP_LOG_FILE}" || true
+    exit "${ORG_EXIT_CODE}"
+}
+trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 function output {
     echo "BENCHMARK_OUTPUT: ${1}"
@@ -79,15 +96,19 @@ echo "BENCHMARK"
 echo "========="
 output "[{"
 
-"${REBOOT_CONTAINERD_SCRIPT}" -nosnapshotter
+NO_STARGZ_SNAPSHOTTER="true" "${REBOOT_CONTAINERD_SCRIPT}"
 measure "${LEGACY_MODE}" "--mode=legacy" ${TARGET_REPOUSER} ${TARGET_IMAGES}
 
+echo -n "" > "${TMP_LOG_FILE}"
 set_noprefetch "true" # disable prefetch
-"${REBOOT_CONTAINERD_SCRIPT}"
+LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
 measure "${STARGZ_MODE}" "--mode=stargz" ${TARGET_REPOUSER} ${TARGET_IMAGES}
+check_remote_snapshots "${TMP_LOG_FILE}"
 
+echo -n "" > "${TMP_LOG_FILE}"
 set_noprefetch "false" # enable prefetch
-"${REBOOT_CONTAINERD_SCRIPT}"
+LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
 measure "${ESTARGZ_MODE}" "--mode=estargz" ${TARGET_REPOUSER} ${TARGET_IMAGES}
+check_remote_snapshots "${TMP_LOG_FILE}"
 
 output "}]"

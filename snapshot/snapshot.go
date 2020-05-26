@@ -37,6 +37,16 @@ import (
 const (
 	targetSnapshotLabel = "containerd.io/snapshot.ref"
 	remoteLabel         = "containerd.io/snapshot/remote"
+
+	// remoteSnapshotLogKey is a key for log line, which indicates whether
+	// `Prepare` method successfully prepared targeting remote snapshot or not, as
+	// defined in the following:
+	// - "true"  : indicates the snapshot has been successfully prepared as a
+	//             remote snapshot
+	// - "false" : indicates the snapshot failed to be prepared as a remote
+	//             snapshot
+	// - null    : undetermined
+	remoteSnapshotLogKey = "remote-snapshot-prepared"
 )
 
 // FileSystem is a backing filesystem abstraction.
@@ -203,6 +213,12 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 	// Try to prepare the remote snapshot. If succeeded, we commit the snapshot now
 	// and return ErrAlreadyExists.
+	//
+	// NOTE: If passed labels including a target of a remote snapshot, this method
+	//       must log whether this method succeeded to prepare that remote snapshot
+	//       or not, using the key `remoteSnapshotLogKey` defined in the above. This
+	//       log is used by tests in this project.
+	logCtx := log.G(ctx).WithField("key", key).WithField("parent", parent)
 	var base snapshots.Info
 	for _, opt := range opts {
 		if err := opt(&base); err != nil {
@@ -212,9 +228,14 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	if target, ok := base.Labels[targetSnapshotLabel]; ok {
 		if err := o.prepareRemoteSnapshot(ctx, key, base.Labels); err == nil {
 			base.Labels[remoteLabel] = fmt.Sprintf("remote snapshot") // Mark this snapshot as remote
-			if err := o.Commit(ctx, target, key, append(opts, snapshots.WithLabels(base.Labels))...); err == nil {
+			err := o.Commit(ctx, target, key, append(opts, snapshots.WithLabels(base.Labels))...)
+			if err == nil {
+				logCtx.WithField(remoteSnapshotLogKey, "true").Debug("prepared remote snapshot")
 				return nil, errors.Wrapf(errdefs.ErrAlreadyExists, "target snapshot %q", target)
 			}
+			logCtx.WithError(err).WithField(remoteSnapshotLogKey, "false").Debug("failed to internally commit remote snapshot")
+		} else {
+			logCtx.WithError(err).WithField(remoteSnapshotLogKey, "false").Debug("failed to prepare remote snapshot")
 		}
 	}
 
@@ -604,8 +625,6 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, lab
 	}
 
 	if err := o.fs.Mount(o.context, o.upperPath(id), labels); err != nil {
-		log.G(ctx).WithField("key", key).
-			WithError(err).Debug("failed to prepare remote snapshot")
 		return err
 	}
 

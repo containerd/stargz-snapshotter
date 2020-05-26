@@ -17,12 +17,14 @@
 set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REPO="${CONTEXT}../../"
+
 REGISTRY_HOST="cri-registry"
 TEST_NODE_NAME="cri-testenv-container"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
-REMOTE_SNAPSHOT_FAILURE_LOG="failed to prepare remote snapshot"
 
 source "${CONTEXT}/const.sh"
+source "${REPO}/script/util/utils.sh"
 
 IMAGE_LIST="${1}"
 
@@ -31,6 +33,7 @@ DOCKER_COMPOSE_YAML=$(mktemp)
 CONTAINERD_CONFIG=$(mktemp)
 SNAPSHOTTER_CONFIG=$(mktemp)
 TMPFILE=$(mktemp)
+LOG_FILE=$(mktemp)
 function cleanup {
     ORG_EXIT_CODE="${1}"
     docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v || true
@@ -39,6 +42,7 @@ function cleanup {
     rm "${CONTAINERD_CONFIG}" || true
     rm "${SNAPSHOTTER_CONFIG}" || true
     rm "${TMPFILE}" || true
+    rm "${LOG_FILE}" || true
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
@@ -170,10 +174,9 @@ if ! [ -s "${TMPFILE}" ] ; then
 fi
 
 # Check all remote snapshots are created successfully
-if docker exec "${TEST_NODE_NAME}" journalctl -xu stargz-snapshotter \
-        | grep "${REMOTE_SNAPSHOT_FAILURE_LOG}" ; then
-    echo "Some layers hasn't been prepared as remote snapshots"
-    exit 1
-fi
+docker exec "${TEST_NODE_NAME}" journalctl -u stargz-snapshotter \
+    | grep "${LOG_REMOTE_SNAPSHOT}" \
+    | sed -E 's/^[^\{]*(\{.*)$/\1/g' > "${LOG_FILE}"
+check_remote_snapshots "${LOG_FILE}"
 
 exit 0

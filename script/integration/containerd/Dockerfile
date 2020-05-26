@@ -18,7 +18,7 @@ FROM golang:1.13
 # docker-ce-cli is used only to log into registry with ~/.docker/config.json
 RUN apt-get update -y && \
     apt-get --no-install-recommends install -y fuse iptables libbtrfs-dev libseccomp-dev \
-            apt-transport-https gnupg2 software-properties-common && \
+            apt-transport-https gnupg2 software-properties-common jq && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
     add-apt-repository \
       "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \

@@ -55,9 +55,8 @@ func main() {
 		log.L.WithError(err).Fatal("failed to prepare logger")
 	}
 	logrus.SetLevel(lvl)
-	logrus.SetFormatter(&logrus.TextFormatter{
+	logrus.SetFormatter(&logrus.JSONFormatter{
 		TimestampFormat: log.RFC3339NanoFixed,
-		FullTimestamp:   true,
 	})
 
 	var (

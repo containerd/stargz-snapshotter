@@ -42,7 +42,7 @@ FROM ${NODE_BASE_IMAGE_NAME}
 
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
-RUN apt install -y --no-install-recommends git make gcc build-essential && \
+RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
     curl https://dl.google.com/go/go1.13.9.linux-amd64.tar.gz \
     | tar -C /usr/local -xz && \
     go get -u github.com/onsi/ginkgo/ginkgo && \
