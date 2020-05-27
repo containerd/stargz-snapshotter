@@ -46,7 +46,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -65,8 +64,8 @@ import (
 	"github.com/golang/groupcache/lru"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/hanwen/go-fuse/fuse"
-	"github.com/hanwen/go-fuse/fuse/nodefs"
+	fusefs "github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
@@ -81,6 +80,8 @@ const (
 	stateDirName              = ".stargz-snapshotter"
 	defaultLRUCacheEntry      = 100
 	defaultResolveResultEntry = 100
+	statFileMode              = syscall.S_IFREG | 0400 // -r--------
+	stateDirMode              = syscall.S_IFDIR | 0500 // dr-x------
 
 	// targetRefLabelCRI is a label which contains image reference passed from CRI plugin
 	targetRefLabelCRI = "containerd.io/snapshot/cri.image-ref"
@@ -287,30 +288,39 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 
 	// Mounting stargz
 	// TODO: bind mount the state directory as a read-only fs on snapshotter's side
-	conn := nodefs.NewFileSystemConnector(&node{
-		Node:  nodefs.NewDefaultNode(),
+	timeSec := time.Second
+	rawFS := fusefs.NewNodeFS(&node{
 		fs:    fs,
 		layer: l.reader,
 		e:     l.root,
 		s:     newState(digest, l.blob),
 		root:  mountpoint,
-	}, &nodefs.Options{
-		NegativeTimeout: 0,
-		AttrTimeout:     time.Second,
-		EntryTimeout:    time.Second,
-		Owner:           nil, // preserve owners.
+	}, &fusefs.Options{
+		AttrTimeout:     &timeSec,
+		EntryTimeout:    &timeSec,
+		NullPermissions: true,
 	})
-	server, err := fuse.NewServer(conn.RawFS(), mountpoint, &fuse.MountOptions{
+	server, err := fuse.NewServer(rawFS, mountpoint, &fuse.MountOptions{
 		AllowOther: true,             // allow users other than root&mounter to access fs
+		FsName:     "stargz",         // name this filesystem as "stargz"
 		Options:    []string{"suid"}, // allow setuid inside container
+		Debug:      fs.debug,
 	})
 	if err != nil {
 		logCtx.WithError(err).Debug("failed to make filesstem server")
 		return err
 	}
 
-	server.SetDebug(fs.debug)
-	go server.Serve()
+	go func() {
+		server.Serve()
+
+		// Cleanup on unmount
+		// TODO: prevent race.
+		fs.layerMu.Lock()
+		delete(fs.layer, mountpoint)
+		fs.layerMu.Unlock()
+	}()
+
 	return server.WaitMount()
 }
 
@@ -396,12 +406,6 @@ func (fs *filesystem) check(ctx context.Context, l *layer) error {
 	}
 
 	return nil
-}
-
-func (fs *filesystem) unregister(mountpoint string) {
-	fs.layerMu.Lock()
-	delete(fs.layer, mountpoint)
-	fs.layerMu.Unlock()
 }
 
 func (fs *filesystem) parseLabels(labels map[string]string) (rRef, rDigest string, rLayers []string, rPrefetchSize int64, _ error) {
@@ -620,9 +624,9 @@ type fileReader interface {
 	OpenFile(name string) (io.ReaderAt, error)
 }
 
-// node is a filesystem inode abstraction which implements node in go-fuse.
+// node is a filesystem inode abstraction.
 type node struct {
-	nodefs.Node
+	fusefs.Inode
 	fs     *filesystem
 	layer  fileReader
 	e      *stargz.TOCEntry
@@ -631,11 +635,11 @@ type node struct {
 	opaque bool // true if this node is an overlayfs opaque directory
 }
 
-func (n *node) OnUnmount() {
-	n.fs.unregister(n.root)
-}
+var _ = (fusefs.InodeEmbedder)((*node)(nil))
 
-func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
+var _ = (fusefs.NodeReaddirer)((*node)(nil))
+
+func (n *node) Readdir(ctx context.Context) (fusefs.DirStream, syscall.Errno) {
 	var ents []fuse.DirEntry
 	whiteouts := map[string]*stargz.TOCEntry{}
 	normalEnts := map[string]bool{}
@@ -678,182 +682,175 @@ func (n *node) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		}
 	}
 
-	sort.Slice(ents, func(i, j int) bool { return ents[i].Name < ents[j].Name })
-	return ents, fuse.OK
+	return fusefs.NewListDirStream(ents), 0
 }
 
-func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*nodefs.Inode, fuse.Status) {
-	c := n.Inode().GetChild(name)
-	if c != nil {
-		s := c.Node().GetAttr(out, nil, context)
-		if s != fuse.OK {
-			return nil, s
-		}
-		return c, fuse.OK
-	}
+var _ = (fusefs.NodeLookuper)((*node)(nil))
 
+func (n *node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
 	// We don't want to show prefetch landmarks in "/".
 	if n.e.Name == "" && (name == PrefetchLandmark || name == NoPrefetchLandmark) {
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
 
 	// We don't want to show whiteouts.
 	if strings.HasPrefix(name, whiteoutPrefix) {
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
 
 	// state directory
 	if n.e.Name == "" && name == stateDirName {
-		return n.Inode().NewChild(name, true, n.s), n.s.attr(out)
+		return n.NewInode(ctx, n.s, stateToAttr(n.s, &out.Attr)), 0
 	}
 
+	// lookup stargz TOCEntry
 	ce, ok := n.e.LookupChild(name)
 	if !ok {
 		// If the entry exists as a whiteout, show an overlayfs-styled whiteout node.
 		if wh, ok := n.e.LookupChild(fmt.Sprintf("%s%s", whiteoutPrefix, name)); ok {
-			return n.Inode().NewChild(name, false, &whiteout{
-				Node: nodefs.NewDefaultNode(),
-				oe:   wh,
-			}), entryToWhAttr(wh, out)
+			return n.NewInode(ctx, &whiteout{
+				e: wh,
+			}, entryToWhAttr(wh, &out.Attr)), 0
 		}
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
 	var opaque bool
 	if _, ok := ce.LookupChild(whiteoutOpaqueDir); ok {
 		// This entry is an opaque directory so make it recognizable for overlayfs.
 		opaque = true
 	}
-	return n.Inode().NewChild(name, ce.Stat().IsDir(), &node{
-		Node:   nodefs.NewDefaultNode(),
+
+	return n.NewInode(ctx, &node{
 		fs:     n.fs,
 		layer:  n.layer,
 		e:      ce,
 		s:      n.s,
 		root:   n.root,
 		opaque: opaque,
-	}), entryToAttr(ce, out)
+	}, entryToAttr(ce, &out.Attr)), 0
 }
 
-func (n *node) Access(mode uint32, context *fuse.Context) fuse.Status {
-	if context.Owner.Uid == 0 {
-		// root can do anything.
-		return fuse.OK
-	}
-	if mode == 0 {
-		// Requires nothing.
-		return fuse.OK
-	}
+var _ = (fusefs.NodeOpener)((*node)(nil))
 
-	var shift uint32
-	if uint32(n.e.Uid) == context.Owner.Uid {
-		shift = 6
-	} else if uint32(n.e.Gid) == context.Owner.Gid {
-		shift = 3
-	} else {
-		shift = 0
-	}
-	if mode<<shift&modeOfEntry(n.e) != 0 {
-		return fuse.OK
-	}
-
-	return fuse.EPERM
-}
-
-func (n *node) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Status) {
+func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	ra, err := n.layer.OpenFile(n.e.Name)
 	if err != nil {
 		n.s.report(fmt.Errorf("failed to open node: %v", err))
-		return nil, fuse.EIO
+		return nil, 0, syscall.EIO
 	}
 	return &file{
-		File: nodefs.NewDefaultFile(),
-		n:    n,
-		e:    n.e,
-		ra:   ra,
-	}, fuse.OK
+		n:  n,
+		e:  n.e,
+		ra: ra,
+	}, 0, 0
 }
 
-func (n *node) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) fuse.Status {
-	return entryToAttr(n.e, out)
+var _ = (fusefs.NodeGetattrer)((*node)(nil))
+
+func (n *node) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	entryToAttr(n.e, &out.Attr)
+	return 0
 }
 
-func (n *node) GetXAttr(attribute string, context *fuse.Context) ([]byte, fuse.Status) {
-	if attribute == opaqueXattr && n.opaque {
+var _ = (fusefs.NodeGetxattrer)((*node)(nil))
+
+func (n *node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	if attr == opaqueXattr && n.opaque {
 		// This node is an opaque directory so give overlayfs-compliant indicator.
-		return []byte(opaqueXattrValue), fuse.OK
+		if len(dest) < len(opaqueXattrValue) {
+			return uint32(len(opaqueXattrValue)), syscall.ERANGE
+		}
+		return uint32(copy(dest, opaqueXattrValue)), 0
 	}
-	if v, ok := n.e.Xattrs[attribute]; ok {
-		return v, fuse.OK
+	if v, ok := n.e.Xattrs[attr]; ok {
+		if len(dest) < len(v) {
+			return uint32(len(v)), syscall.ERANGE
+		}
+		return uint32(copy(dest, v)), 0
 	}
-	return nil, fuse.ENOATTR
+	return 0, syscall.ENODATA
 }
 
-func (n *node) ListXAttr(ctx *fuse.Context) (attrs []string, code fuse.Status) {
+var _ = (fusefs.NodeListxattrer)((*node)(nil))
+
+func (n *node) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	var attrs []byte
 	if n.opaque {
 		// This node is an opaque directory so add overlayfs-compliant indicator.
-		attrs = append(attrs, opaqueXattr)
+		attrs = append(attrs, []byte(opaqueXattr+"\x00")...)
 	}
 	for k := range n.e.Xattrs {
-		attrs = append(attrs, k)
+		attrs = append(attrs, []byte(k+"\x00")...)
 	}
-	return attrs, fuse.OK
+	if len(dest) < len(attrs) {
+		return uint32(len(attrs)), syscall.ERANGE
+	}
+	return uint32(copy(dest, attrs)), 0
 }
 
-func (n *node) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
-	return []byte(n.e.LinkName), fuse.OK
-}
-func (n *node) Deletable() bool {
-	// read-only filesystem
-	return false
+var _ = (fusefs.NodeReadlinker)((*node)(nil))
+
+func (n *node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	return []byte(n.e.LinkName), 0
 }
 
-func (n *node) StatFs() *fuse.StatfsOut {
-	return defaultStatfs()
+var _ = (fusefs.NodeStatfser)((*node)(nil))
+
+func (n *node) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	defaultStatfs(out)
+	return 0
 }
 
-// file is a file abstraction which implements file in go-fuse.
+// file is a file abstraction which implements file handle in go-fuse.
 type file struct {
-	nodefs.File
 	n  *node
 	e  *stargz.TOCEntry
 	ra io.ReaderAt
 }
 
-func (f *file) String() string {
-	return "stargzFile"
-}
+var _ = (fusefs.FileReader)((*file)(nil))
 
-func (f *file) Read(buf []byte, off int64) (fuse.ReadResult, fuse.Status) {
-	n, err := f.ra.ReadAt(buf, off)
+func (f *file) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	n, err := f.ra.ReadAt(dest, off)
 	if err != nil && err != io.EOF {
 		f.n.s.report(fmt.Errorf("failed to read node: %v", err))
-		return nil, fuse.EIO
+		return nil, syscall.EIO
 	}
-	return fuse.ReadResultData(buf[:n]), fuse.OK
+	return fuse.ReadResultData(dest[:n]), 0
 }
 
-func (f *file) GetAttr(out *fuse.Attr) fuse.Status {
-	return entryToAttr(f.e, out)
+var _ = (fusefs.FileGetattrer)((*file)(nil))
+
+func (f *file) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Errno {
+	entryToAttr(f.e, &out.Attr)
+	return 0
 }
 
-// whiteout is a whiteout abstraction compliant to overlayfs. This implements
-// node in go-fuse.
+// whiteout is a whiteout abstraction compliant to overlayfs.
 type whiteout struct {
-	nodefs.Node
-	oe *stargz.TOCEntry
+	fusefs.Inode
+	e *stargz.TOCEntry
 }
 
-func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) fuse.Status {
-	return entryToWhAttr(w.oe, out)
+var _ = (fusefs.NodeGetattrer)((*whiteout)(nil))
+
+func (w *whiteout) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	entryToWhAttr(w.e, &out.Attr)
+	return 0
+}
+
+var _ = (fusefs.NodeStatfser)((*whiteout)(nil))
+
+func (w *whiteout) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	defaultStatfs(out)
+	return 0
 }
 
 // newState provides new state directory node.
 // It creates statFile at the same time to give it stable inode number.
 func newState(digest string, blob remote.Blob) *state {
 	return &state{
-		Node: nodefs.NewDefaultNode(),
 		statFile: &statFile{
-			Node: nodefs.NewDefaultNode(),
 			name: digest + ".json",
 			statJSON: statJSON{
 				Digest: digest,
@@ -869,85 +866,51 @@ func newState(digest string, blob remote.Blob) *state {
 // the clients(e.g. Kubernetes's livenessProbe).
 // This directory has mode "dr-x------ root root".
 type state struct {
-	nodefs.Node
+	fusefs.Inode
 	statFile *statFile
+}
+
+var _ = (fusefs.NodeReaddirer)((*state)(nil))
+
+func (s *state) Readdir(ctx context.Context) (fusefs.DirStream, syscall.Errno) {
+	return fusefs.NewListDirStream([]fuse.DirEntry{
+		{
+			Mode: statFileMode,
+			Name: s.statFile.name,
+			Ino:  inodeOfStatFile(s.statFile),
+		},
+	}), 0
+}
+
+var _ = (fusefs.NodeLookuper)((*state)(nil))
+
+func (s *state) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
+	if name != s.statFile.name {
+		return nil, syscall.ENOENT
+	}
+	attr, errno := s.statFile.attr(&out.Attr)
+	if errno != 0 {
+		return nil, errno
+	}
+	return s.NewInode(ctx, s.statFile, attr), 0
+}
+
+var _ = (fusefs.NodeGetattrer)((*state)(nil))
+
+func (s *state) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	stateToAttr(s, &out.Attr)
+	return 0
+}
+
+var _ = (fusefs.NodeStatfser)((*state)(nil))
+
+func (s *state) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	defaultStatfs(out)
+	return 0
 }
 
 func (s *state) report(err error) {
 	s.statFile.report(err)
-}
-
-func (s *state) OpenDir(context *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
-	return []fuse.DirEntry{
-		{
-			Mode: syscall.S_IFREG | s.statFile.mode(),
-			Name: s.statFile.name,
-			Ino:  s.statFile.ino(),
-		},
-	}, fuse.OK
-}
-
-func (s *state) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*nodefs.Inode, fuse.Status) {
-	if c := s.Inode().GetChild(name); c != nil {
-		if status := c.Node().GetAttr(out, nil, context); status != fuse.OK {
-			return nil, status
-		}
-		return c, fuse.OK
-	}
-
-	if name != s.statFile.name {
-		return nil, fuse.ENOENT
-	}
-	return s.Inode().NewChild(name, false, s.statFile), s.statFile.attr(out)
-}
-
-func (s *state) Access(mode uint32, context *fuse.Context) fuse.Status {
-	if mode == 0 {
-		// Requires nothing.
-		return fuse.OK
-	}
-	if context.Owner.Uid == 0 && mode&s.mode()>>6 != 0 {
-		// root can read and open it (dr-x------ root root).
-		return fuse.OK
-	}
-
-	return fuse.EPERM
-
-}
-func (s *state) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) fuse.Status {
-	return s.attr(out)
-}
-
-func (s *state) StatFs() *fuse.StatfsOut {
-	return defaultStatfs()
-}
-
-func (s *state) ino() uint64 {
-	// calculates the inode number which is one-to-one conresspondence
-	// with this state directory node inscance.
-	return uint64(uintptr(unsafe.Pointer(s)))
-}
-
-func (s *state) mode() uint32 {
-	return 0500
-}
-
-func (s *state) attr(out *fuse.Attr) fuse.Status {
-	out.Ino = s.ino()
-	out.Size = 0
-	out.Blksize = blockSize
-	out.Blocks = 0
-	out.Mode = syscall.S_IFDIR | s.mode()
-	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
-	out.Nlink = 1
-
-	// dummy
-	out.Mtime = 0
-	out.Mtimensec = 0
-	out.Rdev = 0
-	out.Padding = 0
-
-	return fuse.OK
 }
 
 type statJSON struct {
@@ -962,105 +925,78 @@ type statJSON struct {
 // statFile is a file which contain something to be reported from this layer.
 // This filesystem uses statFile.report() to report something(e.g. error) to
 // the clients(e.g. Kubernetes's livenessProbe).
-// This directory has mode "-r-------- root root".
+// This file has mode "-r-------- root root".
 type statFile struct {
-	nodefs.Node
+	fusefs.Inode
 	name     string
 	blob     remote.Blob
 	statJSON statJSON
 	mu       sync.Mutex
 }
 
-func (e *statFile) report(err error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.statJSON.Error = err.Error()
+var _ = (fusefs.NodeOpener)((*statFile)(nil))
+
+func (sf *statFile) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	return nil, 0, 0
 }
 
-func (e *statFile) updateStatUnlocked() ([]byte, error) {
-	e.statJSON.FetchedSize = e.blob.FetchedSize()
-	e.statJSON.FetchedPercent = float64(e.statJSON.FetchedSize) / float64(e.statJSON.Size) * 100.0
-	j, err := json.Marshal(&e.statJSON)
+var _ = (fusefs.NodeReader)((*statFile)(nil))
+
+func (sf *statFile) Read(ctx context.Context, f fusefs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	st, err := sf.updateStatUnlocked()
+	if err != nil {
+		return nil, syscall.EIO
+	}
+	n, err := bytes.NewReader(st).ReadAt(dest, off)
+	if err != nil && err != io.EOF {
+		return nil, syscall.EIO
+	}
+	return fuse.ReadResultData(dest[:n]), 0
+}
+
+var _ = (fusefs.NodeGetattrer)((*statFile)(nil))
+
+func (sf *statFile) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	_, errno := sf.attr(&out.Attr)
+	return errno
+}
+
+var _ = (fusefs.NodeStatfser)((*statFile)(nil))
+
+func (sf *statFile) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	defaultStatfs(out)
+	return 0
+}
+
+func (sf *statFile) report(err error) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	sf.statJSON.Error = err.Error()
+}
+
+func (sf *statFile) attr(out *fuse.Attr) (fusefs.StableAttr, syscall.Errno) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	st, err := sf.updateStatUnlocked()
+	if err != nil {
+		return fusefs.StableAttr{}, syscall.EIO
+	}
+
+	return statFileToAttr(sf, uint64(len(st)), out), 0
+}
+
+func (sf *statFile) updateStatUnlocked() ([]byte, error) {
+	sf.statJSON.FetchedSize = sf.blob.FetchedSize()
+	sf.statJSON.FetchedPercent = float64(sf.statJSON.FetchedSize) / float64(sf.statJSON.Size) * 100.0
+	j, err := json.Marshal(&sf.statJSON)
 	if err != nil {
 		return nil, err
 	}
 	j = append(j, []byte("\n")...)
 	return j, nil
-}
-
-func (e *statFile) Access(mode uint32, context *fuse.Context) fuse.Status {
-	if mode == 0 {
-		// Requires nothing.
-		return fuse.OK
-	}
-	if context.Owner.Uid == 0 && mode&e.mode()>>6 != 0 {
-		// root can operate it.
-		return fuse.OK
-	}
-
-	return fuse.EPERM
-}
-
-func (e *statFile) Open(flags uint32, context *fuse.Context) (nodefs.File, fuse.Status) {
-	return nil, fuse.OK
-}
-
-func (e *statFile) Read(file nodefs.File, dest []byte, off int64, context *fuse.Context) (fuse.ReadResult, fuse.Status) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	st, err := e.updateStatUnlocked()
-	if err != nil {
-		return nil, fuse.EIO
-	}
-	n, err := bytes.NewReader(st).ReadAt(dest, off)
-	if err != nil && err != io.EOF {
-		return nil, fuse.EIO
-	}
-	return fuse.ReadResultData(dest[:n]), fuse.OK
-}
-
-func (e *statFile) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) fuse.Status {
-	return e.attr(out)
-}
-
-func (e *statFile) StatFs() *fuse.StatfsOut {
-	return defaultStatfs()
-}
-
-func (e *statFile) ino() uint64 {
-	// calculates the inode number which is one-to-one conresspondence
-	// with this state file node inscance.
-	return uint64(uintptr(unsafe.Pointer(e)))
-}
-
-func (e *statFile) mode() uint32 {
-	return 0400
-}
-
-func (e *statFile) attr(out *fuse.Attr) fuse.Status {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	st, err := e.updateStatUnlocked()
-	if err != nil {
-		return fuse.EIO
-	}
-
-	out.Ino = e.ino()
-	out.Size = uint64(len(st))
-	out.Blksize = blockSize
-	out.Blocks = out.Size / uint64(out.Blksize)
-	out.Mode = syscall.S_IFREG | e.mode()
-	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
-	out.Nlink = 1
-
-	// dummy
-	out.Mtime = 0
-	out.Mtimensec = 0
-	out.Rdev = 0
-	out.Padding = 0
-
-	return fuse.OK
 }
 
 // inodeOfEnt calculates the inode number which is one-to-one conresspondence
@@ -1070,7 +1006,7 @@ func inodeOfEnt(e *stargz.TOCEntry) uint64 {
 }
 
 // entryToAttr converts stargz's TOCEntry to go-fuse's Attr.
-func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) fuse.Status {
+func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) fusefs.StableAttr {
 	out.Ino = inodeOfEnt(e)
 	out.Size = uint64(e.Size)
 	out.Blksize = blockSize
@@ -1089,11 +1025,17 @@ func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) fuse.Status {
 	}
 	out.Padding = 0 // TODO
 
-	return fuse.OK
+	return fusefs.StableAttr{
+		Mode: out.Mode,
+		Ino:  out.Ino,
+		// NOTE: The inode number is unique throughout the lifettime of
+		// this filesystem so we don't consider about generation at this
+		// moment.
+	}
 }
 
 // entryToWhAttr converts stargz's TOCEntry to go-fuse's Attr of whiteouts.
-func entryToWhAttr(e *stargz.TOCEntry, out *fuse.Attr) fuse.Status {
+func entryToWhAttr(e *stargz.TOCEntry, out *fuse.Attr) fusefs.StableAttr {
 	fi := e.Stat()
 	out.Ino = inodeOfEnt(e)
 	out.Size = 0
@@ -1107,7 +1049,79 @@ func entryToWhAttr(e *stargz.TOCEntry, out *fuse.Attr) fuse.Status {
 	out.Nlink = 1
 	out.Padding = 0 // TODO
 
-	return fuse.OK
+	return fusefs.StableAttr{
+		Mode: out.Mode,
+		Ino:  out.Ino,
+		// NOTE: The inode number is unique throughout the lifettime of
+		// this filesystem so we don't consider about generation at this
+		// moment.
+	}
+}
+
+// inodeOfState calculates the inode number which is one-to-one conresspondence
+// with the state directory insntance which was created on mount.
+func inodeOfState(s *state) uint64 {
+	return uint64(uintptr(unsafe.Pointer(s)))
+}
+
+// stateToAttr converts state directory to go-fuse's Attr.
+func stateToAttr(s *state, out *fuse.Attr) fusefs.StableAttr {
+	out.Ino = inodeOfState(s)
+	out.Size = 0
+	out.Blksize = blockSize
+	out.Blocks = 0
+	out.Nlink = 1
+
+	// root can read and open it (dr-x------ root root).
+	out.Mode = stateDirMode
+	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
+
+	// dummy
+	out.Mtime = 0
+	out.Mtimensec = 0
+	out.Rdev = 0
+	out.Padding = 0
+
+	return fusefs.StableAttr{
+		Mode: out.Mode,
+		Ino:  out.Ino,
+		// NOTE: The inode number is unique throughout the lifettime of
+		// this filesystem so we don't consider about generation at this
+		// moment.
+	}
+}
+
+// inodeOfStatFile calculates the inode number which is one-to-one conresspondence
+// with the stat file insntance which was created on mount.
+func inodeOfStatFile(s *statFile) uint64 {
+	return uint64(uintptr(unsafe.Pointer(s)))
+}
+
+// statFileToAttr converts stat file to go-fuse's Attr.
+func statFileToAttr(sf *statFile, size uint64, out *fuse.Attr) fusefs.StableAttr {
+	out.Ino = inodeOfStatFile(sf)
+	out.Size = size
+	out.Blksize = blockSize
+	out.Blocks = out.Size / uint64(out.Blksize)
+	out.Nlink = 1
+
+	// Root can read it ("-r-------- root root").
+	out.Mode = statFileMode
+	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
+
+	// dummy
+	out.Mtime = 0
+	out.Mtimensec = 0
+	out.Rdev = 0
+	out.Padding = 0
+
+	return fusefs.StableAttr{
+		Mode: out.Mode,
+		Ino:  out.Ino,
+		// NOTE: The inode number is unique throughout the lifettime of
+		// this filesystem so we don't consider about generation at this
+		// moment.
+	}
 }
 
 // modeOfEntry gets system's mode bits from TOCEntry
@@ -1153,18 +1167,17 @@ func modeOfEntry(e *stargz.TOCEntry) uint32 {
 	return res
 }
 
-func defaultStatfs() *fuse.StatfsOut {
+func defaultStatfs(stat *fuse.StatfsOut) {
+
 	// http://man7.org/linux/man-pages/man2/statfs.2.html
-	return &fuse.StatfsOut{
-		Blocks:  0, // dummy
-		Bfree:   0,
-		Bavail:  0,
-		Files:   0, // dummy
-		Ffree:   0,
-		Bsize:   blockSize,
-		NameLen: 1<<32 - 1,
-		Frsize:  blockSize,
-		Padding: 0,
-		Spare:   [6]uint32{},
-	}
+	stat.Blocks = 0 // dummy
+	stat.Bfree = 0
+	stat.Bavail = 0
+	stat.Files = 0 // dummy
+	stat.Ffree = 0
+	stat.Bsize = blockSize
+	stat.NameLen = 1<<32 - 1
+	stat.Frsize = blockSize
+	stat.Padding = 0
+	stat.Spare = [6]uint32{}
 }

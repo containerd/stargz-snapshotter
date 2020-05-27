@@ -18,6 +18,7 @@ package logger
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -28,8 +29,8 @@ import (
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/util"
-	"github.com/hanwen/go-fuse/fuse"
-	"github.com/hanwen/go-fuse/fuse/nodefs"
+	fusefs "github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
@@ -44,18 +45,21 @@ const (
 func Mount(mountPoint string, tarfile io.ReaderAt, monitor Monitor) (func() error, error) {
 	// Mount filesystem.
 	root := newRoot(tarfile, monitor)
-	conn := nodefs.NewFileSystemConnector(root, &nodefs.Options{
-		NegativeTimeout: 0,
-		AttrTimeout:     time.Second,
-		EntryTimeout:    time.Second,
-		Owner:           nil, // preserve owners.
+	timeSec := time.Second
+	rawFS := fusefs.NewNodeFS(root, &fusefs.Options{
+		AttrTimeout:     &timeSec,
+		EntryTimeout:    &timeSec,
+		NullPermissions: true,
 	})
-	server, err := fuse.NewServer(conn.RawFS(), mountPoint, &fuse.MountOptions{AllowOther: true})
+	if err := root.InitNodes(); err != nil {
+		return nil, errors.Wrap(err, "failed to init nodes")
+	}
+	server, err := fuse.NewServer(rawFS, mountPoint, &fuse.MountOptions{
+		AllowOther: true,             // allow users other than root&mounter to access fs
+		Options:    []string{"suid"}, // allow setuid inside container
+	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to prepare filesystem server")
-	}
-	if err := root.InitNodes(); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize nodes")
 	}
 	go server.Serve()
 	if err := server.WaitMount(); err != nil {
@@ -68,11 +72,9 @@ func Mount(mountPoint string, tarfile io.ReaderAt, monitor Monitor) (func() erro
 // Nodes
 func newRoot(tarfile io.ReaderAt, monitor Monitor) *node {
 	root := &node{
-		Node:    nodefs.NewDefaultNode(),
 		tr:      tarfile,
 		monitor: monitor,
 	}
-	root.root = root
 	now := time.Now()
 	root.attr.SetTimes(&now, &now, &now)
 	root.attr.Mode = fuse.S_IFDIR | 0777
@@ -81,7 +83,7 @@ func newRoot(tarfile io.ReaderAt, monitor Monitor) *node {
 }
 
 type node struct {
-	nodefs.Node // Embedded default node.
+	fusefs.Inode
 
 	fullname string
 	attr     fuse.Attr
@@ -89,171 +91,113 @@ type node struct {
 	link     string // Symbolic link.
 	xattr    map[string][]byte
 
-	root *node
-	tr   io.ReaderAt
+	tr io.ReaderAt
 
 	monitor Monitor
 }
 
-func (n *node) OnMount(conn *nodefs.FileSystemConnector) {
-	n.monitor.OnMount()
-}
+var _ = (fusefs.InodeEmbedder)((*node)(nil))
 
-func (n *node) OnUnmount() {
-	n.monitor.OnUnmount()
-}
+var _ = (fusefs.NodeLookuper)((*node)(nil))
 
-func (n *node) Lookup(out *fuse.Attr, name string, context *fuse.Context) (*nodefs.Inode, fuse.Status) {
-	c := n.Inode().GetChild(name)
+func (n *node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
+	c := n.GetChild(name)
 	if c == nil {
-		return nil, fuse.ENOENT
+		return nil, syscall.ENOENT
 	}
-	if s := c.Node().GetAttr(out, nil, context); s != fuse.OK {
-		return nil, s
+	// All node used in this filesystem must have Getattr method.
+	var a fuse.AttrOut
+	if errno := c.Operations().(fusefs.NodeGetattrer).Getattr(ctx, nil, &a); errno != 0 {
+		return nil, errno
 	}
-	n.monitor.OnLookup(n.fullname)
+	out.Attr = a.Attr
+	n.monitor.OnLookup(filepath.Join(n.fullname, name))
 
-	return c, fuse.OK
+	return c, 0
 }
 
-func (n *node) Deletable() bool {
-	// Undeletable because of read-only filesystem
-	return false
-}
+var _ = (fusefs.NodeReadlinker)((*node)(nil))
 
-func (n *node) OnForget() {
-	// Do nothing because the node is undeletable.
-	n.monitor.OnForget(n.fullname)
-}
-
-func (n *node) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
-	if context.Owner.Uid == 0 { // root can do anything.
-		return fuse.OK
-	}
-	if mode == 0 { // Requires nothing.
-		return fuse.OK
-	}
-	var attr fuse.Attr
-	s := n.GetAttr(&attr, nil, context)
-	if s != fuse.OK {
-		return s
-	}
-	var shift uint32
-	if attr.Owner.Uid == context.Owner.Uid {
-		shift = 6
-	} else if attr.Owner.Gid == context.Owner.Gid {
-		shift = 3
-	} else {
-		shift = 0
-	}
-	if mode<<shift&attr.Mode != 0 {
-		n.monitor.OnAccess(n.fullname)
-		return fuse.OK
-	}
-
-	return fuse.EPERM
-}
-
-func (n *node) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
+func (n *node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 	n.monitor.OnReadlink(n.fullname, n.link)
-	return []byte(n.link), fuse.OK
+	return []byte(n.link), 0
 }
 
-func (n *node) Open(flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
+var _ = (fusefs.NodeOpener)((*node)(nil))
+
+func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	n.monitor.OnOpen(n.fullname)
 	// It is OK to return (nil, OK) here. In that case,
-	// the Node need to implement "Read" function.
-	return nil, fuse.OK
+	// this node need to implement "Read" function.
+	return nil, 0, 0
 }
 
-func (n *node) Read(file nodefs.File, dest []byte, off int64, context *fuse.Context) (fuse.ReadResult, fuse.Status) {
+var _ = (fusefs.NodeReader)((*node)(nil))
+
+func (n *node) Read(ctx context.Context, f fusefs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	if _, err := n.r.ReadAt(dest, off); err != nil && err != io.EOF {
 		fmt.Printf("Error: Failed to read %s: %v", n.fullname, err)
-		return nil, fuse.EIO
+		return nil, syscall.EIO
 	}
 	n.monitor.OnRead(n.fullname, off, int64(len(dest)))
-	return fuse.ReadResultData(dest), fuse.OK
+	return fuse.ReadResultData(dest), 0
 }
 
-func (n *node) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) (code fuse.Status) {
-	n.dumpAttr(out)
+var _ = (fusefs.NodeGetattrer)((*node)(nil))
+
+func (n *node) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.AttrOut) syscall.Errno {
+	copyAttr(&out.Attr, n.attr)
 	n.monitor.OnGetAttr(n.fullname)
-	return fuse.OK
+	return 0
 }
 
-func (n *node) GetXAttr(attribute string, context *fuse.Context) (data []byte, code fuse.Status) {
-	if v, ok := n.xattr[attribute]; ok {
-		return v, fuse.OK
+var _ = (fusefs.NodeGetxattrer)((*node)(nil))
+
+func (n *node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
+	if v, ok := n.xattr[attr]; ok {
+		if len(dest) < len(v) {
+			return uint32(len(v)), syscall.ERANGE
+		}
+		return uint32(copy(dest, v)), 0
 	}
-	return nil, fuse.ENOATTR
+	return 0, syscall.ENODATA
 }
 
-func (n *node) ListXAttr(ctx *fuse.Context) (attrs []string, code fuse.Status) {
+var _ = (fusefs.NodeListxattrer)((*node)(nil))
+
+func (n *node) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errno) {
+	var attrs []byte
 	for k := range n.xattr {
-		attrs = append(attrs, k)
+		attrs = append(attrs, []byte(k+"\x00")...)
 	}
-	return attrs, fuse.OK
+	if len(dest) < len(attrs) {
+		return uint32(len(attrs)), syscall.ERANGE
+	}
+	return uint32(copy(dest, attrs)), 0
 }
 
-func (n *node) StatFs() *fuse.StatfsOut {
+var _ = (fusefs.NodeStatfser)((*node)(nil))
+
+func (n *node) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+
 	// http://man7.org/linux/man-pages/man2/statfs.2.html
-	return &fuse.StatfsOut{
-		Blocks:  0, // dummy
-		Bfree:   0,
-		Bavail:  0,
-		Files:   0, // dummy
-		Ffree:   0,
-		Bsize:   0, // dummy
-		NameLen: 1<<32 - 1,
-		Frsize:  0, // dummy
-		Padding: 0,
-		Spare:   [6]uint32{},
-	}
-}
-
-func (n *node) dumpAttr(out *fuse.Attr) {
-	out.Ino = n.attr.Ino
-	out.Size = n.attr.Size
-	out.Blocks = n.attr.Blocks
-	out.Atime = n.attr.Atime
-	out.Mtime = n.attr.Mtime
-	out.Ctime = n.attr.Ctime
-	out.Atimensec = n.attr.Atimensec
-	out.Mtimensec = n.attr.Mtimensec
-	out.Ctimensec = n.attr.Ctimensec
-	out.Mode = n.attr.Mode
-	out.Nlink = n.attr.Nlink
-	out.Owner = n.attr.Owner
-	out.Rdev = n.attr.Rdev
-	out.Blksize = n.attr.Blksize
-	out.Padding = n.attr.Padding
-}
-
-func (n *node) headerToAttr(h *tar.Header) fuse.Attr {
-	out := fuse.Attr{}
-
-	out.Size = uint64(h.Size)
-	out.Blocks = uint64(h.Size/DefaultBlockSize + 1)
-	out.Atime = uint64(h.AccessTime.Unix())
-	out.Mtime = uint64(h.ModTime.Unix())
-	out.Ctime = uint64(h.ChangeTime.Unix())
-	out.Atimensec = uint32(h.AccessTime.UnixNano())
-	out.Mtimensec = uint32(h.ModTime.UnixNano())
-	out.Ctimensec = uint32(h.ChangeTime.UnixNano())
-	out.Mode = fileModeToSystemMode(h.FileInfo().Mode())
-	out.Blksize = uint32(DefaultBlockSize)
-	out.Owner = fuse.Owner{Uid: uint32(h.Uid), Gid: uint32(h.Gid)}
-	out.Rdev = uint32(unix.Mkdev(uint32(h.Devmajor), uint32(h.Devminor)))
-
-	// ad-hoc
-	out.Ino = 0
-	out.Nlink = 1
+	out.Blocks = 0 // dummy
+	out.Bfree = 0
+	out.Bavail = 0
+	out.Files = 0 // dummy
+	out.Ffree = 0
+	out.Bsize = 0 // dummy
+	out.NameLen = 1<<32 - 1
+	out.Frsize = 0 // dummy
 	out.Padding = 0
+	out.Spare = [6]uint32{}
 
-	return out
+	return 0
 }
 
 func (n *node) InitNodes() error {
+	ctx := context.Background()
+
 	pw, err := util.NewPositionWatcher(n.tr)
 	if err != nil {
 		return errors.Wrap(err, "Failed to make position watcher")
@@ -261,14 +205,21 @@ func (n *node) InitNodes() error {
 	tr := tar.NewReader(pw)
 
 	// Walk functions for nodes
-	getormake := func(n *nodefs.Inode, base string) (c *nodefs.Inode, err error) {
+	getormake := func(n *fusefs.Inode, base string) (c *fusefs.Inode, err error) {
 		if c = n.GetChild(base); c == nil {
-			// Make temporary dummy node.
-			c = n.NewChild(base, true, &node{Node: nodefs.NewDefaultNode()})
+			// Make temporary dummy node (directory).
+			if ok := n.AddChild(base, n.NewPersistentInode(ctx, &node{}, fusefs.StableAttr{
+				Mode: syscall.S_IFDIR,
+			}), true); !ok {
+				return nil, fmt.Errorf("failed to add dummy child %q", base)
+			}
+			if c = n.GetChild(base); c == nil {
+				return nil, fmt.Errorf("dummy child %q hasn't been registered", base)
+			}
 		}
 		return
 	}
-	getnode := func(n *nodefs.Inode, base string) (c *nodefs.Inode, err error) {
+	getnode := func(n *fusefs.Inode, base string) (c *fusefs.Inode, err error) {
 		if c = n.GetChild(base); c == nil {
 			// the original node isn't found. We do not allow it.
 			return nil, fmt.Errorf("Node %q not found", base)
@@ -291,8 +242,8 @@ func (n *node) InitNodes() error {
 		var (
 			fullname     = filepath.Clean(h.Name)
 			dir, base    = filepath.Split(fullname)
-			parentDir    *nodefs.Inode
-			existingNode *nodefs.Inode
+			parentDir    *fusefs.Inode
+			existingNode *fusefs.Inode
 			xattrs       = make(map[string][]byte)
 		)
 		if parentDir, err = n.walkDown(dir, getormake); err != nil {
@@ -313,23 +264,21 @@ func (n *node) InitNodes() error {
 			}
 			// This is "placeholder node" which has been registered in previous loop as
 			// an intermediate directory. Now we update it with real one.
-			ph, ok := existingNode.Node().(*node)
+			ph, ok := existingNode.Operations().(*node)
 			if !ok {
-				return fmt.Errorf("invalid placeholder node %q", fullname)
+				return fmt.Errorf("invalid placeholder node type for %q", fullname)
 			}
-			ph.Node = nodefs.NewDefaultNode()
 			ph.fullname = fullname
-			ph.attr = n.headerToAttr(h)
+			ph.attr, _ = headerToAttr(h)
 			ph.link = h.Linkname
-			ph.xattr = overrideXattr(ph.xattr, xattrs) // preserve previously assigned xattr
-			ph.root = n.root
+			ph.xattr = override(ph.xattr, xattrs) // preserve previously assigned xattr
 			ph.tr = n.tr
 			ph.monitor = n.monitor
 		case strings.HasPrefix(base, whiteoutPrefix):
 			if base == whiteoutOpaqueDir {
 				// This node is opaque directory indicator so we append opaque xattr to
 				// the parent directory.
-				pn, ok := parentDir.Node().(*node)
+				pn, ok := parentDir.Operations().(*node)
 				if !ok {
 					return fmt.Errorf("parent node %q isn't valid node", dir)
 				}
@@ -353,27 +302,30 @@ func (n *node) InitNodes() error {
 				return errors.Wrapf(err, "hardlink(%q ==> %q) is not found",
 					fullname, h.Linkname)
 			}
-			n, ok := target.Node().(*node)
+			n, ok := target.Operations().(*node)
 			if !ok {
 				return fmt.Errorf("original node %q isn't valid node", h.Linkname)
 			}
 			n.attr.Nlink++
 			// We register the target node as name "base". When we query this hardlink node,
 			// we can easily get the target name by seeing target's fullname field.
-			parentDir.AddChild(base, target)
+			if ok := parentDir.AddChild(base, target, true); !ok {
+				return fmt.Errorf("failed to add child %q", base)
+			}
 		default:
 			// Normal node so simply create it.
-			_ = parentDir.NewChild(base, h.FileInfo().IsDir(), &node{
-				Node:     nodefs.NewDefaultNode(),
+			attr, sAttr := headerToAttr(h)
+			if ok := parentDir.AddChild(base, n.NewPersistentInode(ctx, &node{
 				fullname: fullname,
-				attr:     n.headerToAttr(h),
+				attr:     attr,
 				r:        io.NewSectionReader(n.tr, pw.CurrentPos(), h.Size),
 				link:     h.Linkname,
 				xattr:    xattrs,
-				root:     n.root,
 				tr:       n.tr,
 				monitor:  n.monitor,
-			})
+			}, sAttr), true); !ok {
+				return fmt.Errorf("failed to add child %q", base)
+			}
 		}
 
 		continue
@@ -388,17 +340,19 @@ func (n *node) InitNodes() error {
 			if err != nil {
 				return errors.Wrapf(err, "parent node of whiteout %q is not found", w)
 			}
-			p.NewChild(base[len(whiteoutPrefix):], false, &whiteout{nodefs.NewDefaultNode()})
+			if ok := p.AddChild(base[len(whiteoutPrefix):], n.NewPersistentInode(ctx, &whiteout{}, fusefs.StableAttr{Mode: syscall.S_IFCHR}), true); !ok {
+				return fmt.Errorf("failed to add child %q", base)
+			}
 		}
 	}
 
 	return nil
 }
 
-type walkFunc func(n *nodefs.Inode, base string) (*nodefs.Inode, error)
+type walkFunc func(n *fusefs.Inode, base string) (*fusefs.Inode, error)
 
-func (n *node) walkDown(path string, walkFn walkFunc) (ino *nodefs.Inode, err error) {
-	ino = n.root.Inode()
+func (n *node) walkDown(path string, walkFn walkFunc) (ino *fusefs.Inode, err error) {
+	ino = n.Root()
 	for _, comp := range strings.Split(path, "/") {
 		if len(comp) == 0 {
 			continue
@@ -414,10 +368,12 @@ func (n *node) walkDown(path string, walkFn walkFunc) (ino *nodefs.Inode, err er
 }
 
 type whiteout struct {
-	nodefs.Node
+	fusefs.Inode
 }
 
-func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context) (code fuse.Status) {
+var _ = (fusefs.NodeGetattrer)((*whiteout)(nil))
+
+func (w *whiteout) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	out.Ino = 0 // TODO
 	out.Size = 0
 	out.Blksize = uint32(DefaultBlockSize)
@@ -427,16 +383,12 @@ func (w *whiteout) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Conte
 	out.Rdev = uint32(unix.Mkdev(0, 0))
 	out.Nlink = 1
 	out.Padding = 0 // TODO
-	return fuse.OK
+	return 0
 }
 
 // monitor
 type Monitor interface {
-	OnMount()
-	OnUnmount()
 	OnLookup(name string)
-	OnForget(name string)
-	OnAccess(name string)
 	OnReadlink(name, linkname string)
 	OnOpen(name string)
 	OnRead(name string, off, size int64)
@@ -471,22 +423,12 @@ func (m *OpenReadMonitor) DumpLog() []string {
 	return m.log
 }
 
-func (m *OpenReadMonitor) OnMount() {}
-
-func (m *OpenReadMonitor) OnUnmount() {}
-
-func (m *OpenReadMonitor) OnLookup(name string) {}
-
-func (m *OpenReadMonitor) OnForget(name string) {}
-
-func (m *OpenReadMonitor) OnAccess(name string) {}
-
+func (m *OpenReadMonitor) OnLookup(name string)             {}
 func (m *OpenReadMonitor) OnReadlink(name, linkname string) {}
-
-func (m *OpenReadMonitor) OnGetAttr(name string) {}
+func (m *OpenReadMonitor) OnGetAttr(name string)            {}
 
 // Utilities
-func overrideXattr(a, b map[string][]byte) map[string][]byte {
+func override(a, b map[string][]byte) map[string][]byte {
 	if b == nil {
 		return a
 	}
@@ -497,6 +439,52 @@ func overrideXattr(a, b map[string][]byte) map[string][]byte {
 		a[k] = v
 	}
 	return a
+}
+
+func headerToAttr(h *tar.Header) (fuse.Attr, fusefs.StableAttr) {
+	out := fuse.Attr{}
+
+	out.Size = uint64(h.Size)
+	out.Blocks = uint64(h.Size/DefaultBlockSize + 1)
+	out.Atime = uint64(h.AccessTime.Unix())
+	out.Mtime = uint64(h.ModTime.Unix())
+	out.Ctime = uint64(h.ChangeTime.Unix())
+	out.Atimensec = uint32(h.AccessTime.UnixNano())
+	out.Mtimensec = uint32(h.ModTime.UnixNano())
+	out.Ctimensec = uint32(h.ChangeTime.UnixNano())
+	out.Mode = fileModeToSystemMode(h.FileInfo().Mode())
+	out.Blksize = uint32(DefaultBlockSize)
+	out.Owner = fuse.Owner{Uid: uint32(h.Uid), Gid: uint32(h.Gid)}
+	out.Rdev = uint32(unix.Mkdev(uint32(h.Devmajor), uint32(h.Devminor)))
+
+	// ad-hoc
+	out.Ino = 0
+	out.Nlink = 1
+	out.Padding = 0
+
+	return out, fusefs.StableAttr{
+		Mode: out.Mode,
+		// We don't care about inode and generation and let it be
+		// managed by go-fuse.
+	}
+}
+
+func copyAttr(dest *fuse.Attr, src fuse.Attr) {
+	dest.Ino = src.Ino
+	dest.Size = src.Size
+	dest.Blocks = src.Blocks
+	dest.Atime = src.Atime
+	dest.Mtime = src.Mtime
+	dest.Ctime = src.Ctime
+	dest.Atimensec = src.Atimensec
+	dest.Mtimensec = src.Mtimensec
+	dest.Ctimensec = src.Ctimensec
+	dest.Mode = src.Mode
+	dest.Nlink = src.Nlink
+	dest.Owner = src.Owner
+	dest.Rdev = src.Rdev
+	dest.Blksize = src.Blksize
+	dest.Padding = src.Padding
 }
 
 func fileModeToSystemMode(m os.FileMode) uint32 {

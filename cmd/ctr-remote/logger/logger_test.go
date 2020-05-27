@@ -25,6 +25,7 @@ package logger
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -36,8 +37,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanwen/go-fuse/fuse"
-	"github.com/hanwen/go-fuse/fuse/nodefs"
+	fusefs "github.com/hanwen/go-fuse/v2/fs"
+	"github.com/hanwen/go-fuse/v2/fuse"
 	"golang.org/x/sys/unix"
 )
 
@@ -123,14 +124,14 @@ func TestExistence(t *testing.T) {
 				t.Fatalf("failed to read input tar: %q", err)
 			}
 			root := newRoot(bytes.NewReader(inTarData), NewOpenReadMonitor())
-			_ = nodefs.NewFileSystemConnector(root, &nodefs.Options{
-				NegativeTimeout: 0,
-				AttrTimeout:     time.Second,
-				EntryTimeout:    time.Second,
-				Owner:           nil, // preserve owners.
+			timeSec := time.Second
+			fusefs.NewNodeFS(root, &fusefs.Options{
+				AttrTimeout:     &timeSec,
+				EntryTimeout:    &timeSec,
+				NullPermissions: true,
 			})
 			if err := root.InitNodes(); err != nil {
-				t.Fatalf("failed to initialize nodes: %v", err)
+				t.Fatalf("failed to init nodes: %v", err)
 			}
 			for _, want := range tt.want {
 				want(t, root)
@@ -143,8 +144,8 @@ type check func(*testing.T, *node)
 
 func fileNotExist(file string) check {
 	return func(t *testing.T, root *node) {
-		ent, inode, err := getDirentAndNode(root, file)
-		if err == nil || ent != nil || inode != nil {
+		_, err := getNode(t, root, file)
+		if err == nil {
 			t.Errorf("Node %q exists", file)
 		}
 	}
@@ -152,11 +153,11 @@ func fileNotExist(file string) check {
 
 func hasFileContents(file string, want string) check {
 	return func(t *testing.T, root *node) {
-		_, inode, err := getDirentAndNode(root, file)
+		inode, err := getNode(t, root, file)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", file, err)
 		}
-		n, ok := inode.Node().(*node)
+		n, ok := inode.Operations().(*node)
 		if !ok {
 			t.Fatalf("entry %q isn't a normal node", file)
 		}
@@ -176,31 +177,21 @@ func hasFileContents(file string, want string) check {
 
 func hasValidWhiteout(name string) check {
 	return func(t *testing.T, root *node) {
-		ent, inode, err := getDirentAndNode(root, name)
+		inode, err := getNode(t, root, name)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", name, err)
 		}
-		n, ok := inode.Node().(*whiteout)
+		n, ok := inode.Operations().(*whiteout)
 		if !ok {
 			t.Fatalf("entry %q isn't a whiteout node", name)
 		}
-		var a fuse.Attr
-		if status := n.GetAttr(&a, nil, nil); status != fuse.OK {
-			t.Fatalf("failed to get attributes of file %q: %v", name, status)
-		}
-		if a.Ino != ent.Ino {
-			t.Errorf("inconsistent inodes %d(Node) != %d(Dirent)", a.Ino, ent.Ino)
-			return
-		}
-
-		// validate the direntry
-		if ent.Mode&syscall.S_IFCHR != syscall.S_IFCHR {
-			t.Errorf("whiteout entry %q isn't a char device %q but %q",
-				name, strconv.FormatUint(uint64(syscall.S_IFCHR), 2), strconv.FormatUint(uint64(ent.Mode), 2))
-			return
+		var ao fuse.AttrOut
+		if errno := n.Operations().(fusefs.NodeGetattrer).Getattr(context.Background(), nil, &ao); errno != 0 {
+			t.Fatalf("failed to get attributes of file %q: %v", name, errno)
 		}
 
 		// validate the node
+		a := ao.Attr
 		if a.Mode&syscall.S_IFCHR != syscall.S_IFCHR {
 			t.Errorf("whiteout node %q isn't a char device %q but %q",
 				name, strconv.FormatUint(uint64(syscall.S_IFCHR), 2), strconv.FormatUint(uint64(a.Mode), 2))
@@ -216,20 +207,23 @@ func hasValidWhiteout(name string) check {
 
 func hasNodeXattrs(entry, name, value string) check {
 	return func(t *testing.T, root *node) {
-		_, inode, err := getDirentAndNode(root, entry)
+		inode, err := getNode(t, root, entry)
 		if err != nil {
 			t.Fatalf("failed to get node %q: %v", entry, err)
 		}
-		n, ok := inode.Node().(*node)
+		n, ok := inode.Operations().(*node)
 		if !ok {
 			t.Fatalf("entry %q isn't a normal node", entry)
 		}
 
 		// check xattr exists in the xattrs list.
-		attrs, status := n.ListXAttr(nil)
-		if status != fuse.OK {
+		buf := make([]byte, 1000)
+		nb, errno := n.Operations().(fusefs.NodeListxattrer).Listxattr(context.Background(), buf)
+		if errno != 0 {
 			t.Fatalf("failed to get xattrs list of node %q: %v", entry, err)
 		}
+
+		attrs := strings.Split(string(buf[:nb]), "\x00")
 		var found bool
 		for _, x := range attrs {
 			if x == name {
@@ -242,9 +236,14 @@ func hasNodeXattrs(entry, name, value string) check {
 		}
 
 		// check the xattr has valid value.
-		v, status := n.GetXAttr(name, nil)
-		if status != fuse.OK {
+		v := make([]byte, len(value))
+		nv, errno := n.Operations().(fusefs.NodeGetxattrer).Getxattr(context.Background(), name, v)
+		if errno != 0 {
 			t.Fatalf("failed to get xattr %q of node %q: %v", name, entry, err)
+		}
+		if int(nv) != len(value) {
+			t.Fatalf("invalid xattr size for file %q, value %q got %d; want %d",
+				name, value, nv, len(value))
 		}
 		if string(v) != value {
 			t.Errorf("node %q has an invalid xattr %q; want %q", entry, v, value)
@@ -253,55 +252,36 @@ func hasNodeXattrs(entry, name, value string) check {
 	}
 }
 
-// getDirentAndNode gets dirent and node at the specified path at once and makes
-// sure that the both of them exist.
-func getDirentAndNode(root *node, path string) (ent *fuse.DirEntry, n *nodefs.Inode, err error) {
+func getNode(t *testing.T, root *node, path string) (n *fusefs.Inode, err error) {
 	dir, base := filepath.Split(filepath.Clean(path))
 
 	// get the target's parent directory.
-	var attr fuse.Attr
+	var eo fuse.EntryOut
 	d := root
 	for _, name := range strings.Split(dir, "/") {
 		if len(name) == 0 {
 			continue
 		}
-		di, status := d.Lookup(&attr, name, nil)
-		if status != fuse.OK {
-			err = fmt.Errorf("failed to lookup directory %q: %v", name, status)
+		di, errno := d.Lookup(context.Background(), name, &eo)
+		if errno != 0 {
+			err = fmt.Errorf("failed to lookup directory %q: %v", name, errno)
 			return
 		}
 		var ok bool
-		if d, ok = di.Node().(*node); !ok {
+		if d, ok = di.Operations().(*node); !ok {
 			err = fmt.Errorf("directory %q isn't a normal node", name)
 			return
 		}
 
 	}
 
-	// get the target's direntry.
-	var ents []fuse.DirEntry
-	ents, status := d.OpenDir(nil)
-	if status != fuse.OK {
-		err = fmt.Errorf("failed to open directory %q: %v", path, status)
-	}
-	var found bool
-	for _, e := range ents {
-		if e.Name == base {
-			ent, found = &e, true
-			break
-		}
-	}
-	if !found {
-		err = fmt.Errorf("direntry %q not found in the parent directory of %q", base, path)
-	}
-
 	// get the target's node.
-	n, status = d.Lookup(&attr, base, nil)
-	if status != fuse.OK {
-		err = fmt.Errorf("failed to lookup node %q: %v", path, status)
+	node, errno := d.Lookup(context.Background(), base, &eo)
+	if errno != 0 {
+		return nil, fmt.Errorf("failed to lookup node %q: %v", path, errno)
 	}
 
-	return
+	return node, nil
 }
 
 func TestOpenRead(t *testing.T) {
