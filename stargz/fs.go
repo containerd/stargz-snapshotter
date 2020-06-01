@@ -71,15 +71,15 @@ import (
 )
 
 const (
-	blockSize                 = 512
+	blockSize                 = 4096
 	memoryCacheType           = "memory"
 	whiteoutPrefix            = ".wh."
 	whiteoutOpaqueDir         = whiteoutPrefix + whiteoutPrefix + ".opq"
 	opaqueXattr               = "trusted.overlay.opaque"
 	opaqueXattrValue          = "y"
 	stateDirName              = ".stargz-snapshotter"
-	defaultLRUCacheEntry      = 100
 	defaultResolveResultEntry = 100
+	defaultPrefetchTimeoutSec = 10
 	statFileMode              = syscall.S_IFREG | 0400 // -r--------
 	stateDirMode              = syscall.S_IFDIR | 0500 // dr-x------
 
@@ -104,27 +104,38 @@ type Config struct {
 	remote.ResolverConfig             `toml:"resolver"`
 	remote.BlobConfig                 `toml:"blob"`
 	keychain.KubeconfigKeychainConfig `toml:"kubeconfig_keychain"`
+	cache.DirectoryCacheConfig        `toml:"directory_cache"`
 	HTTPCacheType                     string `toml:"http_cache_type"`
 	FSCacheType                       string `toml:"filesystem_cache_type"`
-	LRUCacheEntry                     int    `toml:"lru_max_entry"`
 	ResolveResultEntry                int    `toml:"resolve_result_entry"`
 	PrefetchSize                      int64  `toml:"prefetch_size"`
+	PrefetchTimeoutSec                int64  `toml:"prefetch_timeout_sec"`
 	NoPrefetch                        bool   `toml:"noprefetch"`
 	Debug                             bool   `toml:"debug"`
 }
 
-func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.FileSystem, error) {
-	maxEntry := config.LRUCacheEntry
-	if maxEntry == 0 {
-		maxEntry = defaultLRUCacheEntry
+func NewFilesystem(ctx context.Context, root string, config *Config) (_ snbase.FileSystem, err error) {
+	var httpCache cache.BlobCache
+	if config.HTTPCacheType == memoryCacheType {
+		httpCache = cache.NewMemoryCache()
+	} else {
+		if httpCache, err = cache.NewDirectoryCache(
+			filepath.Join(root, "http"),
+			config.DirectoryCacheConfig,
+		); err != nil {
+			return nil, errors.Wrap(err, "failed to prepare HTTP cache")
+		}
 	}
-	httpCache, err := getCache(config.HTTPCacheType, filepath.Join(root, "httpcache"), maxEntry)
-	if err != nil {
-		return nil, err
-	}
-	fsCache, err := getCache(config.FSCacheType, filepath.Join(root, "fscache"), maxEntry)
-	if err != nil {
-		return nil, err
+	var fsCache cache.BlobCache
+	if config.FSCacheType == memoryCacheType {
+		fsCache = cache.NewMemoryCache()
+	} else {
+		if fsCache, err = cache.NewDirectoryCache(
+			filepath.Join(root, "fscache"),
+			config.DirectoryCacheConfig,
+		); err != nil {
+			return nil, errors.Wrap(err, "failed to prepare filesystem cache")
+		}
 	}
 	keychain := authn.NewMultiKeychain(
 		authn.DefaultKeychain,
@@ -134,12 +145,17 @@ func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.Fil
 	if resolveResultEntry == 0 {
 		resolveResultEntry = defaultResolveResultEntry
 	}
+	prefetchTimeout := time.Duration(config.PrefetchTimeoutSec) * time.Second
+	if prefetchTimeout == 0 {
+		prefetchTimeout = defaultPrefetchTimeoutSec * time.Second
+	}
 	return &filesystem{
 		resolver:              remote.NewResolver(keychain, config.ResolverConfig),
 		blobConfig:            config.BlobConfig,
 		httpCache:             httpCache,
 		fsCache:               fsCache,
 		prefetchSize:          config.PrefetchSize,
+		prefetchTimeout:       prefetchTimeout,
 		noprefetch:            config.NoPrefetch,
 		debug:                 config.Debug,
 		layer:                 make(map[string]*layer),
@@ -148,20 +164,13 @@ func NewFilesystem(ctx context.Context, root string, config *Config) (snbase.Fil
 	}, nil
 }
 
-// getCache gets a cache corresponding to specified type.
-func getCache(ctype, dir string, maxEntry int) (cache.BlobCache, error) {
-	if ctype == memoryCacheType {
-		return cache.NewMemoryCache(), nil
-	}
-	return cache.NewDirectoryCache(dir, maxEntry)
-}
-
 type filesystem struct {
 	resolver              *remote.Resolver
 	blobConfig            remote.BlobConfig
 	httpCache             cache.BlobCache
 	fsCache               cache.BlobCache
 	prefetchSize          int64
+	prefetchTimeout       time.Duration
 	noprefetch            bool
 	debug                 bool
 	layer                 map[string]*layer
@@ -245,7 +254,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// Check() for this layer waits for the prefetch completion. We recreate
 	// RoundTripper to avoid disturbing other NW-related operations.
 	if !fs.noprefetch {
+		l.doPrefetch()
 		go func() {
+			defer l.donePrefetch()
 			fs.backgroundTaskManager.DoPrioritizedTask()
 			defer fs.backgroundTaskManager.DonePrioritizedTask()
 			tr, err := fetchTr()
@@ -275,11 +286,17 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 					retN, retErr = 0, err
 					return
 				}
-				retN, retErr = l.blob.ReadAt(p, offset, remote.WithContext(ctx), remote.WithRoundTripper(tr))
+				retN, retErr = l.blob.ReadAt(
+					p,
+					offset,
+					remote.WithContext(ctx),              // Make cancellable
+					remote.WithRoundTripper(tr),          // Use dedicated Transport
+					remote.WithCacheOpts(cache.Direct()), // Do not pollute mem cache
+				)
 			}, 120*time.Second)
 			return
 		}), 0, l.blob.Size())
-		if err := l.reader.CacheTarGzWithReader(br); err != nil {
+		if err := l.reader.CacheTarGzWithReader(br, cache.Direct()); err != nil {
 			logCtx.WithError(err).Debug("failed to fetch whole layer")
 			return
 		}
@@ -349,7 +366,7 @@ func (fs *filesystem) resolve(ctx context.Context, ref, digest string) *resolveR
 			return nil, errors.Wrap(err, "failed to read layer")
 		}
 
-		return newLayer(blob, gr, root), nil
+		return newLayer(blob, gr, root, fs.prefetchTimeout), nil
 	})
 }
 
@@ -371,7 +388,7 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	}
 
 	// Wait for prefetch compeletion
-	if err := l.waitForPrefetchCompletion(10 * time.Second); err != nil {
+	if err := l.waitForPrefetchCompletion(); err != nil {
 		logCtx.WithError(err).Warn("failed to sync with prefetch completion")
 	}
 
@@ -507,26 +524,33 @@ func (rr *resolveResult) isInProgress() bool {
 	return rr.progress.isInProgress()
 }
 
-func newLayer(blob remote.Blob, r reader.Reader, root *stargz.TOCEntry) *layer {
+func newLayer(blob remote.Blob, r reader.Reader, root *stargz.TOCEntry, prefetchTimeout time.Duration) *layer {
 	return &layer{
-		blob:           blob,
-		reader:         r,
-		root:           root,
-		prefetchWaiter: newWaiter(),
+		blob:            blob,
+		reader:          r,
+		root:            root,
+		prefetchWaiter:  newWaiter(),
+		prefetchTimeout: prefetchTimeout,
 	}
 }
 
 type layer struct {
-	blob           remote.Blob
-	reader         reader.Reader
-	root           *stargz.TOCEntry
-	prefetchWaiter *waiter
+	blob            remote.Blob
+	reader          reader.Reader
+	root            *stargz.TOCEntry
+	prefetchWaiter  *waiter
+	prefetchTimeout time.Duration
+}
+
+func (l *layer) doPrefetch() {
+	l.prefetchWaiter.start()
+}
+
+func (l *layer) donePrefetch() {
+	l.prefetchWaiter.done()
 }
 
 func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
-	l.prefetchWaiter.start()
-	defer l.prefetchWaiter.done()
-
 	if _, ok := l.reader.Lookup(NoPrefetchLandmark); ok {
 		// do not prefetch this layer
 		return nil
@@ -545,15 +569,15 @@ func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
 		return l.blob.ReadAt(p, off, opts...)
 	}), 0, prefetchSize)
 	err := l.reader.CacheTarGzWithReader(pr)
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+	if err != nil && errors.Cause(err) != io.EOF && errors.Cause(err) != io.ErrUnexpectedEOF {
 		return errors.Wrap(err, "failed to cache prefetched layer")
 	}
 
 	return nil
 }
 
-func (l *layer) waitForPrefetchCompletion(timeout time.Duration) error {
-	return l.prefetchWaiter.wait(timeout)
+func (l *layer) waitForPrefetchCompletion() error {
+	return l.prefetchWaiter.wait(l.prefetchTimeout)
 }
 
 func newWaiter() *waiter {

@@ -42,7 +42,10 @@ func TestDirectoryCache(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to make tempdir: %v", err)
 		}
-		c, err := NewDirectoryCache(tmp, 10, SyncAdd())
+		c, err := NewDirectoryCache(tmp, DirectoryCacheConfig{
+			MaxLRUCacheEntry: 10,
+			SyncAdd:          true,
+		})
 		if err != nil {
 			t.Fatalf("failed to make cache: %v", err)
 		}
@@ -56,7 +59,10 @@ func TestDirectoryCache(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to make tempdir: %v", err)
 		}
-		c, err := NewDirectoryCache(tmp, 1, SyncAdd())
+		c, err := NewDirectoryCache(tmp, DirectoryCacheConfig{
+			MaxLRUCacheEntry: 1,
+			SyncAdd:          true,
+		})
 		if err != nil {
 			t.Fatalf("failed to make cache: %v", err)
 		}
@@ -144,28 +150,35 @@ func digestFor(content string) string {
 
 func hit(sample string) check {
 	return func(t *testing.T, c BlobCache) {
-		d := digestFor(sample)
-		p, err := c.Fetch(d)
-		if err != nil {
-			t.Errorf("failed to fetch blob %q: %v", d, err)
-			return
-		}
-		if len(p) != len(sample) {
-			t.Errorf("fetched size %d; want %d", len(p), len(sample))
-			return
-		}
-		df := digestFor(string(p))
-		if df != d {
-			t.Errorf("fetched digest %q(%q); want %q(%q)",
-				df, string(p), d, sample)
-		}
+		// test whole blob
+		key := digestFor(sample)
+		testChunk(t, c, key, 0, sample)
+
+		// test a chunk
+		chunk := len(sample) / 3
+		testChunk(t, c, key, int64(chunk), sample[chunk:2*chunk])
+	}
+}
+
+func testChunk(t *testing.T, c BlobCache, key string, offset int64, sample string) {
+	p := make([]byte, len(sample))
+	if n, err := c.FetchAt(key, offset, p); err != nil {
+		t.Errorf("failed to fetch blob %q: %v", key, err)
+		return
+	} else if n != len(sample) {
+		t.Errorf("fetched size %d; want %d", len(p), len(sample))
+		return
+	}
+	if digestFor(sample) != digestFor(string(p)) {
+		t.Errorf("fetched %q; want %q", string(p), sample)
 	}
 }
 
 func miss(sample string) check {
 	return func(t *testing.T, c BlobCache) {
 		d := digestFor(sample)
-		_, err := c.Fetch(d)
+		p := make([]byte, len(sample))
+		_, err := c.FetchAt(d, 0, p)
 		if err == nil {
 			t.Errorf("hit blob %q but must be missed: %v", d, err)
 			return

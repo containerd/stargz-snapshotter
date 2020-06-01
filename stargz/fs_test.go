@@ -41,6 +41,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
 	"github.com/containerd/stargz-snapshotter/task"
@@ -62,7 +63,7 @@ func TestCheck(t *testing.T) {
 	bb := &breakBlob{}
 	fs := &filesystem{
 		layer: map[string]*layer{
-			"test": newLayer(bb, nopreader{}, nil),
+			"test": newLayer(bb, nopreader{}, nil, time.Second),
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
 	}
@@ -79,9 +80,9 @@ func TestCheck(t *testing.T) {
 
 type nopreader struct{}
 
-func (r nopreader) OpenFile(name string) (io.ReaderAt, error)   { return nil, nil }
-func (r nopreader) Lookup(name string) (*stargz.TOCEntry, bool) { return nil, false }
-func (r nopreader) CacheTarGzWithReader(ir io.Reader) error     { return nil }
+func (r nopreader) OpenFile(name string) (io.ReaderAt, error)                     { return nil, nil }
+func (r nopreader) Lookup(name string) (*stargz.TOCEntry, bool)                   { return nil, false }
+func (r nopreader) CacheTarGzWithReader(ir io.Reader, opts ...cache.Option) error { return nil }
 
 type breakBlob struct {
 	success bool
@@ -885,7 +886,7 @@ func TestPrefetch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
-			l := newLayer(blob, gr, nil)
+			l := newLayer(blob, gr, nil, time.Second)
 			prefetchSize := int64(0)
 			if tt.prefetchSize != nil {
 				prefetchSize = tt.prefetchSize(l)
@@ -966,22 +967,22 @@ type testCache struct {
 	mu     sync.Mutex
 }
 
-func (tc *testCache) Fetch(blobHash string) ([]byte, error) {
+func (tc *testCache) FetchAt(key string, offset int64, p []byte, opts ...cache.Option) (int, error) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
-	cache, ok := tc.membuf[blobHash]
+	cache, ok := tc.membuf[key]
 	if !ok {
-		return nil, fmt.Errorf("Missed cache: %q", blobHash)
+		return 0, fmt.Errorf("Missed cache: %q", key)
 	}
-	return []byte(cache), nil
+	return copy(p, cache[offset:]), nil
 }
 
-func (tc *testCache) Add(blobHash string, p []byte) {
+func (tc *testCache) Add(key string, p []byte, opts ...cache.Option) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
-	tc.membuf[blobHash] = string(p)
-	tc.t.Logf("  cached [%s...]: %q", blobHash[:8], string(p))
+	tc.membuf[key] = string(p)
+	tc.t.Logf("  cached [%s...]: %q", key[:8], string(p))
 }
 
 func TestWaiter(t *testing.T) {

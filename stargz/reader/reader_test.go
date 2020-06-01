@@ -101,11 +101,11 @@ func (br *breakReaderAt) ReadAt(p []byte, off int64) (int, error) {
 
 type nopCache struct{}
 
-func (nc *nopCache) Fetch(blobHash string) ([]byte, error) {
-	return nil, fmt.Errorf("Missed cache: %q", blobHash)
+func (nc *nopCache) FetchAt(key string, offset int64, p []byte, opts ...cache.Option) (int, error) {
+	return 0, fmt.Errorf("Missed cache: %q", key)
 }
 
-func (nc *nopCache) Add(blobHash string, p []byte) {}
+func (nc *nopCache) Add(key string, p []byte, opts ...cache.Option) {}
 
 type testCache struct {
 	membuf map[string]string
@@ -113,22 +113,22 @@ type testCache struct {
 	mu     sync.Mutex
 }
 
-func (tc *testCache) Fetch(blobHash string) ([]byte, error) {
+func (tc *testCache) FetchAt(key string, offset int64, p []byte, opts ...cache.Option) (int, error) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
-	cache, ok := tc.membuf[blobHash]
+	cache, ok := tc.membuf[key]
 	if !ok {
-		return nil, fmt.Errorf("Missed cache: %q", blobHash)
+		return 0, fmt.Errorf("Missed cache: %q", key)
 	}
-	return []byte(cache), nil
+	return copy(p, cache[offset:]), nil
 }
 
-func (tc *testCache) Add(blobHash string, p []byte) {
+func (tc *testCache) Add(key string, p []byte, opts ...cache.Option) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
-	tc.membuf[blobHash] = string(p)
-	tc.t.Logf("  cached [%s...]: %q", blobHash[:8], string(p))
+	tc.membuf[key] = string(p)
+	tc.t.Logf("  cached [%s...]: %q", key[:8], string(p))
 }
 
 type region struct{ b, e int64 }
@@ -220,8 +220,9 @@ func TestFileReadAt(t *testing.T) {
 								if !ok {
 									break
 								}
-								data, err := f.cache.Fetch(genID(f.digest, ce.ChunkOffset, ce.ChunkSize))
-								if err != nil || len(data) != int(ce.ChunkSize) {
+								data := make([]byte, ce.ChunkSize)
+								n, err := f.cache.FetchAt(genID(f.digest, ce.ChunkOffset, ce.ChunkSize), 0, data)
+								if err != nil || n != int(ce.ChunkSize) {
 									t.Errorf("missed cache of offset=%d, size=%d: %v(got size=%d)", ce.ChunkOffset, ce.ChunkSize, err, n)
 									return
 								}
