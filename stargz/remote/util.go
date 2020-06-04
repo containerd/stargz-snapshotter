@@ -46,31 +46,58 @@ func superRegion(regs []region) region {
 
 // regionSet is a set of regions
 type regionSet struct {
-	rs []region
+	rs []region // must be kept sorted
 }
 
-// add attempts to merge r to rs.rs
+// add attempts to merge r to rs.rs with squashing the regions as
+// small as possible. This operation takes O(n).
+// TODO: more efficient way to do it.
 func (rs *regionSet) add(r region) {
-	for i := range rs.rs {
-		f := &rs.rs[i]
-		if r.b <= f.b && f.b <= r.e+1 && r.e <= f.e {
-			f.b = r.b
+	// Iterate over the sorted region slice from the tail.
+	// a) When an overwrap occurs, adjust `r` to fully contain the looking region
+	//    `l` and remove `l` from region slice.
+	// b) Once l.e become less than r.b, no overwrap will occur again. So immediately
+	//    insert `r` which fully contains all overwrapped regions, to the region slice.
+	//    Here, `r` is inserted to the region slice with keeping it sorted, without
+	//    overwrapping to any regions.
+	// *) If any `l` contains `r`, we don't need to do anything so return immediately.
+	for i := len(rs.rs) - 1; i >= 0; i-- {
+		l := &rs.rs[i]
+
+		// *) l contains r
+		if l.b <= r.b && r.e <= l.e {
 			return
 		}
-		if f.b <= r.b && r.e <= f.e {
+
+		// a) r overwraps to l so adjust r to fully contain l and reomve l
+		//    from region slice.
+		if l.b <= r.b && r.b <= l.e+1 && l.e <= r.e {
+			r.b = l.b
+			rs.rs = append(rs.rs[:i], rs.rs[i+1:]...)
+			continue
+		}
+		if r.b <= l.b && l.b <= r.e+1 && r.e <= l.e {
+			r.e = l.e
+			rs.rs = append(rs.rs[:i], rs.rs[i+1:]...)
+			continue
+		}
+		if r.b <= l.b && l.e <= r.e {
+			rs.rs = append(rs.rs[:i], rs.rs[i+1:]...)
+			continue
+		}
+
+		// b) No overwrap will occur after this iteration. Instert r to the
+		//    region slice immediately.
+		if l.e < r.b {
+			rs.rs = append(rs.rs[:i+1], append([]region{r}, rs.rs[i+1:]...)...)
 			return
 		}
-		if f.b <= r.b && r.b <= f.e+1 && f.e <= r.e {
-			f.e = r.e
-			return
-		}
-		if r.b <= f.b && f.e <= r.e {
-			f.b = r.b
-			f.e = r.e
-			return
-		}
+
+		// No overwrap occurs yet. See the next region.
 	}
-	rs.rs = append(rs.rs, r)
+
+	// r is the topmost region among regions in the slice.
+	rs.rs = append([]region{r}, rs.rs...)
 }
 
 func (rs *regionSet) totalSize() int64 {

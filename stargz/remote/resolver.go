@@ -23,6 +23,7 @@
 package remote
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -84,6 +85,11 @@ func NewResolver(keychain authn.Keychain, config ResolverConfig) *Resolver {
 		trPool:    lru.New(poolEntry),
 		keychain:  keychain,
 		config:    config,
+		bufPool: sync.Pool{
+			New: func() interface{} {
+				return new(bytes.Buffer)
+			},
+		},
 	}
 }
 
@@ -93,6 +99,7 @@ type Resolver struct {
 	trPoolMu  sync.Mutex
 	keychain  authn.Keychain
 	config    ResolverConfig
+	bufPool   sync.Pool
 }
 
 func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config BlobConfig) (Blob, error) {
@@ -124,6 +131,7 @@ func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config Blo
 		cache:         cache,
 		lastCheck:     time.Now(),
 		checkInterval: checkInterval,
+		resolver:      r,
 	}, nil
 }
 
@@ -352,7 +360,7 @@ type multipartReadCloser interface {
 	Close() error
 }
 
-func (f *fetcher) fetch(ctx context.Context, rs []region, opts ...Option) (multipartReadCloser, error) {
+func (f *fetcher) fetch(ctx context.Context, rs []region, opts *options) (multipartReadCloser, error) {
 	if len(rs) == 0 {
 		return nil, fmt.Errorf("no request queried")
 	}
@@ -362,16 +370,11 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, opts ...Option) (multi
 		singleRangeMode = f.isSingleRangeMode()
 	)
 
-	// Parse options
-	var opt options
-	for _, o := range opts {
-		o(&opt)
+	if opts.ctx != nil {
+		ctx = opts.ctx
 	}
-	if opt.ctx != nil {
-		ctx = opt.ctx
-	}
-	if opt.tr != nil {
-		tr = opt.tr
+	if opts.tr != nil {
+		tr = opts.tr
 	}
 
 	// squash requesting chunks for reducing the total size of request header
@@ -428,8 +431,8 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, opts ...Option) (multi
 		}
 		return singlePartReader(reg, res.Body), nil
 	} else if !singleRangeMode {
-		f.singleRangeMode()              // fallbacks to singe range request mode
-		return f.fetch(ctx, rs, opts...) // retries with the single range mode
+		f.singleRangeMode()           // fallbacks to singe range request mode
+		return f.fetch(ctx, rs, opts) // retries with the single range mode
 	}
 
 	return nil, fmt.Errorf("unexpected status code on %q: %v", f.url, res.Status)
@@ -548,8 +551,9 @@ func parseRange(header string) (region, error) {
 type Option func(*options)
 
 type options struct {
-	ctx context.Context
-	tr  http.RoundTripper
+	ctx       context.Context
+	tr        http.RoundTripper
+	cacheOpts []cache.Option
 }
 
 func WithContext(ctx context.Context) Option {
@@ -561,5 +565,11 @@ func WithContext(ctx context.Context) Option {
 func WithRoundTripper(tr http.RoundTripper) Option {
 	return func(opts *options) {
 		opts.tr = tr
+	}
+}
+
+func WithCacheOpts(cacheOpts ...cache.Option) Option {
+	return func(opts *options) {
+		opts.cacheOpts = cacheOpts
 	}
 }

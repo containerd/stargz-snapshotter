@@ -24,11 +24,14 @@ package reader
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"strings"
+	"sync"
 
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/google/crfs/stargz"
@@ -38,7 +41,7 @@ import (
 type Reader interface {
 	OpenFile(name string) (io.ReaderAt, error)
 	Lookup(name string) (*stargz.TOCEntry, bool)
-	CacheTarGzWithReader(r io.Reader) error
+	CacheTarGzWithReader(r io.Reader, opts ...cache.Option) error
 }
 
 func NewReader(sr *io.SectionReader, cache cache.BlobCache) (Reader, *stargz.TOCEntry, error) {
@@ -56,13 +59,19 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache) (Reader, *stargz.TOC
 		r:     r,
 		sr:    sr,
 		cache: cache,
+		bufPool: sync.Pool{
+			New: func() interface{} {
+				return new(bytes.Buffer)
+			},
+		},
 	}, root, nil
 }
 
 type reader struct {
-	r     *stargz.Reader
-	sr    *io.SectionReader
-	cache cache.BlobCache
+	r       *stargz.Reader
+	sr      *io.SectionReader
+	cache   cache.BlobCache
+	bufPool sync.Pool
 }
 
 func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
@@ -80,6 +89,7 @@ func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
 		r:      gr.r,
 		cache:  gr.cache,
 		ra:     sr,
+		gr:     gr,
 	}, nil
 }
 
@@ -87,10 +97,10 @@ func (gr *reader) Lookup(name string) (*stargz.TOCEntry, bool) {
 	return gr.r.Lookup(name)
 }
 
-func (gr *reader) CacheTarGzWithReader(r io.Reader) error {
+func (gr *reader) CacheTarGzWithReader(r io.Reader, opts ...cache.Option) error {
 	gzr, err := gzip.NewReader(r)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to get gzip reader")
 	}
 	defer gzr.Close()
 	tr := tar.NewReader(gzr)
@@ -98,7 +108,7 @@ func (gr *reader) CacheTarGzWithReader(r io.Reader) error {
 		h, err := tr.Next()
 		if err != nil {
 			if err != io.EOF {
-				return err
+				return errors.Wrapf(err, "failed to read next tar entry")
 			}
 			break
 		}
@@ -116,20 +126,42 @@ func (gr *reader) CacheTarGzWithReader(r io.Reader) error {
 			if !ok {
 				break
 			}
+
+			// make sure that this range is at ce.ChunkOffset for ce.ChunkSize
+			if nr != ce.ChunkOffset {
+				return fmt.Errorf("invalid offset %d != %d", nr, ce.ChunkOffset)
+			}
+
+			// Check if the target chunks exists in the cache
 			id := genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize)
-			if cacheData, err := gr.cache.Fetch(id); err != nil || len(cacheData) != int(ce.ChunkSize) {
-
-				// make sure that this range is at ce.ChunkOffset for ce.ChunkSize
-				if nr != ce.ChunkOffset {
-					return fmt.Errorf("invalid offset %d != %d", nr, ce.ChunkOffset)
+			if _, err := gr.cache.FetchAt(id, 0, nil, opts...); err != nil {
+				// missed cache, needs to fetch and add it to the cache
+				b := gr.bufPool.Get().(*bytes.Buffer)
+				b.Reset()
+				b.Grow(int(ce.ChunkSize))
+				if _, err := io.CopyN(b, tr, ce.ChunkSize); err != nil {
+					gr.bufPool.Put(b)
+					return errors.Wrapf(err,
+						"failed to read file payload of %q (offset:%d,size:%d)",
+						h.Name, ce.ChunkOffset, ce.ChunkSize)
 				}
-				data := make([]byte, int(ce.ChunkSize))
-
-				// Cache this chunk (offset: ce.ChunkOffset, size: ce.ChunkSize)
-				if _, err := io.ReadFull(tr, data); err != nil && err != io.EOF {
-					return err
+				if int64(b.Len()) != ce.ChunkSize {
+					gr.bufPool.Put(b)
+					return fmt.Errorf("unexpected copied data size %d; want %d",
+						b.Len(), ce.ChunkSize)
 				}
-				gr.cache.Add(id, data)
+				gr.cache.Add(id, b.Bytes()[:ce.ChunkSize], opts...)
+				gr.bufPool.Put(b)
+
+				nr += ce.ChunkSize
+				continue
+			}
+
+			// Discard the target chunk
+			if _, err := io.CopyN(ioutil.Discard, tr, ce.ChunkSize); err != nil {
+				return errors.Wrapf(err,
+					"failed to discard file payload of %q (offset:%d,size:%d)",
+					h.Name, ce.ChunkOffset, ce.ChunkSize)
 			}
 			nr += ce.ChunkSize
 		}
@@ -143,6 +175,7 @@ type file struct {
 	ra     io.ReaderAt
 	r      *stargz.Reader
 	cache  cache.BlobCache
+	gr     *reader
 }
 
 // ReadAt reads chunks from the stargz file with trying to fetch as many chunks
@@ -154,40 +187,51 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 		if !ok {
 			break
 		}
-		id := genID(sf.digest, ce.ChunkOffset, ce.ChunkSize)
-		if cached, err := sf.cache.Fetch(id); err == nil && int64(len(cached)) == ce.ChunkSize {
-			nr += copy(p[nr:], cached[offset+int64(nr)-ce.ChunkOffset:])
-		} else {
-			var (
-				ip          []byte
-				tmp         bool
-				lowerUnread = positive(offset - ce.ChunkOffset)
-				upperUnread = positive(ce.ChunkOffset + ce.ChunkSize - (offset + int64(len(p))))
-			)
-			if lowerUnread == 0 && upperUnread == 0 {
-				ip = p[nr : int64(nr)+ce.ChunkSize]
-			} else {
-				// Use temporally buffer for aligning this chunk
-				ip = make([]byte, ce.ChunkSize)
-				tmp = true
-			}
+		var (
+			id           = genID(sf.digest, ce.ChunkOffset, ce.ChunkSize)
+			lowerDiscard = positive(offset - ce.ChunkOffset)
+			upperDiscard = positive(ce.ChunkOffset + ce.ChunkSize - (offset + int64(len(p))))
+			expectedSize = ce.ChunkSize - upperDiscard - lowerDiscard
+		)
+
+		// Check if the content exists in the cache
+		n, err := sf.cache.FetchAt(id, lowerDiscard, p[nr:int64(nr)+expectedSize])
+		if err == nil && int64(n) == expectedSize {
+			nr += n
+			continue
+		}
+
+		// We missed cache. Take it from underlying reader.
+		// We read the whole chunk here and add it to the cache so that following
+		// reads against neighboring chunks can take the data without decmpression.
+		if lowerDiscard == 0 && upperDiscard == 0 {
+			// We can directly store the result to the given buffer
+			ip := p[nr : int64(nr)+ce.ChunkSize]
 			n, err := sf.ra.ReadAt(ip, ce.ChunkOffset)
 			if err != nil && err != io.EOF {
 				return 0, errors.Wrap(err, "failed to read data")
-			} else if int64(n) != ce.ChunkSize {
-				return 0, fmt.Errorf("invalid chunk size %d; want %d", n, ce.ChunkSize)
-			}
-			if tmp {
-				// Write temporally buffer to resulting slice
-				n = copy(p[nr:], ip[lowerUnread:ce.ChunkSize-upperUnread])
-				if int64(n) != ce.ChunkSize-upperUnread-lowerUnread {
-					return 0, fmt.Errorf("unexpected final data size %d; want %d",
-						n, ce.ChunkSize-upperUnread-lowerUnread)
-				}
 			}
 			sf.cache.Add(id, ip)
 			nr += n
+			continue
 		}
+
+		// Use temporally buffer for aligning this chunk
+		b := sf.gr.bufPool.Get().(*bytes.Buffer)
+		b.Reset()
+		b.Grow(int(ce.ChunkSize))
+		ip := b.Bytes()[:ce.ChunkSize]
+		if _, err := sf.ra.ReadAt(ip, ce.ChunkOffset); err != nil && err != io.EOF {
+			sf.gr.bufPool.Put(b)
+			return 0, errors.Wrap(err, "failed to read data")
+		}
+		sf.cache.Add(id, ip)
+		n = copy(p[nr:], ip[lowerDiscard:ce.ChunkSize-upperDiscard])
+		sf.gr.bufPool.Put(b)
+		if int64(n) != expectedSize {
+			return 0, fmt.Errorf("unexpected final data size %d; want %d", n, expectedSize)
+		}
+		nr += n
 	}
 
 	return nr, nil

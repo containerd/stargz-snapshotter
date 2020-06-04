@@ -46,7 +46,7 @@ func TestRegionSet(t *testing.T) {
 		},
 		{
 			input:    []region{{2, 4}, {6, 8}, {1, 5}},
-			expected: []region{{1, 5}, {6, 8}},
+			expected: []region{{1, 8}},
 		},
 		{
 			input:    []region{{1, 2}, {1, 2}},
@@ -71,6 +71,18 @@ func TestRegionSet(t *testing.T) {
 		{
 			input:    []region{{4, 6}, {1, 3}}, // region.e is inclusive
 			expected: []region{{1, 6}},
+		},
+		{
+			input:    []region{{4, 6}, {1, 3}, {7, 9}, {2, 8}},
+			expected: []region{{1, 9}},
+		},
+		{
+			input:    []region{{4, 6}, {1, 5}, {7, 9}, {4, 8}},
+			expected: []region{{1, 9}},
+		},
+		{
+			input:    []region{{7, 8}, {1, 2}, {5, 6}},
+			expected: []region{{1, 2}, {5, 8}},
 		},
 	}
 	for i, tt := range tests {
