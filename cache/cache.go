@@ -78,6 +78,7 @@ func NewDirectoryCache(directory string, config DirectoryCacheConfig) (BlobCache
 	dc := &directoryCache{
 		cache:     newObjectCache(maxEntry),
 		fileCache: newObjectCache(maxFds),
+		wipLock:   &namedLock{},
 		directory: directory,
 		bufPool: sync.Pool{
 			New: func() interface{} {
@@ -100,6 +101,7 @@ type directoryCache struct {
 	cache     *objectCache
 	fileCache *objectCache
 	directory string
+	wipLock   *namedLock
 
 	bufPool sync.Pool
 
@@ -186,23 +188,31 @@ func (dc *directoryCache) Add(key string, p []byte, opts ...Option) {
 			c   = dc.cachePath(key)
 			wip = dc.wipPath(key)
 		)
+
+		dc.wipLock.lock(key)
 		if _, err := os.Stat(wip); err == nil {
+			dc.wipLock.unlock(key)
 			return // Write in progress
 		}
 		if _, err := os.Stat(c); err == nil {
+			dc.wipLock.unlock(key)
 			return // Already exists.
 		}
 
 		// Write the contents to a temporary file
 		if err := os.MkdirAll(filepath.Dir(wip), os.ModePerm); err != nil {
 			fmt.Printf("Warning: Failed to Create blob cache directory %q: %v\n", c, err)
+			dc.wipLock.unlock(key)
 			return
 		}
 		wipfile, err := os.Create(wip)
 		if err != nil {
 			fmt.Printf("Warning: failed to prepare temp file for storing cache %q", key)
+			dc.wipLock.unlock(key)
 			return
 		}
+		dc.wipLock.unlock(key)
+
 		defer func() {
 			wipfile.Close()
 			os.Remove(wipfile.Name())
@@ -249,6 +259,42 @@ func (dc *directoryCache) cachePath(key string) string {
 
 func (dc *directoryCache) wipPath(key string) string {
 	return filepath.Join(dc.directory, key[:2], "w", key)
+}
+
+type namedLock struct {
+	muMap  map[string]*sync.Mutex
+	refMap map[string]int
+
+	mu sync.Mutex
+}
+
+func (nl *namedLock) lock(name string) {
+	nl.mu.Lock()
+	if nl.muMap == nil {
+		nl.muMap = make(map[string]*sync.Mutex)
+	}
+	if nl.refMap == nil {
+		nl.refMap = make(map[string]int)
+	}
+	if _, ok := nl.muMap[name]; !ok {
+		nl.muMap[name] = &sync.Mutex{}
+	}
+	mu := nl.muMap[name]
+	nl.refMap[name]++
+	nl.mu.Unlock()
+	mu.Lock()
+}
+
+func (nl *namedLock) unlock(name string) {
+	nl.mu.Lock()
+	mu := nl.muMap[name]
+	nl.refMap[name]--
+	if nl.refMap[name] <= 0 {
+		delete(nl.muMap, name)
+		delete(nl.refMap, name)
+	}
+	nl.mu.Unlock()
+	mu.Unlock()
 }
 
 func newObjectCache(maxEntries int) *objectCache {
