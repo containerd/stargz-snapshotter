@@ -12,32 +12,16 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-FROM golang:1.13
+FROM stargz/cind:1.4.0-beta.1
 
 # basic tools
-# docker-ce-cli is used only to log into registry with ~/.docker/config.json
 RUN apt-get update -y && \
-    apt-get --no-install-recommends install -y fuse iptables libbtrfs-dev libseccomp-dev \
-            apt-transport-https gnupg2 software-properties-common jq && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
-    add-apt-repository \
-      "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
-    apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli && \
+    apt-get --no-install-recommends install -y iptables jq && \
     git clone https://github.com/google/go-containerregistry \
               $GOPATH/src/github.com/google/go-containerregistry && \
     cd $GOPATH/src/github.com/google/go-containerregistry && \
     git checkout eb7c14b719c60883de5747caa25463b44f8bf896 && \
     GO111MODULE=on go install github.com/google/go-containerregistry/cmd/crane
 
-# runtime dependencies
-RUN git clone https://github.com/opencontainers/runc \
-              $GOPATH/src/github.com/opencontainers/runc && \
-    cd $GOPATH/src/github.com/opencontainers/runc && \
-    git checkout d736ef14f0288d6993a1845745d6756cfc9ddd5a && \
-    GO111MODULE=off make -j2 BUILDTAGS='seccomp apparmor' && \
-    GO111MODULE=off make install && \
-    git clone https://github.com/containerd/containerd \
-              $GOPATH/src/github.com/containerd/containerd && \
-    cd $GOPATH/src/github.com/containerd/containerd && \
-    git checkout 990076b731ec9446437972b41176a6b0f3b7bcbf && \
-    GO111MODULE=off make -j2 && GO111MODULE=off make install
+COPY ./config.containerd.toml /etc/containerd/config.toml
+COPY ./config.stargz.toml /etc/containerd-stargz-grpc/config.toml

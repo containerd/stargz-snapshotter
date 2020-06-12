@@ -36,8 +36,8 @@ spec:
   containers:
   - name: ${TEST_CONTAINER_NAME}
     image: ${TESTIMAGE}
-    command: ["tail"]
-    args: ["-f", "/dev/null"]
+    command: ["sleep"]
+    args: ["infinity"]
   imagePullSecrets:
   - name: testsecret
 EOF

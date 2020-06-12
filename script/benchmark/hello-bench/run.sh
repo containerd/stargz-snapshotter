@@ -58,7 +58,7 @@ function output {
 
 function set_noprefetch {
     local NOPREFETCH="${1}"
-    sed -i 's/noprefetch = .*/noprefetch = '"${NOPREFETCH}"'/g' "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.stargz.toml"
+    sed -i 's/noprefetch = .*/noprefetch = '"${NOPREFETCH}"'/g' "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml"
 }
 
 NUM_OF_SUMPLES=1
@@ -70,16 +70,6 @@ function measure {
     "${MEASURING_SCRIPT}" ${OPTION} --user=${USER} --op=run --experiments=${NUM_OF_SUMPLES} ${@:4}
     output "],"
 }
-
-echo "Installing remote snapshotter..."
-mkdir -p /tmp/out
-PREFIX=/tmp/out/ make clean && \
-    PREFIX=/tmp/out/ make -j2 && \
-    PREFIX=/tmp/out/ make install
-mkdir -p "${CONTAINERD_CONFIG_DIR}" && \
-    cp "${REPO_CONFIG_DIR}"config.containerd.toml "${CONTAINERD_CONFIG_DIR}"
-mkdir -p "${REMOTE_SNAPSHOTTER_CONFIG_DIR}" && \
-    cp "${REPO_CONFIG_DIR}"config.stargz.toml "${REMOTE_SNAPSHOTTER_CONFIG_DIR}"
 
 echo "========="
 echo "SPEC LIST"

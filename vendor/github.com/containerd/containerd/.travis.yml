@@ -15,7 +15,7 @@ os:
 - linux
 
 go:
-  - "1.13.10"
+  - "1.13.11"
 
 env:
   - TRAVIS_GOOS=linux TEST_RUNTIME=io.containerd.runc.v1 TRAVIS_CGO_ENABLED=1 TRAVIS_DISTRO=bionic GOPROXY=direct
@@ -46,7 +46,6 @@ addons:
       - libaio-dev
       - libprotobuf-c-dev
       - libprotobuf-dev
-      - socat
 
 before_install:
   - uname -r

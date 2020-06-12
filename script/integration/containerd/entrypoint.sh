@@ -16,14 +16,11 @@
 
 set -euo pipefail
 
-CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
-REPO="${CONTEXT}../../../"
-
 # NOTE: The entire contents of containerd/stargz-snapshotter are located in
 # the testing container so utils.sh is visible from this script during runtime.
 # TODO: Refactor the code dependencies and pack them in the container without
 #       expecting and relying on volumes.
-source "${REPO}/script/util/utils.sh"
+source "/utils.sh"
 
 PLUGIN=stargz
 REGISTRY_HOST=registry-integration
@@ -31,7 +28,6 @@ REGISTRY_ALT_HOST=registry-alt
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
-TMP_DIR=$(mktemp -d)
 USR_ORG=$(mktemp -d)
 USR_MIRROR=$(mktemp -d)
 USR_REFRESH=$(mktemp -d)
@@ -42,8 +38,6 @@ USR_STARGZSN_STARGZ=$(mktemp -d)
 LOG_FILE=$(mktemp)
 function cleanup {
     ORG_EXIT_CODE="${1}"
-    rm -rf "${TMP_DIR}" || true
-    rm -rf "${TMP_DIR}" || true
     rm -rf "${USR_ORG}" || true
     rm -rf "${USR_MIRROR}" || true
     rm -rf "${USR_REFRESH}" || true
@@ -110,15 +104,6 @@ echo "Logging into the registry..."
 cp /auth/certs/domain.crt /usr/local/share/ca-certificates
 update-ca-certificates
 retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
-
-echo "Installing snapshotter..."
-PREFIX="${TMP_DIR}/" make clean
-PREFIX="${TMP_DIR}/" GO_BUILD_FLAGS="-race" make containerd-stargz-grpc # Check data race
-PREFIX="${TMP_DIR}/" make ctr-remote
-PREFIX="${TMP_DIR}/" make install
-mkdir -p /etc/containerd /etc/containerd-stargz-grpc
-cp ./script/integration/containerd/config.containerd.toml /etc/containerd/config.toml
-cp ./script/integration/containerd/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
 
 echo "Preparing images..."
 crane copy ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
