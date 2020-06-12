@@ -18,29 +18,59 @@ set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
+
+BENCHMARKING_BASE_IMAGE_NAME="benchmark-image-base"
+BENCHMARKING_NODE_IMAGE_NAME="benchmark-image-test"
 BENCHMARKING_NODE=hello-bench
 BENCHMARKING_CONTAINER=hello-bench-container
 
+if [ "${BENCHMARKING_NO_RECREATE:-}" != "true" ] ; then
+    echo "Preparing node image..."
+    docker build -t "${BENCHMARKING_BASE_IMAGE_NAME}" --target snapshotter-base \
+           ${DOCKER_BUILD_ARGS:-} "${REPO}"
+fi
+
 DOCKER_COMPOSE_YAML=$(mktemp)
+TMP_CONTEXT=$(mktemp -d)
 function cleanup {
     local ORG_EXIT_CODE="${1}"
     rm "${DOCKER_COMPOSE_YAML}" || true
+    rm -rf "${TMP_CONTEXT}" || true
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+
+cp -R "${CONTEXT}/config" "${TMP_CONTEXT}"
+
+cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
+FROM ${BENCHMARKING_BASE_IMAGE_NAME}
+
+RUN apt-get update -y && \
+    apt-get --no-install-recommends install -y python jq && \
+    git clone https://github.com/google/go-containerregistry \
+              \${GOPATH}/src/github.com/google/go-containerregistry && \
+    cd \${GOPATH}/src/github.com/google/go-containerregistry && \
+    git checkout 4b1985e5ea2104672636879e1694808f735fd214 && \
+    GO111MODULE=on go install github.com/google/go-containerregistry/cmd/crane
+
+COPY ./config/config.containerd.toml /etc/containerd/config.toml
+COPY ./config/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
+
+ENV CONTAINERD_SNAPSHOTTER=""
+
+ENTRYPOINT [ "sleep", "infinity" ]
+EOF
+docker build -t "${BENCHMARKING_NODE_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
 
 echo "Preparing docker-compose.yml..."
 cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3"
 services:
   ${BENCHMARKING_NODE}:
-    build:
-      context: "${CONTEXT}/hello-bench"
-      dockerfile: Dockerfile
+    image: ${BENCHMARKING_NODE_IMAGE_NAME}
     container_name: ${BENCHMARKING_CONTAINER}
     privileged: true
     working_dir: /go/src/github.com/containerd/stargz-snapshotter
-    command: tail -f /dev/null
     environment:
     - NO_PROXY=127.0.0.1,localhost
     - HTTP_PROXY=${HTTP_PROXY:-}

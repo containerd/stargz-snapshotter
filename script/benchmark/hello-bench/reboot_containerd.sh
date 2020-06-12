@@ -77,10 +77,10 @@ else
     fi
     containerd-stargz-grpc --log-level=debug \
                            --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
-                           --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.stargz.toml" \
+                           --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml" \
                            2>&1 | tee -a "${LOG_FILE}" & # Dump all log
     retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
 fi
 echo "running containerd..."
-containerd --config="${CONTAINERD_CONFIG_DIR}config.containerd.toml" &
+containerd --config="${CONTAINERD_CONFIG_DIR}config.toml" &
 retry ctr version

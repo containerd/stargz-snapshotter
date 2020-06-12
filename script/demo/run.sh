@@ -63,8 +63,8 @@ function cleanup {
 
 echo "copying config from repo..."
 mkdir -p /etc/containerd /etc/containerd-stargz-grpc && \
-    cp "${REPO}/script/demo/config.containerd.toml" "${CONTAINERD_CONFIG_DIR}" && \
-    cp "${REPO}/script/demo/config.stargz.toml" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}"
+    cp "${REPO}/script/demo/config.containerd.toml" "${CONTAINERD_CONFIG_DIR}config.toml" && \
+    cp "${REPO}/script/demo/config.stargz.toml" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml"
 
 echo "cleaning up the environment..."
 kill_all "containerd"
@@ -79,8 +79,8 @@ echo "preparing commands..."
 echo "running remote snaphsotter..."
 containerd-stargz-grpc --log-level=debug \
                        --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
-                       --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.stargz.toml" &
+                       --config="${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml" &
 retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
 
 echo "running containerd..."
-containerd --config="${CONTAINERD_CONFIG_DIR}config.containerd.toml" $@ &
+containerd --config="${CONTAINERD_CONFIG_DIR}config.toml" $@ &

@@ -1,7 +1,9 @@
 version: "3.4"
 services:
   containerd_demo:
-    build: .
+    build:
+      context: ../../
+      target: containerd-base
     container_name: containerd_demo
     privileged: true
     stdin_open: true
