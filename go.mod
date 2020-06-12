@@ -7,7 +7,7 @@ require (
 	github.com/Microsoft/hcsshim v0.8.7 // indirect
 	github.com/containerd/cgroups v0.0.0-20200327175542-b44481373989 // indirect
 	github.com/containerd/console v1.0.0 // indirect
-	github.com/containerd/containerd v1.3.1-0.20200507183255-990076b731ec
+	github.com/containerd/containerd v1.4.0-beta.1
 	github.com/containerd/continuity v0.0.0-20190815185530-f2a389ac0a02
 	github.com/containerd/fifo v0.0.0-20191213151349-ff969a566b00 // indirect
 	github.com/containerd/go-runc v0.0.0-20191206163734-a5c2862aed5e
