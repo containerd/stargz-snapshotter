@@ -328,16 +328,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		return err
 	}
 
-	go func() {
-		server.Serve()
-
-		// Cleanup on unmount
-		// TODO: prevent race.
-		fs.layerMu.Lock()
-		delete(fs.layer, mountpoint)
-		fs.layerMu.Unlock()
-	}()
-
+	go server.Serve()
 	return server.WaitMount()
 }
 
@@ -423,6 +414,22 @@ func (fs *filesystem) check(ctx context.Context, l *layer) error {
 	}
 
 	return nil
+}
+
+func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
+	fs.layerMu.Lock()
+	if _, ok := fs.layer[mountpoint]; !ok {
+		fs.layerMu.Unlock()
+		return fmt.Errorf("specified path %q isn't a mountpoint", mountpoint)
+	}
+	delete(fs.layer, mountpoint) // unregisters the corresponding layer
+	fs.layerMu.Unlock()
+	// The goroutine which serving the mountpoint possibly becomes not responding.
+	// In case of such situations, we use MNT_FORCE here and abort the connection.
+	// In the future, we might be able to consider to kill that specific hanging
+	// goroutine using channel, etc.
+	// See also: https://www.kernel.org/doc/html/latest/filesystems/fuse.html#aborting-a-filesystem-connection
+	return syscall.Unmount(mountpoint, syscall.MNT_FORCE)
 }
 
 func (fs *filesystem) parseLabels(labels map[string]string) (rRef, rDigest string, rLayers []string, rPrefetchSize int64, _ error) {
