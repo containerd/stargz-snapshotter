@@ -56,9 +56,12 @@ const (
 // snapshot.
 // Check() is called to check the connectibity of the existing layer snapshot
 // every time the layer is used by containerd.
+// Unmount() is called to unmount a remote snapshot from the specified mount point
+// directory.
 type FileSystem interface {
 	Mount(ctx context.Context, mountpoint string, labels map[string]string) error
 	Check(ctx context.Context, mountpoint string) error
+	Unmount(ctx context.Context, mountpoint string) error
 }
 
 // SnapshotterConfig is used to configure the remote snapshotter instance
@@ -425,11 +428,11 @@ func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Trans
 func (o *snapshotter) cleanupSnapshotDirectory(ctx context.Context, dir string) error {
 
 	// On a remote snapshot, the layer is mounted on the "fs" directory.
-	// Filesystem can do any finalization by detecting this "unmount" event
-	// and we don't care the finalization explicitly at this stage.
+	// We use Filesystem's Unmount API so that it can do necessary finalization
+	// before/after the unmount.
 	mp := filepath.Join(dir, "fs")
-	if err := syscall.Unmount(mp, 0); err != nil {
-		log.G(ctx).WithError(err).WithField("dir", mp).Warn("failed to unmount remote snapshot")
+	if err := o.fs.Unmount(o.context, mp); err != nil {
+		log.G(ctx).WithError(err).WithField("dir", mp).Debug("failed to unmount")
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return errors.Wrapf(err, "failed to remove directory %q", dir)
