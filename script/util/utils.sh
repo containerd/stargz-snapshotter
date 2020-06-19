@@ -25,7 +25,7 @@ function prepare_creds {
     openssl req -subj "/C=JP/ST=Remote/L=Snapshotter/O=TestEnv/OU=Integration/CN=${REGISTRY_HOST}" \
             -newkey rsa:2048 -nodes -keyout "${OUTPUT}/certs/domain.key" \
             -x509 -days 365 -out "${OUTPUT}/certs/domain.crt"
-    docker run --entrypoint htpasswd registry:2 -Bbn "${USER}" "${PASS}" > "${OUTPUT}/auth/htpasswd"
+    htpasswd -Bbn "${USER}" "${PASS}" > "${OUTPUT}/auth/htpasswd"
 }
 
 # Check if all snapshots logged in the specified file are prepared as remote snapshots.
