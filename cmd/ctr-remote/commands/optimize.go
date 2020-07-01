@@ -23,7 +23,6 @@
 package commands
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -218,10 +217,12 @@ func convert(clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...
 		if err := json.Unmarshal(configData, &config); err != nil {
 			return errors.Wrap(err, "failed to parse image config file")
 		}
-		layers, err = optimize(clicontext, layers, config, runopts...)
+		var done func()
+		layers, done, err = optimize(clicontext, layers, config, runopts...)
 		if err != nil {
 			return err
 		}
+		defer done()
 	}
 	srcCfg, err := srcImg.ConfigFile()
 	if err != nil {
@@ -247,33 +248,45 @@ func convert(clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...
 }
 
 // The order of the "in" list must be base layer first, top layer last.
-func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (out []regpkg.Layer, err error) {
-	root := ""
+func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (out []regpkg.Layer, done func(), err error) {
+	// Setup temporary workspace
+	tmpRoot, err := ioutil.TempDir("", "optimize")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer os.RemoveAll(tmpRoot)
 	mktemp := func() (path string, err error) {
-		if path, err = ioutil.TempDir(root, "optimize"); err != nil {
+		if path, err = ioutil.TempDir(tmpRoot, "optimize"); err != nil {
 			return "", err
 		}
-		if err = os.Chmod(path, 0777); err != nil {
+		if err = os.Chmod(path, 0755); err != nil {
 			return "", err
 		}
 		return path, nil
 	}
-	if root, err = mktemp(); err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(root)
 
 	// mount layer loggers on temp directories.
 	var (
-		eg        errgroup.Group
-		lowerdirs []string
-		addLayer  = make([](func([]regpkg.Layer) ([]regpkg.Layer, error)), len(in))
+		eg         errgroup.Group
+		lowerdirs  []string
+		addLayer   = make([](func([]regpkg.Layer) ([]regpkg.Layer, error)), len(in))
+		layerFiles []*os.File
 	)
+	done = func() {
+		for _, f := range layerFiles {
+			if err := f.Close(); err != nil {
+				fmt.Printf("Warn: failed to close tmpfile %v: %v\n", f.Name(), err)
+			}
+			if err := os.Remove(f.Name()); err != nil {
+				fmt.Printf("Warn: failed to remove tmpfile %v: %v\n", f.Name(), err)
+			}
+		}
+	}
 	for i := range in {
 		i := i
 		mp, err := mktemp()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer syscall.Unmount(mp, syscall.MNT_FORCE)
 		lowerdirs = append([]string{mp}, lowerdirs...) // top layer first, base layer last (for overlayfs).
@@ -287,16 +300,20 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 				return err
 			}
 			defer r.Close()
-			tarBytes, err := ioutil.ReadAll(r)
+			layerFile, err := ioutil.TempFile("", "layerdata")
 			if err != nil {
 				return err
 			}
+			layerFiles = append(layerFiles, layerFile)
+			if _, err := io.Copy(layerFile, r); err != nil {
+				return err
+			}
 			mon := logger.NewOpenReadMonitor()
-			if _, err := logger.Mount(mp, bytes.NewReader(tarBytes), mon); err != nil {
+			if _, err := logger.Mount(mp, layerFile, mon); err != nil {
 				return errors.Wrapf(err, "failed to mount on %q", mp)
 			}
 			addLayer[i] = func(lowers []regpkg.Layer) ([]regpkg.Layer, error) {
-				r, err := sorter.Sort(bytes.NewReader(tarBytes), mon.DumpLog())
+				r, err := sorter.Sort(layerFile, mon.DumpLog())
 				if err != nil {
 					return nil, errors.Wrap(err, "failed to sort tar")
 				}
@@ -307,7 +324,7 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// prepare FileSystem Bundle
@@ -317,13 +334,13 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 		workdir  string
 	)
 	if bundle, err = mktemp(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if upperdir, err = mktemp(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if workdir, err = mktemp(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var (
 		rootfs = sampler.GetRootfsPathUnder(bundle)
@@ -331,22 +348,22 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 			strings.Join(lowerdirs, ":"), upperdir, workdir)
 	)
 	if err = os.Mkdir(rootfs, 0777); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err = syscall.Mount("overlay", rootfs, "overlay", 0, option); err != nil {
-		return nil, errors.Wrapf(err, "mount overlayfs on %q with data %q", rootfs, option)
+		return nil, nil, errors.Wrapf(err, "mount overlayfs on %q with data %q", rootfs, option)
 	}
 	defer syscall.Unmount(rootfs, syscall.MNT_FORCE)
 
 	// run workload
 	if err = sampler.Run(bundle, config, clicontext.Int("period"), opts...); err != nil {
-		return nil, errors.Wrap(err, "failed to run the sampler")
+		return nil, nil, errors.Wrap(err, "failed to run the sampler")
 	}
 
 	// get converted layers
 	for _, f := range addLayer {
 		if out, err = f(out); err != nil {
-			return nil, errors.Wrap(err, "failed to get converted layer")
+			return nil, nil, errors.Wrap(err, "failed to get converted layer")
 		}
 	}
 	return
