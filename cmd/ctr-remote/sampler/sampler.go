@@ -19,13 +19,13 @@ package sampler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/containerd/containerd/log"
 	runc "github.com/containerd/go-runc"
 	"github.com/docker/docker/oci"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -36,7 +36,7 @@ import (
 )
 
 // TODO: Enable to specify volumes
-func Run(bundle string, config v1.Image, period int, opts ...Option) error {
+func Run(ctx context.Context, bundle string, config v1.Image, opts ...Option) error {
 	opt := options{}
 	for _, o := range opts {
 		o(&opt)
@@ -47,37 +47,16 @@ func Run(bundle string, config v1.Image, period int, opts ...Option) error {
 		return errors.Wrap(err, "failed to convert config to spec")
 	}
 	sf, err := os.Create(filepath.Join(bundle, "config.json"))
+	if err != nil {
+		return errors.Wrap(err, "failed to create config.json in the bundle")
+	}
+	defer sf.Close()
 	if err = json.NewEncoder(sf).Encode(spec); err != nil {
 		return errors.Wrap(err, "failed to parse user")
 	}
 
 	// run the container
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan struct{})
-	go func() {
-		err = runContainer(ctx, bundle)
-		close(done)
-	}()
-
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-	defer signal.Stop(sc)
-
-	select {
-	case <-sc:
-		fmt.Printf("Signal detected.")
-		cancel()
-	case <-time.After(time.Duration(period) * time.Second):
-		cancel()
-	case <-done:
-	}
-
-	if err != nil {
+	if err := runContainer(ctx, bundle); err != nil {
 		return errors.Wrap(err, "failed to run containers")
 	}
 
@@ -101,32 +80,41 @@ func conf2spec(config v1.ImageConfig, rootfs string, opt options) (specs.Spec, e
 
 	// User
 	username := config.User
-	if username == "" {
-		username = "root"
-	}
 	if opt.user != "" {
 		username = opt.user
 	}
-	userinfo, err := getUser(username, rootfs)
-	if err != nil {
-		// fall back to default
-		userinfo = specs.User{
-			UID: 0,
-			GID: 0,
+	if username != "" {
+		// Username is specified, we need to resolve the uid and gid
+		passwdPath, err := user.GetPasswdPath()
+		if err != nil {
+			return specs.Spec{}, errors.Wrapf(err, "failed to get passwd file path")
+		}
+		groupPath, err := user.GetGroupPath()
+		if err != nil {
+			return specs.Spec{}, errors.Wrapf(err, "failed to get group file path")
+		}
+		execUser, err := user.GetExecUserPath(username, nil,
+			filepath.Join(rootfs, passwdPath), filepath.Join(rootfs, groupPath))
+		if err != nil {
+			return specs.Spec{}, errors.Wrapf(err, "failed to resolve username %q", username)
+		}
+		s.Process.User.UID = uint32(execUser.Uid)
+		s.Process.User.GID = uint32(execUser.Gid)
+		for _, g := range execUser.Sgids {
+			s.Process.User.AdditionalGids = append(s.Process.User.AdditionalGids, uint32(g))
 		}
 	}
-	s.Process.User = userinfo
 
 	// Env
 	s.Process.Env = append(config.Env, opt.envs...)
 
 	// WorkingDir
 	s.Process.Cwd = config.WorkingDir
-	if s.Process.Cwd == "" {
-		s.Process.Cwd = "/"
-	}
 	if opt.workingDir != "" {
 		s.Process.Cwd = opt.workingDir
+	}
+	if s.Process.Cwd == "" {
+		s.Process.Cwd = "/"
 	}
 
 	// Entrypoint, Cmd
@@ -144,100 +132,75 @@ func conf2spec(config v1.ImageConfig, rootfs string, opt options) (specs.Spec, e
 }
 
 func runContainer(ctx context.Context, bundle string) error {
-	// TODO: Use user-specified signal.
 	runtime := &runc.Runc{
 		Log:          filepath.Join(bundle, "runc-log.json"),
 		LogFormat:    runc.JSON,
-		PdeathSignal: syscall.SIGKILL, // this can still leak the process
-		// Setpgid:      true,
+		PdeathSignal: syscall.SIGKILL,
+		// Setpgid:      true,         // TODO: do we need this?
 	}
 
+	// Run the container
 	id := xid.New().String()
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				killCtx, timeout := context.WithTimeout(context.Background(), 7*time.Second)
-				if err := runtime.Kill(killCtx, id, int(syscall.SIGKILL), nil); err != nil {
-					fmt.Printf("failed to kill runc %s: %+v\n", id, err)
-					select {
-					case <-killCtx.Done():
-						timeout()
-						cancelRun()
-						return
-					default:
-					}
-				}
-				timeout()
-				select {
-				case <-time.After(50 * time.Millisecond):
-				case <-done:
-					return
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-
 	stdio, err := runc.NewSTDIO()
 	if err != nil {
 		return err
 	}
-	fmt.Printf("> running container %s\n", id)
-	runtime.Run(runCtx, id, bundle, &runc.CreateOpts{
-		IO: stdio,
-	})
-	close(done)
-	fmt.Printf("DONE\n")
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		log.G(ctx).Infof("running container %q", id)
+		runtime.Run(runCtx, id, bundle, &runc.CreateOpts{
+			IO: stdio,
+		})
+		log.G(ctx).Infof("container %q stopped", id)
+	}()
 
-	return nil
-}
-
-// Copyright 2013-2018 Docker, Inc.
-// Modified version of getUser function to make it work with any rootfs.
-// https://github.com/moby/moby/blob/ad1b781e44fa1e44b9e654e5078929aec56aed66/daemon/oci_linux.go
-func getUser(username string, rootfsPath string) (specs.User, error) {
-	passwdPath, err := user.GetPasswdPath()
-	if err != nil {
-		return specs.User{}, err
-	}
-	groupPath, err := user.GetGroupPath()
-	if err != nil {
-		return specs.User{}, err
-	}
-	passwdFile, err := os.Open(filepath.Join(rootfsPath, passwdPath))
-	if err == nil {
-		defer passwdFile.Close()
-	}
-	groupFile, err := os.Open(filepath.Join(rootfsPath, groupPath))
-	if err == nil {
-		defer groupFile.Close()
-	}
-
-	execUser, err := user.GetExecUser(username, nil, passwdFile, groupFile)
-	if err != nil {
-		return specs.User{}, err
+	// Wait until context is canceled or signal is detected
+	log.G(ctx).Debugf("waiting for the termination of container %q", id)
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+	defer signal.Stop(sc)
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		log.G(ctx).Info("context canceled")
+	case <-sc:
+		log.G(ctx).Info("signal detected")
 	}
 
-	// todo: fix this double read by a change to libcontainer/user pkg
-	groupFile, err = os.Open(filepath.Join(rootfsPath, groupPath))
-	if err == nil {
-		defer groupFile.Close()
+	// Kill the container
+	for {
+		select {
+		case <-done:
+			// container terminated
+			return nil
+		default:
+			log.G(ctx).Debugf("trying to kill container %q", id)
+			killCtx, timeout := context.WithTimeout(context.Background(), 7*time.Second)
+			if err := runtime.Kill(killCtx, id, int(syscall.SIGKILL), nil); err != nil {
+				log.G(ctx).WithError(err).Warnf("failed to kill container %q", id)
+				select {
+				case <-killCtx.Done():
+					// runc kill seems to hang. we shouldn't retry this anymore.
+					timeout()
+					return err
+				default:
+				}
+			}
+			timeout()
+			select {
+			case <-done:
+				return nil
+			case <-time.After(50 * time.Millisecond):
+				// retry runc kill
+			}
+		}
 	}
-	uid := uint32(execUser.Uid)
-	gid := uint32(execUser.Gid)
-	var additionalGids []uint32
-	for _, g := range execUser.Sgids {
-		additionalGids = append(additionalGids, uint32(g))
-	}
-
-	return specs.User{
-		UID:            uid,
-		GID:            gid,
-		AdditionalGids: additionalGids,
-		Username:       username,
-	}, nil
 }
