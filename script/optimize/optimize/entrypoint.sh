@@ -21,6 +21,7 @@ DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 ORG_IMAGE_TAG="${REGISTRY_HOST}:5000/test:org$(date '+%M%S')"
 OPT_IMAGE_TAG="${REGISTRY_HOST}:5000/test:opt$(date '+%M%S')"
+TOC_JSON_DIGEST_ANNOTATION="containerd.io/snapshot/stargz/toc.digest"
 
 RETRYNUM=100
 RETRYINTERVAL=1
@@ -77,6 +78,23 @@ func main() {
 }
 EOF
     GO111MODULE=off go build -ldflags '-extldflags "-static"' -o "${CONTEXT_DIR}/accessor" "${GOPATH}/src/test/test"
+}
+
+function validate_toc_json {
+    local MANIFEST=${1}
+    local LAYER_NUM=${2}
+    local LAYER_TAR=${3}
+
+    TOCJSON_ANNOTATION="$(cat ${MANIFEST} | jq -r '.layers['"${LAYER_NUM}"'].annotations."'${TOC_JSON_DIGEST_ANNOTATION}'"')"
+    TOCJSON_DIGEST=$(tar -xOf "${LAYER_TAR}" "stargz.index.json" | sha256sum | sed -E 's/([^ ]*).*/sha256:\1/g')
+
+    if [ "${TOCJSON_ANNOTATION}" != "${TOCJSON_DIGEST}" ] ; then
+        echo "Invalid TOC JSON (layer:${LAYER_NUM}): want ${TOCJSON_ANNOTATION}; got: ${TOCJSON_DIGEST}"
+        return 1
+    fi
+
+    echo "Valid TOC JSON (layer:${LAYER_NUM}) ${TOCJSON_ANNOTATION} == ${TOCJSON_DIGEST}"
+    return 0
 }
 
 echo "Connecting to the docker server..."
@@ -136,5 +154,11 @@ echo "Validating tarball contents of layer 1..."
 diff "${WORKING_DIR}/1-got" "${WORKING_DIR}/1-want"
 echo "Validating tarball contents of layer 2..."
 diff "${WORKING_DIR}/2-got" "${WORKING_DIR}/2-want"
+
+echo "Validating TOC JSON digest..."
+crane manifest "${OPT_IMAGE_TAG}" | tee "${WORKING_DIR}/dist-manifest.json" && echo ""
+validate_toc_json "${WORKING_DIR}/dist-manifest.json" "0" "${LAYER_0}"
+validate_toc_json "${WORKING_DIR}/dist-manifest.json" "1" "${LAYER_1}"
+validate_toc_json "${WORKING_DIR}/dist-manifest.json" "2" "${LAYER_2}"
 
 exit 0

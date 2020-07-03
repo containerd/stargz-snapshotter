@@ -21,4 +21,5 @@ RUN apt-get update -y && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
     add-apt-repository \
       "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
-    apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli runc
+    apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli runc && \
+    GO111MODULE=on go install github.com/google/go-containerregistry/cmd/crane
