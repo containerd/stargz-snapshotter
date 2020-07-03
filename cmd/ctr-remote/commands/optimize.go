@@ -23,6 +23,7 @@
 package commands
 
 import (
+	gocontext "context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -34,13 +35,15 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sampler"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sorter"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/logs"
+	reglogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/google/go-containerregistry/pkg/name"
 	regpkg "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
@@ -50,6 +53,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/types"
 	imgpkg "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 )
@@ -101,9 +105,11 @@ var OptimizeCommand = cli.Command{
 	},
 	Action: func(context *cli.Context) error {
 
-		// Set up logs package to get useful messages e.g. progress.
-		logs.Warn.SetOutput(os.Stderr)
-		logs.Progress.SetOutput(os.Stderr)
+		ctx := gocontext.Background()
+
+		// Set up logs package of ggcr to get useful messages
+		reglogs.Warn.SetOutput(log.G(ctx).WriterLevel(logrus.WarnLevel))
+		reglogs.Progress.SetOutput(log.G(ctx).WriterLevel(logrus.InfoLevel))
 
 		// Parse arguments
 		var (
@@ -127,7 +133,7 @@ var OptimizeCommand = cli.Command{
 		if err != nil {
 			return errors.Wrapf(err, "failed to parse destination ref %q", dst)
 		}
-		err = convert(context, srcRef, dstRef, opts...)
+		err = convert(ctx, context, srcRef, dstRef, opts...)
 		if err != nil {
 			return errors.Wrapf(err, "failed to convert image %q -> %q",
 				srcRef.String(), dstRef.String())
@@ -187,7 +193,7 @@ func parseReference(path string, clicontext *cli.Context) (name.Reference, error
 	return ref, nil
 }
 
-func convert(clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...sampler.Option) error {
+func convert(ctx gocontext.Context, clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...sampler.Option) error {
 	// Pull source image
 	srcImg, err := remote.Image(srcRef, remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if err != nil {
@@ -218,7 +224,7 @@ func convert(clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...
 			return errors.Wrap(err, "failed to parse image config file")
 		}
 		var done func()
-		layers, done, err = optimize(clicontext, layers, config, runopts...)
+		layers, done, err = optimize(ctx, clicontext, layers, config, runopts...)
 		if err != nil {
 			return err
 		}
@@ -248,15 +254,16 @@ func convert(clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...
 }
 
 // The order of the "in" list must be base layer first, top layer last.
-func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (out []regpkg.Layer, done func(), err error) {
+func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (out []regpkg.Layer, done func(), err error) {
 	// Setup temporary workspace
-	tmpRoot, err := ioutil.TempDir("", "optimize")
+	tmpRoot, err := ioutil.TempDir("", "optimize-work")
 	if err != nil {
 		return nil, nil, err
 	}
 	defer os.RemoveAll(tmpRoot)
-	mktemp := func() (path string, err error) {
-		if path, err = ioutil.TempDir(tmpRoot, "optimize"); err != nil {
+	log.G(ctx).Debugf("workspace directory: %q", tmpRoot)
+	mktemp := func(name string) (path string, err error) {
+		if path, err = ioutil.TempDir(tmpRoot, "optimize-"+name+"-"); err != nil {
 			return "", err
 		}
 		if err = os.Chmod(path, 0755); err != nil {
@@ -267,24 +274,25 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 
 	// mount layer loggers on temp directories.
 	var (
-		eg         errgroup.Group
-		lowerdirs  []string
-		addLayer   = make([](func([]regpkg.Layer) ([]regpkg.Layer, error)), len(in))
-		layerFiles []*os.File
+		eg           errgroup.Group
+		lowerdirs    []string
+		addLayer     = make([](func([]regpkg.Layer) ([]regpkg.Layer, error)), len(in))
+		layerFiles   []*os.File
+		layerFilesMu sync.Mutex
 	)
 	done = func() {
 		for _, f := range layerFiles {
 			if err := f.Close(); err != nil {
-				fmt.Printf("Warn: failed to close tmpfile %v: %v\n", f.Name(), err)
+				log.G(ctx).WithError(err).Warnf("failed to close tmpfile %v", f.Name())
 			}
 			if err := os.Remove(f.Name()); err != nil {
-				fmt.Printf("Warn: failed to remove tmpfile %v: %v\n", f.Name(), err)
+				log.G(ctx).WithError(err).Warnf("failed to remove tmpfile %v", f.Name())
 			}
 		}
 	}
 	for i := range in {
 		i := i
-		mp, err := mktemp()
+		mp, err := mktemp(fmt.Sprintf("lower%d", i))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -304,7 +312,9 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 			if err != nil {
 				return err
 			}
+			layerFilesMu.Lock()
 			layerFiles = append(layerFiles, layerFile)
+			layerFilesMu.Unlock()
 			if _, err := io.Copy(layerFile, r); err != nil {
 				return err
 			}
@@ -319,7 +329,7 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 				}
 				return append(lowers, &layer{r: r}), nil
 			}
-			fmt.Printf("Unpacked %v\n", dgst)
+			log.G(ctx).Infof("unpacked %v", dgst)
 			return nil
 		})
 	}
@@ -333,13 +343,13 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 		upperdir string
 		workdir  string
 	)
-	if bundle, err = mktemp(); err != nil {
+	if bundle, err = mktemp("bundle"); err != nil {
 		return nil, nil, err
 	}
-	if upperdir, err = mktemp(); err != nil {
+	if upperdir, err = mktemp("upperdir"); err != nil {
 		return nil, nil, err
 	}
-	if workdir, err = mktemp(); err != nil {
+	if workdir, err = mktemp("workdir"); err != nil {
 		return nil, nil, err
 	}
 	var (
@@ -355,8 +365,11 @@ func optimize(clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, o
 	}
 	defer syscall.Unmount(rootfs, syscall.MNT_FORCE)
 
-	// run workload
-	if err = sampler.Run(bundle, config, clicontext.Int("period"), opts...); err != nil {
+	// run the workload with timeout
+	runCtx, cancel := gocontext.WithTimeout(ctx,
+		time.Duration(clicontext.Int("period"))*time.Second)
+	defer cancel()
+	if err = sampler.Run(runCtx, bundle, config, opts...); err != nil {
 		return nil, nil, errors.Wrap(err, "failed to run the sampler")
 	}
 

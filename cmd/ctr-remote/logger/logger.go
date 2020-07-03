@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/util"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -136,7 +137,7 @@ var _ = (fusefs.NodeReader)((*node)(nil))
 
 func (n *node) Read(ctx context.Context, f fusefs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
 	if _, err := n.r.ReadAt(dest, off); err != nil && err != io.EOF {
-		fmt.Printf("Error: Failed to read %s: %v", n.fullname, err)
+		log.G(ctx).WithError(err).Warnf("failed to read file %q", n.fullname)
 		return nil, syscall.EIO
 	}
 	n.monitor.OnRead(n.fullname, off, int64(len(dest)))
