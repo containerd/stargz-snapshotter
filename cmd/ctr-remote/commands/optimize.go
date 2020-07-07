@@ -23,6 +23,7 @@
 package commands
 
 import (
+	"compress/gzip"
 	gocontext "context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -41,6 +42,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sampler"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sorter"
+	"github.com/containerd/stargz-snapshotter/stargz/verify"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
@@ -206,13 +208,14 @@ func convert(ctx gocontext.Context, clicontext *cli.Context, srcRef, dstRef name
 	if err != nil {
 		return errors.Wrap(err, "failed to get image layers")
 	}
+	addendums := make([]mutate.Addendum, len(layers))
 	if clicontext.Bool("stargz-only") {
 		for i, l := range layers {
 			r, err := l.Uncompressed()
 			if err != nil {
 				return errors.Wrapf(err, "failed to convert layer(%d) to stargz", i)
 			}
-			layers[i] = &layer{r: r}
+			addendums[i] = mutate.Addendum{Layer: &layer{r: r}}
 		}
 	} else {
 		configData, err := srcImg.RawConfigFile()
@@ -224,7 +227,7 @@ func convert(ctx gocontext.Context, clicontext *cli.Context, srcRef, dstRef name
 			return errors.Wrap(err, "failed to parse image config file")
 		}
 		var done func()
-		layers, done, err = optimize(ctx, clicontext, layers, config, runopts...)
+		addendums, done, err = optimize(ctx, clicontext, layers, config, runopts...)
 		if err != nil {
 			return err
 		}
@@ -240,7 +243,7 @@ func convert(ctx gocontext.Context, clicontext *cli.Context, srcRef, dstRef name
 	if err != nil {
 		return err
 	}
-	img, err = mutate.AppendLayers(img, layers...)
+	img, err = mutate.Append(img, addendums...)
 	if err != nil {
 		return err
 	}
@@ -254,7 +257,7 @@ func convert(ctx gocontext.Context, clicontext *cli.Context, srcRef, dstRef name
 }
 
 // The order of the "in" list must be base layer first, top layer last.
-func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (out []regpkg.Layer, done func(), err error) {
+func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer, config imgpkg.Image, opts ...sampler.Option) (out []mutate.Addendum, done func(), err error) {
 	// Setup temporary workspace
 	tmpRoot, err := ioutil.TempDir("", "optimize-work")
 	if err != nil {
@@ -276,7 +279,7 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 	var (
 		eg           errgroup.Group
 		lowerdirs    []string
-		addLayer     = make([](func([]regpkg.Layer) ([]regpkg.Layer, error)), len(in))
+		convertLayer = make([](func() (mutate.Addendum, error)), len(in))
 		layerFiles   []*os.File
 		layerFilesMu sync.Mutex
 	)
@@ -312,8 +315,12 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 			if err != nil {
 				return err
 			}
+			stargzFile, err := ioutil.TempFile("", "stargzdata")
+			if err != nil {
+				return err
+			}
 			layerFilesMu.Lock()
-			layerFiles = append(layerFiles, layerFile)
+			layerFiles = append(layerFiles, layerFile, stargzFile)
 			layerFilesMu.Unlock()
 			if _, err := io.Copy(layerFile, r); err != nil {
 				return err
@@ -322,12 +329,46 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 			if _, err := logger.Mount(mp, layerFile, mon); err != nil {
 				return errors.Wrapf(err, "failed to mount on %q", mp)
 			}
-			addLayer[i] = func(lowers []regpkg.Layer) ([]regpkg.Layer, error) {
+			convertLayer[i] = func() (mutate.Addendum, error) {
+				log.G(ctx).Debugf("converting %v...", dgst)
+				defer log.G(ctx).Infof("converted %v", dgst)
+
+				// Sorting file entry by the accessed order
 				r, err := sorter.Sort(layerFile, mon.DumpLog())
 				if err != nil {
-					return nil, errors.Wrap(err, "failed to sort tar")
+					return mutate.Addendum{}, errors.Wrap(err, "failed to sort tar")
 				}
-				return append(lowers, &layer{r: r}), nil
+
+				// Compress the archive with stargz
+				w := stargz.NewWriter(stargzFile)
+				if err := w.AppendTar(r); err != nil {
+					return mutate.Addendum{}, errors.Wrapf(err,
+						"failed to append to stargz %q", stargzFile.Name())
+				}
+				if err := w.Close(); err != nil {
+					return mutate.Addendum{}, errors.Wrapf(err,
+						"failed to make stargz file %q", stargzFile.Name())
+				}
+				sinfo, err := stargzFile.Stat()
+				if err != nil {
+					return mutate.Addendum{}, err
+				}
+
+				// Add chunks digests to TOC JSON
+				r, jtocDigest, err := verify.NewVerifiableStagz(
+					io.NewSectionReader(stargzFile, 0, sinfo.Size()))
+				if err != nil {
+					return mutate.Addendum{}, err
+				}
+				log.G(ctx).WithField("TOC JSON digest", jtocDigest).
+					Debugf("calculated digest of %v", dgst)
+
+				return mutate.Addendum{
+					Layer: &gzipLayer{r: r},
+					Annotations: map[string]string{
+						verify.TOCJSONDigestAnnotation: jtocDigest,
+					},
+				}, nil
 			}
 			log.G(ctx).Infof("unpacked %v", dgst)
 			return nil
@@ -374,11 +415,29 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 	}
 
 	// get converted layers
-	for _, f := range addLayer {
-		if out, err = f(out); err != nil {
-			return nil, nil, errors.Wrap(err, "failed to get converted layer")
-		}
+	var (
+		adds   = make([]mutate.Addendum, len(convertLayer))
+		addsMu sync.Mutex
+	)
+	for i, f := range convertLayer {
+		i, f := i, f
+		eg.Go(func() error {
+			addendum, err := f()
+			if err != nil {
+				return errors.Wrap(err, "failed to get converted layer")
+			}
+			addsMu.Lock()
+			adds[i] = addendum
+			addsMu.Unlock()
+
+			return nil
+		})
 	}
+	if err := eg.Wait(); err != nil {
+		return nil, nil, err
+	}
+	out = adds
+
 	return
 }
 
@@ -473,4 +532,94 @@ func (l *layer) Compressed() (io.ReadCloser, error) {
 
 func (l *layer) Uncompressed() (io.ReadCloser, error) {
 	return ioutil.NopCloser(l.r), nil
+}
+
+type gzipLayer struct {
+	r    io.Reader
+	diff *hash.Hash // registered after computation completed
+	hash *hash.Hash // registered after computation completed
+	size *int64     // registered after computation completed
+	mu   sync.Mutex
+}
+
+func (l *gzipLayer) Digest() (regpkg.Hash, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.hash == nil {
+		return regpkg.Hash{}, stream.ErrNotComputed
+	}
+	return regpkg.Hash{
+		Algorithm: "sha256",
+		Hex:       hex.EncodeToString((*l.hash).Sum(nil)),
+	}, nil
+}
+
+func (l *gzipLayer) Size() (int64, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.size == nil {
+		return -1, stream.ErrNotComputed
+	}
+	return *l.size, nil
+}
+
+func (l *gzipLayer) DiffID() (regpkg.Hash, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.diff == nil {
+		return regpkg.Hash{}, stream.ErrNotComputed
+	}
+	return regpkg.Hash{
+		Algorithm: "sha256",
+		Hex:       hex.EncodeToString((*l.diff).Sum(nil)),
+	}, nil
+}
+
+func (l *gzipLayer) MediaType() (types.MediaType, error) {
+	return types.DockerLayer, nil
+}
+
+func (l *gzipLayer) Compressed() (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		var (
+			diff = sha256.New()
+			h    = sha256.New()
+			size int64
+		)
+		zr, err := gzip.NewReader(io.TeeReader(
+			l.r,
+			io.MultiWriter(pw, writer(func(b []byte) (int, error) {
+				n, err := h.Write(b)
+				size += int64(n)
+				return n, err
+			})),
+		))
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		defer zr.Close()
+		if _, err := io.Copy(diff, zr); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+
+		// registers all computed information
+		l.mu.Lock()
+		l.diff = &diff
+		l.hash = &h
+		l.size = &size
+		l.mu.Unlock()
+
+		pw.Close()
+	}()
+	return ioutil.NopCloser(pr), nil
+}
+
+func (l *gzipLayer) Uncompressed() (io.ReadCloser, error) {
+	return nil, errors.New("unsupported")
 }
