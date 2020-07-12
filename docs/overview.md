@@ -142,12 +142,12 @@ If an optional field `insecure` is `true`, snapshotter tries to connect to the r
 # use plain HTTP for connecting to the mirror host.
 [[resolver.host."exampleregistry.io".mirrors]]
 host = "mirrorhost.io"
-insecure = "true"
+insecure = true
 
 # Use plain HTTP for connecting to `exampleregistry.io`.
 [[resolver.host."exampleregistry.io".mirrors]]
 host = "exampleregistry.io"
-insecure = "true"
+insecure = true
 ```
 
 The config file can be passed to stargz snapshotter using `containerd-stargz-grpc`'s `--config` option.
