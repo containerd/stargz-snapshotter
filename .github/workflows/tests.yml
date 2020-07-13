@@ -16,14 +16,14 @@ jobs:
     - uses: actions/checkout@v2
     - name: Test all
       run: ./script/util/make.sh test-all -j2
-  check:
+  linter:
     runs-on: ubuntu-18.04
-    name: Check
+    name: Linter
     steps:
     - uses: actions/checkout@v2
       with:
         fetch-depth: '0'
-    - name: Check all
+    - name: Run Linter
       run: ./script/util/make.sh install-check-tools check
   integration:
     runs-on: ubuntu-18.04
@@ -59,3 +59,80 @@ jobs:
     - uses: actions/checkout@v2
     - name: Varidate the runtime through CRI
       run: make test-cri
+
+  #
+  # Project checks
+  # NOTE: Jobs for project checks commonly used in containerd projects
+  #
+
+  project:
+    name: Project Checks
+    runs-on: ubuntu-18.04
+    timeout-minutes: 5
+
+    steps:
+      #
+      # Install Go
+      #
+      - name: Install Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: '1.13.12'
+
+      - name: Set env
+        shell: bash
+        run: |
+          echo "::set-env name=GOPATH::${{ github.workspace }}"
+          echo "::add-path::${{ github.workspace }}/bin"
+
+      #
+      # Checkout repos
+      #
+      - name: Checkout this repo
+        uses: actions/checkout@v2
+        with:
+          path: src/github.com/containerd/stargz-snapshotter
+          fetch-depth: 25
+
+      - name: Checkout project repo
+        uses: actions/checkout@v2
+        with:
+          repository: containerd/project
+          path: src/github.com/containerd/project
+
+      #
+      # Go get dependencies
+      #
+      - name: Install dependencies
+        env:
+          GO111MODULE: off
+        run: |
+          go get -u github.com/vbatts/git-validation
+          go get -u github.com/kunalkushwaha/ltag
+          go get -u github.com/LK4D4/vndr
+
+      #
+      # DCO / File headers / Vendor directory validation
+      #
+      - name: DCO
+        env:
+          GITHUB_COMMIT_URL: ${{ github.event.pull_request.commits_url }}
+          DCO_VERBOSITY: "-q"
+          DCO_RANGE: ""
+        working-directory: src/github.com/containerd/stargz-snapshotter
+        run: |
+          set -x
+          if [ -z "${GITHUB_COMMIT_URL}" ]; then
+          DCO_RANGE=$(jq -r '.after + "..HEAD"' ${GITHUB_EVENT_PATH})
+          else
+          DCO_RANGE=$(curl ${GITHUB_COMMIT_URL} | jq -r '.[0].parents[0].sha +".."+ .[-1].sha')
+          fi
+          ../project/script/validate/dco
+
+      - name: Headers
+        run: ../project/script/validate/fileheader ../project/
+        working-directory: src/github.com/containerd/stargz-snapshotter
+
+      - name: Vendor
+        run: ../project/script/validate/vendor
+        working-directory: src/github.com/containerd/stargz-snapshotter
