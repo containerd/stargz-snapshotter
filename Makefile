@@ -36,18 +36,12 @@ containerd-stargz-grpc: FORCE
 ctr-remote: FORCE
 	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) -v ./cmd/ctr-remote
 
-# TODO: git-validation
 check:
 	@echo "$@"
 	@GO111MODULE=$(GO111MODULE_VALUE) golangci-lint run
-	@$(GOPATH)/src/github.com/containerd/project/script/validate/fileheader $(GOPATH)/src/github.com/containerd/project/
-	@git-validation -q -run DCO
 
 install-check-tools:
 	@curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.19.1
-	@GO111MODULE=off go get -u github.com/vbatts/git-validation
-	@GO111MODULE=off go get -u github.com/kunalkushwaha/ltag
-	@git clone https://github.com/containerd/project $(GOPATH)/src/github.com/containerd/project
 
 install:
 	@echo "$@"
