@@ -22,7 +22,7 @@ require (
 	github.com/google/go-containerregistry v0.0.0-20200425101607-48f605c3b60a
 	github.com/hanwen/go-fuse/v2 v2.0.3
 	github.com/imdario/mergo v0.3.9 // indirect
-	github.com/opencontainers/go-digest v1.0.0-rc1.0.20180430190053-c9281466c8b2 // indirect
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
 	github.com/opencontainers/runc v1.0.0-rc9
 	github.com/opencontainers/runtime-spec v1.0.2-0.20190207185410-29686dbc5559

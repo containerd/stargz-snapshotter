@@ -20,13 +20,14 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
+	"sync"
 
 	"github.com/google/crfs/stargz"
+	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 )
 
@@ -57,7 +58,7 @@ type jtoc struct {
 type TOCEntry struct {
 	stargz.TOCEntry
 
-	// ChunkDigest stores a digest of the chunk. This must be formed
+	// ChunkDigest stores an OCI digest of the chunk. This must be formed
 	// as "sha256:0123abcd...".
 	ChunkDigest string `json:"chunkDigest,omitempty"`
 }
@@ -65,23 +66,23 @@ type TOCEntry struct {
 // NewVerifiableStagz takes stargz archive and returns modified one which contains
 // contents digests in the TOC JSON. This also returns the digest of TOC JSON
 // itself which can be used for verifying the TOC JSON.
-func NewVerifiableStagz(sgz *io.SectionReader) (newSgz io.Reader, jtocDigest string, err error) {
+func NewVerifiableStagz(sgz *io.SectionReader) (newSgz io.Reader, jtocDigest digest.Digest, err error) {
 	// Extract TOC JSON and some related parts
-	toc, tocOffset, footer, err := extractTOCJSON(sgz)
+	toc, err := extractTOCJSON(sgz)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to extract TOC JSON")
 	}
 
 	// Rewrite the original TOC JSON with chunks digests
-	if err := addDigests(toc, sgz); err != nil {
+	if err := addDigests(toc.jtoc, sgz); err != nil {
 		return nil, "", errors.Wrap(err, "failed to digest stargz")
 	}
-	tocJSON, err := json.Marshal(toc)
+	tocJSON, err := json.Marshal(toc.jtoc)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to marshal TOC JSON")
 	}
-	tocHash := sha256.New()
-	if _, err := io.CopyN(tocHash, bytes.NewReader(tocJSON), int64(len(tocJSON))); err != nil {
+	dgstr := digest.Canonical.Digester()
+	if _, err := io.CopyN(dgstr.Hash(), bytes.NewReader(tocJSON), int64(len(tocJSON))); err != nil {
 		return nil, "", errors.Wrap(err, "failed to calculate digest of TOC JSON")
 	}
 	pr, pw := io.Pipe()
@@ -120,59 +121,141 @@ func NewVerifiableStagz(sgz *io.SectionReader) (newSgz io.Reader, jtocDigest str
 	if _, err := sgz.Seek(0, io.SeekStart); err != nil {
 		return nil, "", errors.Wrap(err, "failed to reset the seek position of stargz")
 	}
-	if _, err := footer.Seek(0, io.SeekStart); err != nil {
+	if _, err := toc.footer.Seek(0, io.SeekStart); err != nil {
 		return nil, "", errors.Wrap(err, "failed to reset the seek position of footer")
 	}
 	return io.MultiReader(
-		io.LimitReader(sgz, tocOffset), // Original stargz (before TOC JSON)
-		pr,                             // Rewritten TOC JSON
-		footer,                         // Unmodified footer (because tocOffset is unchanged)
-	), fmt.Sprintf("sha256:%x", tocHash.Sum(nil)), nil
+		io.LimitReader(sgz, toc.offset), // Original stargz (before TOC JSON)
+		pr,                              // Rewritten TOC JSON
+		toc.footer,                      // Unmodified footer (because tocOffset is unchanged)
+	), dgstr.Digest(), nil
+}
+
+// StargzTOC checks that the TOC JSON in the passed stargz blob matches the
+// passed digests and that the TOC JSON contains digests for all chunks
+// contained in the stargz blob. If the verification succceeds, this function
+// returns TOCEntryVerifier which holds all chunk digests in the stargz blob.
+func StargzTOC(sgz *io.SectionReader, tocDigest digest.Digest) (TOCEntryVerifier, error) {
+	toc, err := extractTOCJSON(sgz)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to extract TOC JSON")
+	}
+
+	// Verify the digest of TOC JSON
+	if toc.digest != tocDigest {
+		return nil, fmt.Errorf("invalid TOC JSON %q; want %q", toc.digest, tocDigest)
+	}
+
+	// Collect all chunks digests in this layer
+	digestMap := make(map[int64]digest.Digest) // map from chunk offset to the digest
+	for _, e := range toc.jtoc.Entries {
+		if e.Type == "reg" || e.Type == "chunk" {
+			if e.Type == "reg" && e.Size == 0 {
+				continue // ignores empty file
+			}
+
+			// offset must be unique in stargz blob
+			if _, ok := digestMap[e.Offset]; ok {
+				return nil, fmt.Errorf("offset %d found twice", e.Offset)
+			}
+
+			// all chunk entries must contain digest
+			if e.ChunkDigest == "" {
+				return nil, fmt.Errorf("ChunkDigest of %q(off=%d) not found in TOC JSON",
+					e.Name, e.Offset)
+			}
+
+			d, err := digest.Parse(e.ChunkDigest)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to parse digest %q", e.ChunkDigest)
+			}
+			digestMap[e.Offset] = d
+		}
+	}
+
+	return &verifier{digestMap: digestMap}, nil
+}
+
+// TOCEntryVerifier holds verifiers that are usable for verifying chunks contained
+// in a stargz blob.
+type TOCEntryVerifier interface {
+
+	// Verifier provides a content verifier that can be used for verifying the
+	// contents of the specified TOCEntry.
+	Verifier(ce *stargz.TOCEntry) (digest.Verifier, error)
+}
+
+// verifier is an implementation of TOCEntryVerifier which holds verifiers keyed by
+// offset of the chunk.
+type verifier struct {
+	digestMap   map[int64]digest.Digest
+	digestMapMu sync.Mutex
+}
+
+// Verifier returns a content verifier specified by TOCEntry.
+func (v *verifier) Verifier(ce *stargz.TOCEntry) (digest.Verifier, error) {
+	v.digestMapMu.Lock()
+	defer v.digestMapMu.Unlock()
+	d, ok := v.digestMap[ce.Offset]
+	if !ok {
+		return nil, fmt.Errorf("verifier for offset=%d,size=%d hasn't been registered",
+			ce.Offset, ce.ChunkSize)
+	}
+	return d.Verifier(), nil
+}
+
+// tocInfo is a set of information related to footer and TOC JSON in a stargz
+type tocInfo struct {
+	jtoc   *jtoc         // decoded TOC JSON
+	digest digest.Digest // OCI digest of TOC JSON. formed as "sha256:abcd1234..."
+	offset int64         // offset of TOC JSON in the stargz blob
+	footer io.ReadSeeker // stargz footer
 }
 
 // extractTOCJSON extracts TOC JSON from the given stargz reader, with avoiding
 // scanning the entire blob leveraging its footer. The parsed TOC JSON contains
 // additional fields usable for chunk-level content verification.
-func extractTOCJSON(sgz *io.SectionReader) (toc *jtoc, tocOffset int64, footer io.ReadSeeker, err error) {
+func extractTOCJSON(sgz *io.SectionReader) (toc *tocInfo, err error) {
 	// Parse stargz footer and get the offset of TOC JSON
 	if sgz.Size() < stargz.FooterSize {
-		return nil, 0, nil, errors.New("stargz data is too small")
+		return nil, errors.New("stargz data is too small")
 	}
 	footerReader := io.NewSectionReader(sgz, sgz.Size()-stargz.FooterSize, stargz.FooterSize)
 	zr, err := gzip.NewReader(footerReader)
 	if err != nil {
-		return nil, 0, nil, errors.Wrap(err, "failed to uncompress footer")
+		return nil, errors.Wrap(err, "failed to uncompress footer")
 	}
 	defer zr.Close()
 	if len(zr.Header.Extra) != 22 {
-		return nil, 0, nil, errors.Wrap(err, "invalid extra size; must be 22 bytes")
+		return nil, errors.Wrap(err, "invalid extra size; must be 22 bytes")
 	} else if string(zr.Header.Extra[16:]) != "STARGZ" {
-		return nil, 0, nil, errors.New("invalid footer; extra must contain magic string \"STARGZ\"")
+		return nil, errors.New("invalid footer; extra must contain magic string \"STARGZ\"")
 	}
-	tocOffset, err = strconv.ParseInt(string(zr.Header.Extra[:16]), 16, 64)
+	tocOffset, err := strconv.ParseInt(string(zr.Header.Extra[:16]), 16, 64)
 	if err != nil {
-		return nil, 0, nil, errors.Wrap(err, "invalid footer; failed to get the offset of TOC JSON")
+		return nil, errors.Wrap(err, "invalid footer; failed to get the offset of TOC JSON")
 	} else if tocOffset > sgz.Size() {
-		return nil, 0, nil, fmt.Errorf("invalid footer; offset of TOC JSON is too large (%d > %d)",
+		return nil, fmt.Errorf("invalid footer; offset of TOC JSON is too large (%d > %d)",
 			tocOffset, sgz.Size())
 	}
 
 	// Decode the TOC JSON
 	tocReader := io.NewSectionReader(sgz, tocOffset, sgz.Size()-tocOffset-stargz.FooterSize)
 	if err := zr.Reset(tocReader); err != nil {
-		return nil, 0, nil, errors.Wrap(err, "failed to uncompress TOC JSON targz entry")
+		return nil, errors.Wrap(err, "failed to uncompress TOC JSON targz entry")
 	}
 	tr := tar.NewReader(zr)
 	h, err := tr.Next()
 	if err != nil {
-		return nil, 0, nil, errors.Wrap(err, "failed to get TOC JSON tar entry")
+		return nil, errors.Wrap(err, "failed to get TOC JSON tar entry")
 	} else if h.Name != stargz.TOCTarName {
-		return nil, 0, nil, fmt.Errorf("invalid TOC JSON tar entry name %q; must be %q",
+		return nil, fmt.Errorf("invalid TOC JSON tar entry name %q; must be %q",
 			h.Name, stargz.TOCTarName)
 	}
-	toc = new(jtoc)
-	if err := json.NewDecoder(tr).Decode(&toc); err != nil {
-		return nil, 0, nil, errors.Wrap(err, "failed to decode TOC JSON")
+	dgstr := digest.Canonical.Digester()
+	decodedJTOC := new(jtoc)
+	if err := json.NewDecoder(io.TeeReader(tr, dgstr.Hash())).Decode(&decodedJTOC); err != nil {
+		return nil, errors.Wrap(err, "failed to decode TOC JSON")
 	}
 	if _, err := tr.Next(); err != io.EOF {
 		// We only accept stargz file that its TOC JSON resides at the end of that
@@ -180,10 +263,15 @@ func extractTOCJSON(sgz *io.SectionReader) (toc *jtoc, tocOffset int64, footer i
 		// rewriting TOC JSON (The official stargz lib also puts TOC JSON at the end
 		// of the stargz file at this mement).
 		// TODO: in the future, we should relax this restriction.
-		return nil, 0, nil, errors.New("TOC JSON must reside at the end of targz")
+		return nil, errors.New("TOC JSON must reside at the end of targz")
 	}
 
-	return toc, tocOffset, footerReader, nil
+	return &tocInfo{
+		jtoc:   decodedJTOC,
+		digest: dgstr.Digest(),
+		offset: tocOffset,
+		footer: footerReader,
+	}, nil
 }
 
 // addDigests calculates chunk digests and adds them to the TOC JSON
@@ -217,13 +305,13 @@ func addDigests(toc *jtoc, sgz *io.SectionReader) error {
 						return errors.Wrapf(err, "failed to decomp %q", e.Name)
 					}
 				}
-				digest := sha256.New()
-				if _, err := io.CopyN(digest, zr, size); err != nil {
+				dgstr := digest.Canonical.Digester()
+				if _, err := io.CopyN(dgstr.Hash(), zr, size); err != nil {
 					return errors.Wrapf(err, "failed to read %q; (file size: %d, e.Offset: %d, e.ChunkOffset: %d, chunk size: %d, end offset: %d, size of stargz file: %d)",
 						e.Name, sizeMap[e.Name], e.Offset, e.ChunkOffset, size,
 						e.Offset+size, sgz.Size())
 				}
-				e.ChunkDigest = fmt.Sprintf("sha256:%x", digest.Sum(nil))
+				e.ChunkDigest = dgstr.Digest().String()
 			}
 		}
 	}

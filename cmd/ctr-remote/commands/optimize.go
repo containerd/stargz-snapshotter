@@ -366,7 +366,7 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 				return mutate.Addendum{
 					Layer: &gzipLayer{r: r},
 					Annotations: map[string]string{
-						verify.TOCJSONDigestAnnotation: jtocDigest,
+						verify.TOCJSONDigestAnnotation: jtocDigest.String(),
 					},
 				}, nil
 			}
