@@ -72,11 +72,18 @@ EOF
 if ! ( cd "${CONTEXT}" && \
            docker network create "${REGISTRY_NETWORK}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
-           docker run --rm -i --network "${REGISTRY_NETWORK}" \
+           docker run --privileged --rm -i --network "${REGISTRY_NETWORK}" \
+                  --device /dev/fuse \
+                  --tmpfs "/tmp" \
                   -v "${AUTH_DIR}/certs/domain.crt:/usr/local/share/ca-certificates/rgst.crt:ro" \
                   -v "${DOCKERCONFIG}:/root/.docker/config.json:ro" \
                   -v "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro" \
-                  golang:1.13-buster /bin/bash -c "update-ca-certificates && cd /go/src/github.com/containerd/stargz-snapshotter && PREFIX=/out/ make ctr-remote && /out/ctr-remote images optimize --stargz-only ubuntu:18.04 ${TESTIMAGE}" ) ; then
+                  golang:1.13-buster /bin/bash -c "apt-get update -y && \
+apt-get --no-install-recommends install -y fuse && \
+update-ca-certificates && \
+cd /go/src/github.com/containerd/stargz-snapshotter && \
+PREFIX=/out/ make ctr-remote && \
+/out/ctr-remote images optimize ubuntu:18.04 ${TESTIMAGE}" ) ; then
     echo "Failed to prepare private registry"
     docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
     docker network rm "${REGISTRY_NETWORK}"

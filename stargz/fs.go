@@ -60,12 +60,14 @@ import (
 	"github.com/containerd/stargz-snapshotter/stargz/keychain"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
+	"github.com/containerd/stargz-snapshotter/stargz/verify"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/golang/groupcache/lru"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
@@ -98,6 +100,9 @@ const (
 	// NoPrefetchLandmark is a file entry which indicates that no prefetch should
 	// occur in the stargz file.
 	NoPrefetchLandmark = ".no.prefetch.landmark"
+
+	// TargetSkipVerifyLabel indicates to skip content verification for the layer.
+	TargetSkipVerifyLabel = "containerd.io/snapshot/remote/stargz.skipverify"
 )
 
 type Config struct {
@@ -112,6 +117,7 @@ type Config struct {
 	PrefetchTimeoutSec                int64  `toml:"prefetch_timeout_sec"`
 	NoPrefetch                        bool   `toml:"noprefetch"`
 	Debug                             bool   `toml:"debug"`
+	AllowNoVerification               bool   `toml:"allow_no_verification"`
 }
 
 func NewFilesystem(ctx context.Context, root string, config *Config) (_ snbase.FileSystem, err error) {
@@ -161,6 +167,7 @@ func NewFilesystem(ctx context.Context, root string, config *Config) (_ snbase.F
 		layer:                 make(map[string]*layer),
 		resolveResult:         lru.New(resolveResultEntry),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
+		allowNoVerification:   config.AllowNoVerification,
 	}, nil
 }
 
@@ -178,6 +185,7 @@ type filesystem struct {
 	resolveResult         *lru.Cache
 	resolveResultMu       sync.Mutex
 	backgroundTaskManager *task.BackgroundTaskManager
+	allowNoVerification   bool
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
@@ -189,17 +197,17 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	logCtx := log.G(ctx).WithField("mountpoint", mountpoint)
 
 	// Get basic information of this layer.
-	ref, digest, layers, prefetchSize, err := fs.parseLabels(labels)
+	ref, ldgst, layers, prefetchSize, err := fs.parseLabels(labels)
 	if err != nil {
 		logCtx.WithError(err).Debug("failed to get necessary information from labels")
 		return err
 	}
-	logCtx = logCtx.WithField("ref", ref).WithField("digest", digest)
+	logCtx = logCtx.WithField("ref", ref).WithField("digest", ldgst)
 
 	// Resolve the target layer and the all chained layers
 	var (
 		resolved *resolveResult
-		target   = append([]string{digest}, layers...)
+		target   = append([]string{ldgst}, layers...)
 	)
 	for _, dgst := range target {
 		var (
@@ -218,7 +226,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			rr = fs.resolve(ctx, ref, dgst)
 			fs.resolveResult.Add(key, rr)
 		}
-		if dgst == digest {
+		if dgst == ldgst {
 			resolved = rr
 		}
 		fs.resolveResultMu.Unlock()
@@ -227,14 +235,43 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// Get the resolved layer
 	if resolved == nil {
 		logCtx.Debug("resolve result isn't registered")
-		return fmt.Errorf("resolve result(%q,%q) isn't registered", ref, digest)
+		return fmt.Errorf("resolve result(%q,%q) isn't registered", ref, ldgst)
 	}
 	l, err := resolved.waitAndGet(30 * time.Second) // get layer with timeout
 	if err != nil {
 		logCtx.WithError(err).Debug("failed to resolve layer")
-		return errors.Wrapf(err, "failed to resolve layer(%q,%q)", ref, digest)
+		return errors.Wrapf(err, "failed to resolve layer(%q,%q)", ref, ldgst)
 	}
 	if err := fs.check(ctx, l); err != nil { // check the connectivity
+		return err
+	}
+
+	// Verify this layer using the TOC JSON digest passed through label.
+	if tocDigest, ok := labels[verify.TOCJSONDigestAnnotation]; ok {
+		dgst, err := digest.Parse(tocDigest)
+		if err != nil {
+			logCtx.WithError(err).Debugf("failed to parse passed TOC digest %q (%q,%q)",
+				dgst, ref, ldgst)
+			return errors.Wrapf(err, "invalid TOC digest: %v", tocDigest)
+		}
+		if err := l.verify(dgst); err != nil {
+			logCtx.WithError(err).Debugf("invalid layer (%q,%q)", ref, ldgst)
+			return errors.Wrapf(err, "invalid stargz layer")
+		}
+		logCtx.Debugf("verified (%q,%q)", ref, ldgst)
+	} else if _, ok := labels[TargetSkipVerifyLabel]; ok || fs.allowNoVerification {
+		// If unverified layer is allowed, use it with warning.
+		// This mode is for legacy stargz archives which don't contain digests
+		// necessary for layer verification.
+		l.skipVerify()
+		logCtx.Warningf("No verification is held for layer (%q,%q)", ref, ldgst)
+	} else {
+		// Verification must be done. Don't mount this layer.
+		return fmt.Errorf("digest of TOC JSON must be passed")
+	}
+	layerReader, err := l.reader()
+	if err != nil {
+		logCtx.WithError(err).Warningf("failed to get reader for layer (%q,%q)", ref, ldgst)
 		return err
 	}
 
@@ -296,7 +333,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			}, 120*time.Second)
 			return
 		}), 0, l.blob.Size())
-		if err := l.reader.CacheTarGzWithReader(br, cache.Direct()); err != nil {
+		if err := layerReader.CacheTarGzWithReader(br, cache.Direct()); err != nil {
 			logCtx.WithError(err).Debug("failed to fetch whole layer")
 			return
 		}
@@ -308,9 +345,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	timeSec := time.Second
 	rawFS := fusefs.NewNodeFS(&node{
 		fs:    fs,
-		layer: l.reader,
+		layer: layerReader,
 		e:     l.root,
-		s:     newState(digest, l.blob),
+		s:     newState(ldgst, l.blob),
 		root:  mountpoint,
 	}, &fusefs.Options{
 		AttrTimeout:     &timeSec,
@@ -352,12 +389,12 @@ func (fs *filesystem) resolve(ctx context.Context, ref, digest string) *resolveR
 			defer fs.backgroundTaskManager.DonePrioritizedTask()
 			return blob.ReadAt(p, offset)
 		}), 0, blob.Size())
-		gr, root, err := reader.NewReader(sr, fs.fsCache)
+		vr, root, err := reader.NewReader(sr, fs.fsCache)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to read layer")
 		}
 
-		return newLayer(blob, gr, root, fs.prefetchTimeout), nil
+		return newLayer(blob, vr, root, fs.prefetchTimeout), nil
 	})
 }
 
@@ -531,22 +568,47 @@ func (rr *resolveResult) isInProgress() bool {
 	return rr.progress.isInProgress()
 }
 
-func newLayer(blob remote.Blob, r reader.Reader, root *stargz.TOCEntry, prefetchTimeout time.Duration) *layer {
+func newLayer(blob remote.Blob, vr reader.VerifiableReader, root *stargz.TOCEntry, prefetchTimeout time.Duration) *layer {
 	return &layer{
-		blob:            blob,
-		reader:          r,
-		root:            root,
-		prefetchWaiter:  newWaiter(),
-		prefetchTimeout: prefetchTimeout,
+		blob:             blob,
+		verifiableReader: vr,
+		root:             root,
+		prefetchWaiter:   newWaiter(),
+		prefetchTimeout:  prefetchTimeout,
 	}
 }
 
 type layer struct {
-	blob            remote.Blob
-	reader          reader.Reader
-	root            *stargz.TOCEntry
-	prefetchWaiter  *waiter
-	prefetchTimeout time.Duration
+	blob             remote.Blob
+	verifiableReader reader.VerifiableReader
+	root             *stargz.TOCEntry
+	prefetchWaiter   *waiter
+	prefetchTimeout  time.Duration
+	verifier         verify.TOCEntryVerifier
+}
+
+func (l *layer) reader() (reader.Reader, error) {
+	if l.verifier == nil {
+		return nil, fmt.Errorf("layer hasn't been verified yet")
+	}
+	return l.verifiableReader(l.verifier), nil
+}
+
+func (l *layer) skipVerify() {
+	l.verifier = nopTOCEntryVerifier{}
+}
+
+func (l *layer) verify(tocDigest digest.Digest) error {
+	v, err := verify.StargzTOC(io.NewSectionReader(
+		readerAtFunc(func(p []byte, offset int64) (n int, err error) {
+			return l.blob.ReadAt(p, offset)
+		}), 0, l.blob.Size()), tocDigest)
+	if err != nil {
+		return err
+	}
+
+	l.verifier = v
+	return nil
 }
 
 func (l *layer) doPrefetch() {
@@ -558,10 +620,14 @@ func (l *layer) donePrefetch() {
 }
 
 func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
-	if _, ok := l.reader.Lookup(NoPrefetchLandmark); ok {
+	lr, err := l.reader()
+	if err != nil {
+		return err
+	}
+	if _, ok := lr.Lookup(NoPrefetchLandmark); ok {
 		// do not prefetch this layer
 		return nil
-	} else if e, ok := l.reader.Lookup(PrefetchLandmark); ok {
+	} else if e, ok := lr.Lookup(PrefetchLandmark); ok {
 		// override the prefetch size with optimized value
 		prefetchSize = e.Offset
 	} else if prefetchSize > l.blob.Size() {
@@ -575,7 +641,7 @@ func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
 	pr := io.NewSectionReader(readerAtFunc(func(p []byte, off int64) (int, error) {
 		return l.blob.ReadAt(p, off, opts...)
 	}), 0, prefetchSize)
-	err := l.reader.CacheTarGzWithReader(pr)
+	err = lr.CacheTarGzWithReader(pr)
 	if err != nil && errors.Cause(err) != io.EOF && errors.Cause(err) != io.ErrUnexpectedEOF {
 		return errors.Wrap(err, "failed to cache prefetched layer")
 	}
@@ -585,6 +651,22 @@ func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
 
 func (l *layer) waitForPrefetchCompletion() error {
 	return l.prefetchWaiter.wait(l.prefetchTimeout)
+}
+
+type nopTOCEntryVerifier struct{}
+
+func (nev nopTOCEntryVerifier) Verifier(ce *stargz.TOCEntry) (digest.Verifier, error) {
+	return nopVerifier{}, nil
+}
+
+type nopVerifier struct{}
+
+func (nv nopVerifier) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+func (nv nopVerifier) Verified() bool {
+	return true
 }
 
 func newWaiter() *waiter {

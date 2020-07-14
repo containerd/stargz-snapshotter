@@ -44,10 +44,12 @@ import (
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
+	"github.com/containerd/stargz-snapshotter/stargz/verify"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	digest "github.com/opencontainers/go-digest"
 	"golang.org/x/sys/unix"
 )
 
@@ -61,9 +63,11 @@ const (
 
 func TestCheck(t *testing.T) {
 	bb := &breakBlob{}
+	l := newLayer(bb, nopVerifiableReader, nil, time.Second)
+	l.skipVerify()
 	fs := &filesystem{
 		layer: map[string]*layer{
-			"test": newLayer(bb, nopreader{}, nil, time.Second),
+			"test": l,
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
 	}
@@ -76,6 +80,10 @@ func TestCheck(t *testing.T) {
 	if err := fs.Check(context.TODO(), "test"); err == nil {
 		t.Errorf("connection succeeded; wanted to fail")
 	}
+}
+
+func nopVerifiableReader(ev verify.TOCEntryVerifier) reader.Reader {
+	return nopreader{}
 }
 
 type nopreader struct{}
@@ -179,9 +187,8 @@ func TestNodeRead(t *testing.T) {
 
 func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 	testName := "test"
-	r, err := stargz.Open(buildStargz(t, []tarent{
-		regfile(testName, string(contents)),
-	}, chunkSizeInfo(chunkSize)))
+	sgz, _ := buildStargz(t, []tarent{regfile(testName, string(contents))}, chunkSizeInfo(chunkSize))
+	r, err := stargz.Open(sgz)
 	if err != nil {
 		t.Fatal("failed to make stargz")
 	}
@@ -329,7 +336,8 @@ func TestExistence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, err := stargz.Open(buildStargz(t, tt.in))
+			sgz, _ := buildStargz(t, tt.in)
+			r, err := stargz.Open(sgz)
 			if err != nil {
 				t.Fatalf("stargz.Open: %v", err)
 			}
@@ -376,7 +384,7 @@ func (db *dummyBlob) Cache(offset int64, size int64, option ...remote.Option) er
 
 type chunkSizeInfo int
 
-func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) *io.SectionReader {
+func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionReader, digest.Digest) {
 	var chunkSize chunkSizeInfo
 	for _, opt := range opts {
 		if v, ok := opt.(chunkSizeInfo); ok {
@@ -420,7 +428,20 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) *io.SectionRe
 		t.Fatalf("failed to close stargz writer: %q", err)
 	}
 	b := stargzBuf.Bytes()
-	return io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b)))
+
+	sgz, dgst, err := verify.NewVerifiableStagz(io.NewSectionReader(
+		bytes.NewReader(b), 0, int64(len(b))))
+	if err != nil {
+		t.Fatalf("failed to build verifiable stargz: %v", err)
+	}
+
+	vsb := new(bytes.Buffer)
+	if _, err := io.Copy(vsb, sgz); err != nil {
+		t.Fatalf("failed to read verifiable stargz: %v", err)
+	}
+	vsbb := vsb.Bytes()
+
+	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), dgst
 }
 
 type tarent struct {
@@ -818,13 +839,17 @@ func TestPrefetch(t *testing.T) {
 	prefetchLandmarkFile := regfile(PrefetchLandmark, "test")
 	noPrefetchLandmarkFile := regfile(NoPrefetchLandmark, "test")
 	defaultPrefetchSize := int64(10000)
-	landmarkPosition := func(l *layer) int64 {
-		if e, ok := l.reader.Lookup(PrefetchLandmark); ok {
+	landmarkPosition := func(t *testing.T, l *layer) int64 {
+		lr, err := l.reader()
+		if err != nil {
+			t.Fatalf("failed to get reader from layer: %v", err)
+		}
+		if e, ok := lr.Lookup(PrefetchLandmark); ok {
 			return e.Offset
 		}
 		return defaultPrefetchSize
 	}
-	defaultPrefetchPosition := func(l *layer) int64 {
+	defaultPrefetchPosition := func(t *testing.T, l *layer) int64 {
 		return l.blob.Size()
 	}
 	tests := []struct {
@@ -832,7 +857,7 @@ func TestPrefetch(t *testing.T) {
 		in           []tarent
 		wantNum      int      // number of chunks wanted in the cache
 		wants        []string // filenames to compare
-		prefetchSize func(*layer) int64
+		prefetchSize func(*testing.T, *layer) int64
 	}{
 		{
 			name: "default_prefetch",
@@ -879,17 +904,21 @@ func TestPrefetch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sr := buildStargz(t, tt.in, chunkSizeInfo(sampleChunkSize))
+			sr, dgst := buildStargz(t, tt.in, chunkSizeInfo(sampleChunkSize))
 			blob := newBlob(sr)
 			cache := &testCache{membuf: map[string]string{}, t: t}
-			gr, _, err := reader.NewReader(sr, cache)
+			vr, _, err := reader.NewReader(sr, cache)
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
-			l := newLayer(blob, gr, nil, time.Second)
+			l := newLayer(blob, vr, nil, time.Second)
+			if err := l.verify(dgst); err != nil {
+				t.Errorf("failed to verify reader: %v", err)
+				return
+			}
 			prefetchSize := int64(0)
 			if tt.prefetchSize != nil {
-				prefetchSize = tt.prefetchSize(l)
+				prefetchSize = tt.prefetchSize(t, l)
 			}
 			if err := l.prefetch(defaultPrefetchSize); err != nil {
 				t.Errorf("failed to prefetch: %v", err)
@@ -908,12 +937,16 @@ func TestPrefetch(t *testing.T) {
 				return
 			}
 
+			lr, err := l.reader()
+			if err != nil {
+				t.Fatalf("failed to get reader from layer: %v", err)
+			}
 			for _, file := range tt.wants {
-				e, ok := gr.Lookup(file)
+				e, ok := lr.Lookup(file)
 				if !ok {
 					t.Fatalf("failed to lookup %q", file)
 				}
-				wantFile, err := gr.OpenFile(file)
+				wantFile, err := lr.OpenFile(file)
 				if err != nil {
 					t.Fatalf("failed to open file %q", file)
 				}
