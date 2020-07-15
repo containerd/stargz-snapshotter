@@ -99,7 +99,7 @@ if ! ( cd "${CONTEXT}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} \
                           "${BENCHMARKING_NODE}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
-           docker exec -i "${BENCHMARKING_CONTAINER}" script/benchmark/hello-bench/run.sh \
+           docker exec -e BENCHMARK_SAMPLES_NUM -i "${BENCHMARKING_CONTAINER}" script/benchmark/hello-bench/run.sh \
                   "${BENCHMARK_USER}" ${BENCHMARK_TARGETS} \
                | tee "${BENCHMARKING_LOG}" ) ; then
     FAIL=true

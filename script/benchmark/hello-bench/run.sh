@@ -43,6 +43,7 @@ if [ $# -lt 1 ] ; then
 fi
 TARGET_REPOUSER="${1}"
 TARGET_IMAGES=${@:2}
+NUM_OF_SAMPLES="${BENCHMARK_SAMPLES_NUM:-1}"
 
 TMP_LOG_FILE=$(mktemp)
 function cleanup {
@@ -61,13 +62,12 @@ function set_noprefetch {
     sed -i 's/noprefetch = .*/noprefetch = '"${NOPREFETCH}"'/g' "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml"
 }
 
-NUM_OF_SUMPLES=1
 function measure {
     local NAME="${1}"
     local OPTION="${2}"
     local USER="${3}"
     output "\"${NAME}\": ["
-    "${MEASURING_SCRIPT}" ${OPTION} --user=${USER} --op=run --experiments=${NUM_OF_SUMPLES} ${@:4}
+    "${MEASURING_SCRIPT}" ${OPTION} --user=${USER} --op=run --experiments=${NUM_OF_SAMPLES} ${@:4}
     output "],"
 }
 
