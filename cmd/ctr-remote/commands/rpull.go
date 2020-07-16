@@ -25,13 +25,16 @@ import (
 	"github.com/containerd/containerd/cmd/ctr/commands/content"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
-	stargz "github.com/containerd/stargz-snapshotter/stargz/handler"
+	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/stargz-snapshotter/stargz"
+	"github.com/containerd/stargz-snapshotter/stargz/handler"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli"
 )
 
 const (
 	remoteSnapshotterName = "stargz"
+	skipContentVerifyOpt  = "skip-content-verify"
 )
 
 var RpullCommand = cli.Command{
@@ -43,10 +46,16 @@ var RpullCommand = cli.Command{
 After pulling an image, it should be ready to use the same reference in a run
 command. 
 `,
-	Flags: append(commands.RegistryFlags, commands.LabelFlag),
+	Flags: append(commands.RegistryFlags, commands.LabelFlag,
+		cli.BoolFlag{
+			Name:  skipContentVerifyOpt,
+			Usage: "Skip content verification for layers contained in this image.",
+		},
+	),
 	Action: func(context *cli.Context) error {
 		var (
-			ref = context.Args().First()
+			ref    = context.Args().First()
+			config = &rPullConfig{}
 		)
 		if ref == "" {
 			return fmt.Errorf("please provide an image reference to pull")
@@ -64,9 +73,14 @@ command.
 		}
 		defer done(ctx)
 
-		config, err := content.NewFetchConfig(ctx, context)
+		fc, err := content.NewFetchConfig(ctx, context)
 		if err != nil {
 			return err
+		}
+		config.FetchConfig = fc
+
+		if context.Bool(skipContentVerifyOpt) {
+			config.skipVerify = true
 		}
 
 		if err := pull(ctx, client, ref, config); err != nil {
@@ -76,7 +90,12 @@ command.
 	},
 }
 
-func pull(ctx context.Context, client *containerd.Client, ref string, config *content.FetchConfig) error {
+type rPullConfig struct {
+	*content.FetchConfig
+	skipVerify bool
+}
+
+func pull(ctx context.Context, client *containerd.Client, ref string, config *rPullConfig) error {
 	pCtx := ctx
 	h := images.HandlerFunc(func(ctx context.Context, desc ocispec.Descriptor) ([]ocispec.Descriptor, error) {
 		if desc.MediaType != images.MediaTypeDockerSchema1Manifest {
@@ -84,6 +103,14 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *co
 		}
 		return nil, nil
 	})
+
+	var snOpts []snapshots.Opt
+	if config.skipVerify {
+		log.G(pCtx).WithField("image", ref).Warn("content verification disabled")
+		snOpts = append(snOpts, snapshots.WithLabels(map[string]string{
+			stargz.TargetSkipVerifyLabel: "true",
+		}))
+	}
 
 	log.G(pCtx).WithField("image", ref).Debug("fetching")
 	labels := commands.LabelArgs(config.Labels)
@@ -93,8 +120,8 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *co
 		containerd.WithImageHandler(h),
 		containerd.WithSchema1Conversion,
 		containerd.WithPullUnpack,
-		containerd.WithPullSnapshotter(remoteSnapshotterName),
-		containerd.WithImageHandlerWrapper(stargz.AppendInfoHandlerWrapper(ref, 10*1024*1024)),
+		containerd.WithPullSnapshotter(remoteSnapshotterName, snOpts...),
+		containerd.WithImageHandlerWrapper(handler.AppendInfoHandlerWrapper(ref, 10*1024*1024)),
 	}...); err != nil {
 		return err
 	}

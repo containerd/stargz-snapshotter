@@ -32,7 +32,9 @@ import (
 	"testing"
 
 	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/containerd/stargz-snapshotter/stargz/verify"
 	"github.com/google/crfs/stargz"
+	digest "github.com/opencontainers/go-digest"
 )
 
 const (
@@ -45,7 +47,7 @@ const (
 // Tests Reader for failure cases.
 func TestFailReader(t *testing.T) {
 	testFileName := "test"
-	stargzFile := buildStargz(t, []tarent{
+	stargzFile, _ := buildStargz(t, []tarent{
 		regfile(testFileName, sampleData1),
 	}, chunkSizeInfo(sampleChunkSize))
 	br := &breakReaderAt{
@@ -53,7 +55,8 @@ func TestFailReader(t *testing.T) {
 		success:  true,
 	}
 	bsr := io.NewSectionReader(br, 0, stargzFile.Size())
-	gr, _, err := newReader(bsr, &nopCache{})
+	bev := &testTOCEntryVerifier{true}
+	gr, _, err := newReader(bsr, &nopCache{}, bev)
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
 	}
@@ -69,21 +72,40 @@ func TestFailReader(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to open file but wanted to succeed: %v", err)
 	}
-	p := make([]byte, len(sampleData1))
 
-	// tests for reading file
-	br.success = true
-	n, err := fr.ReadAt(p, 0)
-	if err != nil || n != len(sampleData1) || !bytes.Equal([]byte(sampleData1), p) {
-		t.Errorf("failed to read data but wanted to succeed: %v", err)
-		return
-	}
+	for _, rs := range []bool{true, false} {
+		for _, vs := range []bool{true, false} {
+			br.success = rs
+			bev.success = vs
 
-	br.success = false
-	_, err = fr.ReadAt(p, 0)
-	if err == nil {
-		t.Errorf("succeeded to read data but wanted to fail")
-		return
+			// tests for reading file
+			p := make([]byte, len(sampleData1))
+			n, err := fr.ReadAt(p, 0)
+			if rs && vs {
+				if err != nil || n != len(sampleData1) || !bytes.Equal([]byte(sampleData1), p) {
+					t.Errorf("failed to read data but wanted to succeed: %v", err)
+					return
+				}
+			} else {
+				if err == nil {
+					t.Errorf("succeeded to read data but wanted to fail (reader:%v,verify:%v)", rs, vs)
+					return
+				}
+			}
+
+			// tests for caching reader
+			err = gr.CacheTarGzWithReader(bsr)
+			if rs && vs {
+				if err != nil {
+					t.Errorf("failed to cache reader but wanted to succeed")
+				}
+			} else {
+				if err == nil {
+					t.Errorf("succeeded to cache reader but wanted to fail (reader:%v,verify:%v)", rs, vs)
+				}
+			}
+
+		}
 	}
 }
 
@@ -97,6 +119,26 @@ func (br *breakReaderAt) ReadAt(p []byte, off int64) (int, error) {
 		return br.ReaderAt.ReadAt(p, off)
 	}
 	return 0, fmt.Errorf("failed")
+}
+
+type testTOCEntryVerifier struct {
+	success bool
+}
+
+func (bev *testTOCEntryVerifier) Verifier(ce *stargz.TOCEntry) (digest.Verifier, error) {
+	return &testVerifier{bev.success}, nil
+}
+
+type testVerifier struct {
+	success bool
+}
+
+func (bv *testVerifier) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+func (bv *testVerifier) Verified() bool {
+	return bv.success
 }
 
 type nopCache struct{}
@@ -261,10 +303,16 @@ func (er *exceptSectionReader) ReadAt(p []byte, offset int64) (int, error) {
 
 func makeFile(t *testing.T, contents []byte, chunkSize int64) *file {
 	testName := "test"
-	sr := buildStargz(t, []tarent{
+	sr, dgst := buildStargz(t, []tarent{
 		regfile(testName, string(contents)),
 	}, chunkSizeInfo(chunkSize))
-	r, _, err := newReader(sr, &testCache{membuf: map[string]string{}, t: t})
+
+	ev, err := verify.StargzTOC(sr, dgst)
+	if err != nil {
+		t.Fatalf("failed to verify stargz: %v", err)
+	}
+
+	r, _, err := newReader(sr, &testCache{membuf: map[string]string{}, t: t}, ev)
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
 	}
@@ -301,7 +349,7 @@ func regfile(name string, contents string) tarent {
 
 type chunkSizeInfo int
 
-func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) *io.SectionReader {
+func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionReader, digest.Digest) {
 	var chunkSize chunkSizeInfo
 	for _, opt := range opts {
 		if v, ok := opt.(chunkSizeInfo); ok {
@@ -345,14 +393,27 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) *io.SectionRe
 		t.Fatalf("failed to close stargz writer: %q", err)
 	}
 	b := stargzBuf.Bytes()
-	return io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b)))
+
+	sgz, dgst, err := verify.NewVerifiableStagz(io.NewSectionReader(
+		bytes.NewReader(b), 0, int64(len(b))))
+	if err != nil {
+		t.Fatalf("failed to build verifiable stargz: %v", err)
+	}
+
+	vsb := new(bytes.Buffer)
+	if _, err := io.Copy(vsb, sgz); err != nil {
+		t.Fatalf("failed to read verifiable stargz: %v", err)
+	}
+	vsbb := vsb.Bytes()
+
+	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), dgst
 }
 
-func newReader(sr *io.SectionReader, cache cache.BlobCache) (*reader, *stargz.TOCEntry, error) {
+func newReader(sr *io.SectionReader, cache cache.BlobCache, ev verify.TOCEntryVerifier) (*reader, *stargz.TOCEntry, error) {
 	var r *reader
-	gr, root, err := NewReader(sr, cache)
-	if gr != nil {
-		r = gr.(*reader)
+	vr, root, err := NewReader(sr, cache)
+	if vr != nil {
+		r = vr(ev).(*reader)
 	}
 	return r, root, err
 }

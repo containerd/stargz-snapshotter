@@ -108,9 +108,9 @@ retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 echo "Preparing images..."
 crane copy ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
 crane copy alpine:3.10.2 "${REGISTRY_HOST}:5000/alpine:3.10.2"
-ctr-remote image optimize --stargz-only "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
-ctr-remote image optimize --stargz-only "${REGISTRY_HOST}:5000/alpine:3.10.2" "${REGISTRY_HOST}:5000/alpine:stargz"
-ctr-remote image optimize --stargz-only --plain-http "${REGISTRY_HOST}:5000/alpine:3.10.2" "http://${REGISTRY_ALT_HOST}:5000/alpine:stargz"
+ctr-remote image optimize "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
+ctr-remote image optimize "${REGISTRY_HOST}:5000/alpine:3.10.2" "${REGISTRY_HOST}:5000/alpine:stargz"
+ctr-remote image optimize --plain-http "${REGISTRY_HOST}:5000/alpine:3.10.2" "http://${REGISTRY_ALT_HOST}:5000/alpine:stargz"
 
 ############
 # Tests for stargz snapshotter

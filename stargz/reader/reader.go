@@ -34,6 +34,7 @@ import (
 	"sync"
 
 	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/containerd/stargz-snapshotter/stargz/verify"
 	"github.com/google/crfs/stargz"
 	"github.com/pkg/errors"
 )
@@ -44,7 +45,13 @@ type Reader interface {
 	CacheTarGzWithReader(r io.Reader, opts ...cache.Option) error
 }
 
-func NewReader(sr *io.SectionReader, cache cache.BlobCache) (Reader, *stargz.TOCEntry, error) {
+// VerifiableReader is a function that produces a Reader with a given verifier.
+type VerifiableReader func(verify.TOCEntryVerifier) Reader
+
+// NewReader creates a Reader based on the given stargz blob and cache implementation.
+// It returns VerifiableReader so the caller must provide a verify.TOCEntryVerifier
+// to use for verifying file or chunk contained in this stargz blob.
+func NewReader(sr *io.SectionReader, cache cache.BlobCache) (VerifiableReader, *stargz.TOCEntry, error) {
 	r, err := stargz.Open(sr)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to parse stargz")
@@ -55,7 +62,7 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache) (Reader, *stargz.TOC
 		return nil, nil, fmt.Errorf("failed to get a TOCEntry of the root")
 	}
 
-	return &reader{
+	vr := &reader{
 		r:     r,
 		sr:    sr,
 		cache: cache,
@@ -64,14 +71,20 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache) (Reader, *stargz.TOC
 				return new(bytes.Buffer)
 			},
 		},
+	}
+
+	return func(verifier verify.TOCEntryVerifier) Reader {
+		vr.verifier = verifier
+		return vr
 	}, root, nil
 }
 
 type reader struct {
-	r       *stargz.Reader
-	sr      *io.SectionReader
-	cache   cache.BlobCache
-	bufPool sync.Pool
+	r        *stargz.Reader
+	sr       *io.SectionReader
+	cache    cache.BlobCache
+	bufPool  sync.Pool
+	verifier verify.TOCEntryVerifier
 }
 
 func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
@@ -139,7 +152,12 @@ func (gr *reader) CacheTarGzWithReader(r io.Reader, opts ...cache.Option) error 
 				b := gr.bufPool.Get().(*bytes.Buffer)
 				b.Reset()
 				b.Grow(int(ce.ChunkSize))
-				if _, err := io.CopyN(b, tr, ce.ChunkSize); err != nil {
+				v, err := gr.verifier.Verifier(ce)
+				if err != nil {
+					return errors.Wrapf(err, "verifier not found %q(off:%d,size:%d)",
+						h.Name, ce.ChunkOffset, ce.ChunkSize)
+				}
+				if _, err := io.CopyN(b, io.TeeReader(tr, v), ce.ChunkSize); err != nil {
 					gr.bufPool.Put(b)
 					return errors.Wrapf(err,
 						"failed to read file payload of %q (offset:%d,size:%d)",
@@ -149,6 +167,11 @@ func (gr *reader) CacheTarGzWithReader(r io.Reader, opts ...cache.Option) error 
 					gr.bufPool.Put(b)
 					return fmt.Errorf("unexpected copied data size %d; want %d",
 						b.Len(), ce.ChunkSize)
+				}
+				if !v.Verified() {
+					gr.bufPool.Put(b)
+					return fmt.Errorf("invalid chunk %q (offset:%d,size:%d)",
+						h.Name, ce.ChunkOffset, ce.ChunkSize)
 				}
 				gr.cache.Add(id, b.Bytes()[:ce.ChunkSize], opts...)
 				gr.bufPool.Put(b)
@@ -211,6 +234,13 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 			if err != nil && err != io.EOF {
 				return 0, errors.Wrap(err, "failed to read data")
 			}
+
+			// Verify this chunk
+			if err := sf.verify(ip, ce); err != nil {
+				return 0, errors.Wrap(err, "invalid chunk")
+			}
+
+			// Cache this chunk
 			sf.cache.Add(id, ip)
 			nr += n
 			continue
@@ -225,6 +255,14 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 			sf.gr.bufPool.Put(b)
 			return 0, errors.Wrap(err, "failed to read data")
 		}
+
+		// Verify this chunk
+		if err := sf.verify(ip, ce); err != nil {
+			sf.gr.bufPool.Put(b)
+			return 0, errors.Wrap(err, "invalid chunk")
+		}
+
+		// Cache this chunk
 		sf.cache.Add(id, ip)
 		n = copy(p[nr:], ip[lowerDiscard:ce.ChunkSize-upperDiscard])
 		sf.gr.bufPool.Put(b)
@@ -235,6 +273,24 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 	}
 
 	return nr, nil
+}
+
+func (sf *file) verify(p []byte, ce *stargz.TOCEntry) error {
+	v, err := sf.gr.verifier.Verifier(ce)
+	if err != nil {
+		return errors.Wrapf(err, "verifier not found %q (offset:%d,size:%d)",
+			ce.Name, ce.ChunkOffset, ce.ChunkSize)
+	}
+	if _, err := io.Copy(v, bytes.NewReader(p)); err != nil {
+		return errors.Wrapf(err, "failed to verify %q (offset:%d,size:%d)",
+			ce.Name, ce.ChunkOffset, ce.ChunkSize)
+	}
+	if !v.Verified() {
+		return fmt.Errorf("invalid chunk %q (offset:%d,size:%d)",
+			ce.Name, ce.ChunkOffset, ce.ChunkSize)
+	}
+
+	return nil
 }
 
 func genID(digest string, offset, size int64) string {
