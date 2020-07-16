@@ -16,6 +16,11 @@ jobs:
     - uses: actions/checkout@v2
     - name: Prepare output directory
       run: mkdir "${BENCHMARK_RESULT_DIR}"
+    - name: Get instance information
+      run: |
+          curl -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2019-11-01" | \
+          jq '{ location : .compute.location, vmSize : .compute.vmSize }' | \
+          tee ${{ env.BENCHMARK_RESULT_DIR }}/instance.json
     - name: Run benchmark
       run: make benchmark
     - uses: actions/upload-artifact@v1
