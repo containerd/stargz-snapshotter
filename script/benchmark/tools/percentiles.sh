@@ -40,6 +40,11 @@ if [ ${#IMAGES[@]} -eq 0 ] ; then
     IMAGES=( $(cat "${JSON}" | jq -r '[ .[] | select(.mode=="'${MODES[0]}'").repo ] | unique[]') )
 fi
 
+GRANULARITY="${BENCHMARK_PERCENTILES_GRANULARITY}"
+if [ "${GRANULARITY}" == "" ] ; then
+    GRANULARITY="0.1"
+fi
+
 # Ensure we use the exact same number of samples among benchmarks
 MINSAMPLES=
 for IMGNAME in "${IMAGES[@]}" ; do
@@ -52,49 +57,47 @@ for IMGNAME in "${IMAGES[@]}" ; do
     done
 done
 
-PLTFILE_ALL="${DATADIR}result.plt"
-GRAPHFILE_ALL="${DATADIR}result.png"
+function template {
+    local GRAPHFILE="${1}"
+    local IMGNAME="${2}"
+    local MODE="${3}"
+    local OPERATION="${4}"
+    local SAMPLES="${5}"
 
-cat <<EOF > "${PLTFILE_ALL}"
-set output '${GRAPHFILE_ALL}'
-set title "Time to take for starting up containers(${PERCENTILE} pctl., ${MINSAMPLES} samples)"
-set terminal png size 1000, 750
-set style data histogram
-set style histogram rowstack gap 1
+    cat <<EOF
+set output '${GRAPHFILE}'
+set title "${OPERATION} of ${IMGNAME}/${MODE} (${SAMPLES}samples)"
+set terminal png size 500, 375
+set boxwidth 0.5 relative
 set style fill solid 1.0 border -1
-set key autotitle columnheader
-set xtics rotate by -45
+set xlabel 'percentile'
 set ylabel 'time[sec]'
-set lmargin 10
-set rmargin 5
-set tmargin 5
-set bmargin 5
-plot \\
 EOF
+}
 
-NOTITLE=
-INDEX=1
+RAWDATADIR="${DATADIR}raw/"
+PLTDATADIR="${DATADIR}plt/"
+IMGDATADIR="${DATADIR}png/"
+CSVDATADIR="${DATADIR}csv/"
+mkdir "${RAWDATADIR}" "${PLTDATADIR}" "${IMGDATADIR}" "${CSVDATADIR}"
 for IMGNAME in "${IMAGES[@]}" ; do
-    echo "[${INDEX}]Processing: ${IMGNAME}"
+    echo "Processing: ${IMGNAME}"
     IMAGE=$(echo "${IMGNAME}" | sed 's|[/:]|-|g')
-    DATAFILE="${DATADIR}${IMAGE}.dat"
-    SUFFIX=', \'
-    if [ ${INDEX} -eq ${#IMAGES[@]} ] ; then
-        SUFFIX=''
-    fi
-    echo "mode pull create run" > "${DATAFILE}"
+    CSVFILE="${CSVDATADIR}result-${IMAGE}.csv"
+    echo "image,mode,operation,percentile,time" > "${CSVFILE}"
     for MODE in "${MODES[@]}"; do
-        PULLTIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_pull")
-        CREATETIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_create")
-        RUNTIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_run")
-
-        echo "${MODE} ${PULLTIME} ${CREATETIME} ${RUNTIME}" >> "${DATAFILE}"
+        for OPERATION in "pull" "create" "run" ; do
+            DATAFILE="${RAWDATADIR}${IMAGE}-${MODE}-${OPERATION}.dat"
+            PLTFILE="${PLTDATADIR}result-${IMAGE}-${MODE}-${OPERATION}.plt"
+            template "${IMGDATADIR}result-${IMAGE}-${MODE}-${OPERATION}.png" \
+                     "${IMGNAME}" "${MODE}" "${OPERATION}" "${MINSAMPLES}" > "${PLTFILE}"
+            for PCTL in $(seq 0 "${GRANULARITY}" 100) ; do
+                TIME=$(PERCENTILE=${PCTL} percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_${OPERATION}")
+                echo "${PCTL} ${TIME}" >> "${DATAFILE}"
+                echo "${IMGNAME},${MODE},${OPERATION},${PCTL},${TIME}" >> "${CSVFILE}"
+            done
+            echo 'plot "'"${DATAFILE}"'" using 0:2:xtic(1) with boxes lw 1 lc rgb "black" notitle' >> "${PLTFILE}"
+            gnuplot "${PLTFILE}"
+        done
     done
-
-    echo 'newhistogram "'"${IMAGE}"'", "'"${DATAFILE}"'" u 2:xtic(1) fs pattern 1 lt -1 '"${NOTITLE}"', "" u 3 fs pattern 2 lt -1 '"${NOTITLE}"', "" u 4 fs pattern 3 lt -1 '"${NOTITLE}""${SUFFIX}" \
-         >> "${PLTFILE_ALL}"
-    NOTITLE=notitle
-    ((INDEX+=1))
 done
-
-gnuplot "${PLTFILE_ALL}"

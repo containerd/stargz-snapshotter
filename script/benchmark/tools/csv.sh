@@ -44,25 +44,30 @@ for IMGNAME in "${IMAGES[@]}" ; do
     done
 done
 
-cat <<EOF
-# Benchmarking Result (${PERCENTILE} pctl.,samples=${MINSAMPLES})
-
-Runs on the ubuntu-18.04 runner on Github Actions.
-EOF
-
+INDEX="image,operation"
+for MODE in "${MODES[@]}"; do
+    INDEX="${INDEX},${MODE}"
+done
+echo "${INDEX}"
 for IMGNAME in "${IMAGES[@]}" ; do
-    cat <<EOF
-
-## ${IMGNAME}
-
-|mode|pull(sec)|create(sec)|run(sec)|
----|---|---|---
-EOF
-    
+    PULLLINE="${IMGNAME},pull"
     for MODE in "${MODES[@]}"; do
         PULLTIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_pull")
-        CREATETIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_create")
-        RUNTIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_run")
-        echo "|${MODE}|${PULLTIME}|${CREATETIME}|${RUNTIME}|"
+        PULLLINE="${PULLLINE},${PULLTIME}"
     done
+    echo "${PULLLINE}"
+
+    CREATELINE="${IMGNAME},create"
+    for MODE in "${MODES[@]}"; do
+        CREATETIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_create")
+        CREATELINE="${CREATELINE},${CREATETIME}"
+    done
+    echo "${CREATELINE}"
+
+    RUNLINE="${IMGNAME},run"
+    for MODE in "${MODES[@]}"; do
+        RUNTIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_run")
+        RUNLINE="${RUNLINE},${RUNTIME}"
+    done
+    echo "${RUNLINE}"
 done

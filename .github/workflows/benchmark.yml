@@ -3,19 +3,24 @@ on: [push, pull_request]
 
 jobs:
   hello-bench:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     name: HelloBench
     env:
+      BENCHMARK_LOG_DIR: ${{ github.workspace }}/log/
       BENCHMARK_RESULT_DIR: ${{ github.workspace }}/benchmark/
       BENCHMARK_USER: stargz
       BENCHMARK_TARGETS: python:3.7 gcc:9.2.0 rethinkdb:2.3.6 glassfish:4.1-jdk8
-      BENCHMARK_SAMPLES_NUM: 3
+      BENCHMARK_SAMPLES_NUM: 5
+      BENCHMARK_PERCENTILE: 95
+      BENCHMARK_PERCENTILES_GRANULARITY: 25
     steps:
-    - name: Install gnuplot
-      run: sudo apt-get update && sudo apt-get --no-install-recommends install -y gnuplot
+    - name: Install tools
+      run: |
+          sudo apt-get update && sudo apt-get --no-install-recommends install -y gnuplot
+          pip install numpy
     - uses: actions/checkout@v2
-    - name: Prepare output directory
-      run: mkdir "${BENCHMARK_RESULT_DIR}"
+    - name: Prepare directories
+      run: mkdir "${BENCHMARK_RESULT_DIR}" "${BENCHMARK_LOG_DIR}"
     - name: Get instance information
       run: |
           curl -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2019-11-01" | \

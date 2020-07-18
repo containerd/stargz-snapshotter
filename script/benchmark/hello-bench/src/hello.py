@@ -157,8 +157,6 @@ class BenchRunner:
         rc = os.system(cmd)
         assert(rc == 0)
         cmd = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../reboot_containerd.sh') # clear cache
-        if not self.lazypull():
-            cmd += ' -nosnapshotter'
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -290,9 +288,6 @@ class BenchRunner:
                (self.docker_pullbin(), self.pull_subcmd(), self.registry, self.add_suffix(name)))
         print cmd
         rc = os.system(cmd)
-        assert(rc == 0)
-        print "syncing..."
-        rc = os.system("sync")
         assert(rc == 0)
         pulltime = time.time() - startpull
 
