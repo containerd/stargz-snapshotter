@@ -34,6 +34,7 @@ REBOOT_CONTAINERD_SCRIPT="${REPO}/script/benchmark/hello-bench/reboot_containerd
 REPO_CONFIG_DIR="${REPO}/script/benchmark/hello-bench/config/"
 CONTAINERD_CONFIG_DIR=/etc/containerd/
 REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/containerd-stargz-grpc/
+BENCHMARKOUT_MARK_OUTPUT="BENCHMARK_OUTPUT: "
 
 if [ $# -lt 1 ] ; then
     echo "Specify benchmark target."
@@ -46,15 +47,17 @@ TARGET_IMAGES=${@:2}
 NUM_OF_SAMPLES="${BENCHMARK_SAMPLES_NUM:-1}"
 
 TMP_LOG_FILE=$(mktemp)
+WORKLOADS_LIST=$(mktemp)
 function cleanup {
     local ORG_EXIT_CODE="${1}"
     rm "${TMP_LOG_FILE}" || true
+    rm "${WORKLOADS_LIST}"
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 function output {
-    echo "BENCHMARK_OUTPUT: ${1}"
+    echo "${BENCHMARKOUT_MARK_OUTPUT}${1}"
 }
 
 function set_noprefetch {
@@ -63,12 +66,9 @@ function set_noprefetch {
 }
 
 function measure {
-    local NAME="${1}"
-    local OPTION="${2}"
-    local USER="${3}"
-    output "\"${NAME}\": ["
-    "${MEASURING_SCRIPT}" ${OPTION} --user=${USER} --op=run --experiments=${NUM_OF_SAMPLES} ${@:4}
-    output "],"
+    local OPTION="${1}"
+    local USER="${2}"
+    "${MEASURING_SCRIPT}" ${OPTION} --user=${USER} --op=run --experiments=1 ${@:3}
 }
 
 echo "========="
@@ -84,21 +84,51 @@ df
 echo "========="
 echo "BENCHMARK"
 echo "========="
-output "[{"
 
-NO_STARGZ_SNAPSHOTTER="true" "${REBOOT_CONTAINERD_SCRIPT}"
-measure "${LEGACY_MODE}" "--mode=legacy" ${TARGET_REPOUSER} ${TARGET_IMAGES}
+output "["
 
-echo -n "" > "${TMP_LOG_FILE}"
-set_noprefetch "true" # disable prefetch
-LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
-measure "${STARGZ_MODE}" "--mode=stargz" ${TARGET_REPOUSER} ${TARGET_IMAGES}
-check_remote_snapshots "${TMP_LOG_FILE}"
+for SAMPLE_NO in $(seq ${NUM_OF_SAMPLES}) ; do
+    echo -n "" > "${WORKLOADS_LIST}"
+    # Randomize workloads
+    for IMAGE in ${TARGET_IMAGES} ; do
+        for MODE in ${LEGACY_MODE} ${STARGZ_MODE} ${ESTARGZ_MODE} ; do
+            echo "${IMAGE},${MODE}" >> "${WORKLOADS_LIST}"
+        done
+    done
+    sort -R -o "${WORKLOADS_LIST}" "${WORKLOADS_LIST}"
+    echo "Workloads of iteration [${SAMPLE_NO}]"
+    cat "${WORKLOADS_LIST}"
 
-echo -n "" > "${TMP_LOG_FILE}"
-set_noprefetch "false" # enable prefetch
-LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
-measure "${ESTARGZ_MODE}" "--mode=estargz" ${TARGET_REPOUSER} ${TARGET_IMAGES}
-check_remote_snapshots "${TMP_LOG_FILE}"
+    # Run the workloads
+    for THEWL in $(cat "${WORKLOADS_LIST}") ; do
+        echo "The workload is ${THEWL}"
 
-output "}]"
+        IMAGE=$(echo "${THEWL}" | cut -d ',' -f 1)
+        MODE=$(echo "${THEWL}" | cut -d ',' -f 2)
+
+        echo "===== Measuring [${SAMPLE_NO}] ${IMAGE} (${MODE}) ====="
+
+        if [ "${MODE}" == "${LEGACY_MODE}" ] ; then
+            NO_STARGZ_SNAPSHOTTER="true" "${REBOOT_CONTAINERD_SCRIPT}"
+            measure "--mode=legacy" ${TARGET_REPOUSER} ${IMAGE}
+        fi
+
+        if [ "${MODE}" == "${STARGZ_MODE}" ] ; then
+            echo -n "" > "${TMP_LOG_FILE}"
+            set_noprefetch "true" # disable prefetch
+            LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
+            measure "--mode=stargz" ${TARGET_REPOUSER} ${IMAGE}
+            check_remote_snapshots "${TMP_LOG_FILE}"
+        fi
+
+        if [ "${MODE}" == "${ESTARGZ_MODE}" ] ; then
+            echo -n "" > "${TMP_LOG_FILE}"
+            set_noprefetch "false" # enable prefetch
+            LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
+            measure "--mode=estargz" ${TARGET_REPOUSER} ${IMAGE}
+            check_remote_snapshots "${TMP_LOG_FILE}"
+        fi
+    done
+done
+
+output "]"

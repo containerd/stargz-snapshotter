@@ -64,12 +64,13 @@ docker build -t "${BENCHMARKING_NODE_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_
 
 echo "Preparing docker-compose.yml..."
 cat <<EOF > "${DOCKER_COMPOSE_YAML}"
-version: "3"
+version: "3.7"
 services:
   ${BENCHMARKING_NODE}:
     image: ${BENCHMARKING_NODE_IMAGE_NAME}
     container_name: ${BENCHMARKING_CONTAINER}
     privileged: true
+    init: true
     working_dir: /go/src/github.com/containerd/stargz-snapshotter
     environment:
     - NO_PROXY=127.0.0.1,localhost
@@ -84,35 +85,49 @@ services:
     - "/dev/fuse:/dev/fuse"
     - "containerd-data:/var/lib/containerd:delegated"
     - "containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc:delegated"
-    - "containerd-stargz-grpc-status:/run/containerd-stargz-grpc:delegated"
 volumes:
   containerd-data:
   containerd-stargz-grpc-data:
-  containerd-stargz-grpc-status:
 EOF
 
-echo "Benchmaring..."
-BENCHMARKING_LOG=$(mktemp)
-echo "log file: ${BENCHMARKING_LOG}"
+echo "Preparing for benchmark..."
+OUTPUTDIR="${BENCHMARK_RESULT_DIR:-}"
+if [ "${OUTPUTDIR}" == "" ] ; then
+    OUTPUTDIR=$(mktemp -d)
+fi
+echo "See output for >>> ${OUTPUTDIR}"
+LOG_DIR="${BENCHMARK_LOG_DIR:-}"
+if [ "${LOG_DIR}" == "" ] ; then
+    LOG_DIR=$(mktemp -d)
+fi
+LOG_FILE="${LOG_DIR}/containerd-stargz-grpc-benchmark-$(date '+%Y%m%d%H%M%S')"
+touch "${LOG_FILE}"
+echo "Logging to >>> ${LOG_FILE} (will finally be stored under ${OUTPUTDIR})"
+
+echo "Benchmarking..."
 FAIL=
 if ! ( cd "${CONTEXT}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} \
                           "${BENCHMARKING_NODE}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
-           docker exec -e BENCHMARK_SAMPLES_NUM -i "${BENCHMARKING_CONTAINER}" script/benchmark/hello-bench/run.sh \
-                  "${BENCHMARK_USER}" ${BENCHMARK_TARGETS} \
-               | tee "${BENCHMARKING_LOG}" ) ; then
+           docker exec -e BENCHMARK_SAMPLES_NUM -i "${BENCHMARKING_CONTAINER}" \
+                  script/benchmark/hello-bench/run.sh \
+                  "${BENCHMARK_USER}" ${BENCHMARK_TARGETS} &> "${LOG_FILE}" ) ; then
+    echo "Failed to run benchmark."
     FAIL=true
-else
-    LOGDIR=$(mktemp -d)
-    cat "${BENCHMARKING_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/plot.sh" "${LOGDIR}"
-    cat "${BENCHMARKING_LOG}" | "${CONTEXT}/tools/format.sh" | "${CONTEXT}/tools/table.sh" > "${LOGDIR}/result.md"
-    mv "${BENCHMARKING_LOG}" "${LOGDIR}/result.log"
-    echo "See logs for >>> ${LOGDIR}"
-    OUTPUTDIR="${BENCHMARK_RESULT_DIR:-}"
-    if [ "${OUTPUTDIR}" != "" ] ; then
-        cp "${LOGDIR}/result.md" "${LOGDIR}/result.png" "${LOGDIR}/result.log" "${OUTPUTDIR}"
-        cat "${LOGDIR}/result.log" | "${CONTEXT}/tools/format.sh" > "${OUTPUTDIR}/result.json"
+fi
+
+echo "Harvesting log ${LOG_FILE} -> ${OUTPUTDIR} ..."
+tar zcvf "${OUTPUTDIR}/result.log.tar.gz" "${LOG_FILE}"
+if [ "${FAIL}" != "true" ] ; then
+    echo "Formatting output..."
+    if ! ( tar zOxf "${OUTPUTDIR}/result.log.tar.gz" | "${CONTEXT}/tools/format.sh" > "${OUTPUTDIR}/result.json" && \
+           cat "${OUTPUTDIR}/result.json" | "${CONTEXT}/tools/plot.sh" "${OUTPUTDIR}" && \
+           cat "${OUTPUTDIR}/result.json" | "${CONTEXT}/tools/percentiles.sh" "${OUTPUTDIR}" && \
+           cat "${OUTPUTDIR}/result.json" | "${CONTEXT}/tools/table.sh" > "${OUTPUTDIR}/result.md" && \
+           cat "${OUTPUTDIR}/result.json" | "${CONTEXT}/tools/csv.sh" > "${OUTPUTDIR}/result.csv" ) ; then
+        echo "Failed to formatting output (but you can try it manually from ${OUTPUTDIR})"
+        FAIL=true
     fi
 fi
 
