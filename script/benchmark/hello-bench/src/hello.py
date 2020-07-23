@@ -177,7 +177,7 @@ class BenchRunner:
 
     def pull_subcmd(self):
         if self.lazypull():
-            return "rpull"
+            return "rpull --skip-content-verify"
         else:
             return "pull"
         
