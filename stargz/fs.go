@@ -259,7 +259,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			return errors.Wrapf(err, "invalid stargz layer")
 		}
 		logCtx.Debugf("verified (%q,%q)", ref, ldgst)
-	} else if _, ok := labels[TargetSkipVerifyLabel]; ok || fs.allowNoVerification {
+	} else if _, ok := labels[TargetSkipVerifyLabel]; ok && fs.allowNoVerification {
 		// If unverified layer is allowed, use it with warning.
 		// This mode is for legacy stargz archives which don't contain digests
 		// necessary for layer verification.
