@@ -76,8 +76,8 @@ var OptimizeCommand = cli.Command{
 			Usage: "only stargzify and do not optimize layers",
 		},
 		cli.BoolFlag{
-			Name:  "t",
-			Usage: "only stargzify and do not optimize layers",
+			Name:  "terminal,t",
+			Usage: "enable terminal for sample container",
 		},
 		cli.IntFlag{
 			Name:  "period",
@@ -170,7 +170,7 @@ func parseArgs(clicontext *cli.Context) (opts []sampler.Option, err error) {
 	if cwd := clicontext.String("cwd"); cwd != "" {
 		opts = append(opts, sampler.WithWorkingDir(cwd))
 	}
-	if clicontext.Bool("t") {
+	if clicontext.Bool("terminal") {
 		opts = append(opts, sampler.WithTerminal())
 	}
 
