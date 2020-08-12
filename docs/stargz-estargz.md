@@ -52,6 +52,9 @@ The eStargz archive format is an extended version of stargz for solving this pro
 Runtimes can prefetch these files, which hopefully increases cache hit ratio and mitigates the read overhead.
 This format is backwards compatible to stargz so can be used as legacy tar.gz layers by legacy runtimes.
 
+eStargz also has content verification functionality based on OCI [_digests_](https://github.com/opencontainers/image-spec/blob/v1.0.1/descriptor.md#digests).
+See the [verification documentation](/docs/verification.md) for more detail.
+
 ### The structure of eStargz
 
 The structure of eStargz is same as stargz archive except it can indicate the information about likely accessed files as the *order* of file entries, with some [*landmark* file entries](https://github.com/containerd/stargz-snapshotter/blob/28af649b55ac39efc547b2e7f14f81a33a8212e1/stargz/fs.go#L93-L99).
