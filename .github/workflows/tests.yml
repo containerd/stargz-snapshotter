@@ -30,7 +30,7 @@ jobs:
     name: Integration
     steps:
     - name: Install htpasswd for setting up private registry
-      run: sudo apt-get --no-install-recommends install -y apache2-utils
+      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
     - uses: actions/checkout@v2
     - name: Run integration test
       run: make integration
@@ -39,7 +39,7 @@ jobs:
     name: Optimize
     steps:
     - name: Install htpasswd for setting up private registry
-      run: sudo apt-get --no-install-recommends install -y apache2-utils
+      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
     - uses: actions/checkout@v2
     - name: Run test for optimize subcommand of ctr-remote
       run: make test-optimize
@@ -48,7 +48,7 @@ jobs:
     name: PullSecrets
     steps:
     - name: Install htpasswd for setting up private registry
-      run: sudo apt-get --no-install-recommends install -y apache2-utils
+      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
     - uses: actions/checkout@v2
     - name: Run test for pulling image from private registry on Kubernetes
       run: make test-pullsecrets
