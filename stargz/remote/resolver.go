@@ -202,8 +202,7 @@ func (r *Resolver) resolve(ref, digest string) (*fetcher, int64, error) {
 		// Get size information
 		size, err = getSize(url, tr)
 		if err != nil {
-			rErr = errors.Wrapf(rErr, "host %q: failed to get size of %q: %v",
-				h.Host, url, err)
+			rErr = errors.Wrapf(rErr, "host %q: failed to get size: %v", h.Host, err)
 			continue // try another host
 		}
 
@@ -268,13 +267,13 @@ func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) 
 	// We use GET request for GCR.
 	req, err := http.NewRequestWithContext(ctx, "GET", endpointURL, nil)
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to request to the registry of %q", endpointURL)
+		return "", errors.Wrapf(err, "failed to make request to the registry")
 	}
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := tr.RoundTrip(req)
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to request to %q", endpointURL)
+		return "", errors.Wrapf(err, "failed to request")
 	}
 	defer func() {
 		io.Copy(ioutil.Discard, res.Body)
@@ -287,8 +286,7 @@ func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) 
 		// TODO: Support nested redirection
 		url = redir
 	} else {
-		return "", fmt.Errorf("failed to access to %q with code %v",
-			endpointURL, res.StatusCode)
+		return "", fmt.Errorf("failed to access to the registry with code %v", res.StatusCode)
 	}
 
 	return
@@ -411,13 +409,13 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, opts *options) (multip
 		// We are getting the whole blob in one part (= status 200)
 		size, err := strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse Content-Length for %q", f.url)
+			return nil, errors.Wrapf(err, "failed to parse Content-Length")
 		}
 		return singlePartReader(region{0, size - 1}, res.Body), nil
 	} else if res.StatusCode == http.StatusPartialContent {
 		mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
 		if err != nil {
-			return nil, errors.Wrapf(err, "invalid media type %q for %q", mediaType, f.url)
+			return nil, errors.Wrapf(err, "invalid media type %q", mediaType)
 		}
 		if strings.HasPrefix(mediaType, "multipart/") {
 			// We are getting a set of chunks as a multipart body.
@@ -427,7 +425,7 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, opts *options) (multip
 		// We are getting single range
 		reg, err := parseRange(res.Header.Get("Content-Range"))
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse Content-Range: %q", f.url)
+			return nil, errors.Wrapf(err, "failed to parse Content-Range")
 		}
 		return singlePartReader(reg, res.Body), nil
 	} else if !singleRangeMode {
@@ -435,7 +433,7 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, opts *options) (multip
 		return f.fetch(ctx, rs, opts) // retries with the single range mode
 	}
 
-	return nil, fmt.Errorf("unexpected status code on %q: %v", f.url, res.Status)
+	return nil, fmt.Errorf("unexpected status code: %v", res.Status)
 }
 
 func (f *fetcher) check() error {
@@ -443,20 +441,20 @@ func (f *fetcher) check() error {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", f.url, nil)
 	if err != nil {
-		return errors.Wrapf(err, "check failed: failed to make request for %q", f.url)
+		return errors.Wrapf(err, "check failed: failed to make request")
 	}
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := f.tr.RoundTrip(req)
 	if err != nil {
-		return errors.Wrapf(err, "check failed: failed to request to registry %q", f.url)
+		return errors.Wrapf(err, "check failed: failed to request to registry")
 	}
 	defer func() {
 		io.Copy(ioutil.Discard, res.Body)
 		res.Body.Close()
 	}()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("unexpected status code %v for %q", res.StatusCode, f.url)
+		return fmt.Errorf("unexpected status code %v", res.StatusCode)
 	}
 
 	return nil
