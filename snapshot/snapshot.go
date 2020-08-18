@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -647,7 +648,7 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 	}
 	defer t.Rollback()
 
-	var checkPaths []string
+	eg, egCtx := errgroup.WithContext(o.context)
 	for cKey := key; cKey != ""; {
 		id, info, _, err := storage.GetInfo(ctx, cKey)
 		if err != nil {
@@ -655,20 +656,24 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 			return false
 		}
 		if _, ok := info.Labels[remoteLabel]; ok {
-			checkPaths = append(checkPaths, o.upperPath(id))
+			mp := o.upperPath(id)
+			eg.Go(func() error {
+				logCtx.WithField("mount-point", mp).Debug("checking mount point")
+				if err := o.fs.Check(egCtx, mp); err != nil {
+					logCtx.WithError(err).
+						WithField("mount-point", mp).Warn("layer is unavailable")
+					return err
+				}
+				return nil
+			})
 		} else {
 			logCtx.WithField("mount-point", o.upperPath(id)).
 				Debug("layer is normal snapshot(overlayfs)")
 		}
 		cKey = info.Parent
 	}
-	for _, mp := range checkPaths {
-		logCtx.WithField("mount-point", mp).Debug("checking mount point")
-		if err := o.fs.Check(o.context, mp); err != nil {
-			logCtx.WithError(err).WithField("mount-point", mp).Warn("layer is unavailable")
-			return false
-		}
+	if err := eg.Wait(); err != nil {
+		return false
 	}
-
 	return true
 }
