@@ -415,15 +415,15 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 		return fmt.Errorf("layer not registered")
 	}
 
-	// Wait for prefetch compeletion
-	if err := l.waitForPrefetchCompletion(); err != nil {
-		logCtx.WithError(err).Warn("failed to sync with prefetch completion")
-	}
-
 	// Check the blob connectivity and refresh the connection if possible
 	if err := fs.check(ctx, l); err != nil {
 		logCtx.WithError(err).Warn("check failed")
 		return err
+	}
+
+	// Wait for prefetch compeletion
+	if err := l.waitForPrefetchCompletion(); err != nil {
+		logCtx.WithError(err).Warn("failed to sync with prefetch completion")
 	}
 
 	return nil
