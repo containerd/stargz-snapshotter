@@ -1,0 +1,66 @@
+set term svg size 1024,1500
+set multiplot layout 5,2
+
+set title "cpu"
+set xlabel "time (s)"
+set ylabel "cpu (cores)"
+unset key
+plot "snapshotter/cpu" w l lw 2 
+
+set title "cpu-sys-user"
+set xlabel "time (s)"
+set ylabel "cpu (cores)"
+set key bottom right
+plot "snapshotter/cpu-user" w l lw 2 lc 2 title "user" , \
+	"snapshotter/cpu-sys" w l lw 2 lc 1 title "system"
+
+set title "mem-rss"
+set xlabel "time (s)"
+set ylabel "mem (MiB)"
+unset key
+plot "snapshotter/mem-rss-mib" w l lw 2
+
+set title "mem-vir"
+set xlabel "time (s)"
+set ylabel "mem (MiB)"
+unset key
+plot "snapshotter/mem-vir-mib" w l lw 2
+
+set title "mem-pagefaults"
+set xlabel "time (s)"
+set ylabel "#pagefaults"
+set key bottom right
+plot "snapshotter/minor-pagefault" w l lw 2 title "minor", \
+	"snapshotter/major-pagefault" w l lw 2 title "major"
+
+set title "fd"
+set xlabel "time (s)"
+set ylabel "#fd"
+unset key
+plot "snapshotter/fd" w l lw 2
+
+set title "iops"
+set xlabel "time (s)"
+set ylabel "iops (times/sec)"
+set key bottom right
+plot "snapshotter/iops-write" w l lw 2 title "write", \
+	"snapshotter/iops-read" w l lw 2 title "read"
+
+set title "io-bw"
+set xlabel "time (s)"
+set ylabel "io (MiB/sec)"
+set key bottom right
+plot "snapshotter/bw-write" w l lw 2 title "write", \
+	"snapshotter/bw-read" w l lw 2 title "read"
+
+set title "net-rxpkts"
+set xlabel "time (s)"
+set ylabel "io (packets/sec)"
+set key bottom right
+plot "snapshotter/rxpkts" w l lw 2 title "rx", "snapshotter/txpkts" w l lw 2 title "tx"
+
+set title "net-rxbw"
+set xlabel "time (s)"
+set ylabel "io (MiB/sec)"
+set key bottom right
+plot "snapshotter/rxbytes" w l lw 2 title "rx", "snapshotter/txbytes" w l lw 2 title "tx"

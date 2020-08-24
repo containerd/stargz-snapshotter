@@ -19,8 +19,8 @@ GO111MODULE_VALUE=auto
 PREFIX ?= out/
 
 CMD=containerd-stargz-grpc ctr-remote
-
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
+BENCHMARK_OUTPUT=out-bench/
 
 .PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-pullsecrets test-cri
 
@@ -55,6 +55,7 @@ uninstall:
 clean:
 	@echo "$@"
 	@rm -f $(CMD_BINARIES)
+	@rm -rf $(BENCHMARK_OUTPUT)
 
 test:
 	@echo "$@"
@@ -74,6 +75,9 @@ test-optimize:
 
 benchmark:
 	@./script/benchmark/test.sh
+
+fs-bench:
+	@./script/fs-bench/test.sh
 
 test-pullsecrets:
 	@./script/pullsecrets/test.sh

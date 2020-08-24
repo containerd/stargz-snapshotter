@@ -361,7 +361,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		Debug:      fs.debug,
 	})
 	if err != nil {
-		logCtx.WithError(err).Debug("failed to make filesstem server")
+		logCtx.WithError(err).Debug("failed to make filesystem server")
 		return err
 	}
 
