@@ -3,7 +3,8 @@ github.com/BurntSushi/toml
 # github.com/Microsoft/go-winio v0.4.15-0.20190919025122-fc70bd9a86b5
 github.com/Microsoft/go-winio
 github.com/Microsoft/go-winio/pkg/guid
-# github.com/Microsoft/hcsshim v0.8.7
+github.com/Microsoft/go-winio/vhd
+# github.com/Microsoft/hcsshim v0.8.9
 github.com/Microsoft/hcsshim
 github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options
 github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/stats
@@ -30,14 +31,14 @@ github.com/cilium/ebpf/asm
 github.com/cilium/ebpf/internal
 github.com/cilium/ebpf/internal/btf
 github.com/cilium/ebpf/internal/unix
-# github.com/containerd/cgroups v0.0.0-20200327175542-b44481373989
+# github.com/containerd/cgroups v0.0.0-20200710171044-318312a37340
 github.com/containerd/cgroups
 github.com/containerd/cgroups/stats/v1
 github.com/containerd/cgroups/v2
 github.com/containerd/cgroups/v2/stats
 # github.com/containerd/console v1.0.0
 github.com/containerd/console
-# github.com/containerd/containerd v1.4.0-beta.1
+# github.com/containerd/containerd v1.4.0
 github.com/containerd/containerd
 github.com/containerd/containerd/api/events
 github.com/containerd/containerd/api/services/containers/v1
@@ -66,6 +67,7 @@ github.com/containerd/containerd/cmd/ctr/commands/images
 github.com/containerd/containerd/cmd/ctr/commands/install
 github.com/containerd/containerd/cmd/ctr/commands/leases
 github.com/containerd/containerd/cmd/ctr/commands/namespaces
+github.com/containerd/containerd/cmd/ctr/commands/oci
 github.com/containerd/containerd/cmd/ctr/commands/plugins
 github.com/containerd/containerd/cmd/ctr/commands/pprof
 github.com/containerd/containerd/cmd/ctr/commands/run
@@ -125,7 +127,7 @@ github.com/containerd/containerd/snapshots/testsuite
 github.com/containerd/containerd/sys
 github.com/containerd/containerd/sys/reaper
 github.com/containerd/containerd/version
-# github.com/containerd/continuity v0.0.0-20190815185530-f2a389ac0a02
+# github.com/containerd/continuity v0.0.0-20200710164510-efbc4488d8fe
 github.com/containerd/continuity
 github.com/containerd/continuity/devices
 github.com/containerd/continuity/driver
@@ -133,15 +135,14 @@ github.com/containerd/continuity/fs
 github.com/containerd/continuity/fs/fstest
 github.com/containerd/continuity/pathdriver
 github.com/containerd/continuity/proto
-github.com/containerd/continuity/syscallx
 github.com/containerd/continuity/sysx
-# github.com/containerd/fifo v0.0.0-20191213151349-ff969a566b00
+# github.com/containerd/fifo v0.0.0-20200410184934-f15a3290365b
 github.com/containerd/fifo
-# github.com/containerd/go-runc v0.0.0-20191206163734-a5c2862aed5e
+# github.com/containerd/go-runc v0.0.0-20200220073739-7016d3ce2328
 github.com/containerd/go-runc
-# github.com/containerd/ttrpc v1.0.0
+# github.com/containerd/ttrpc v1.0.1
 github.com/containerd/ttrpc
-# github.com/containerd/typeurl v1.0.0
+# github.com/containerd/typeurl v1.0.1
 github.com/containerd/typeurl
 # github.com/coreos/go-systemd/v22 v22.1.0
 github.com/coreos/go-systemd/v22/dbus
@@ -267,7 +268,7 @@ github.com/sirupsen/logrus
 github.com/spf13/pflag
 # github.com/syndtr/gocapability v0.0.0-20180916011248-d98352740cb2
 github.com/syndtr/gocapability/capability
-# github.com/urfave/cli v1.22.2
+# github.com/urfave/cli v1.22.2 => github.com/urfave/cli v1.22.1
 github.com/urfave/cli
 # github.com/willf/bitset v1.1.11-0.20200630133818-d5bec3311243
 github.com/willf/bitset
@@ -315,7 +316,7 @@ google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/remote_api
 google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
-# google.golang.org/genproto v0.0.0-20190819201941-24fa4b261c55
+# google.golang.org/genproto v0.0.0-20200117163144-32f20d992d24
 google.golang.org/genproto/googleapis/rpc/status
 # google.golang.org/grpc v1.28.1
 google.golang.org/grpc

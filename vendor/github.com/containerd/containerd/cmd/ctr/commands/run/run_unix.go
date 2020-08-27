@@ -54,6 +54,15 @@ var platformRunFlags = []cli.Flag{
 		Name:  "gidmap",
 		Usage: "run inside a user namespace with the specified GID mapping range; specified with the format `container-gid:host-gid:length`",
 	},
+	cli.BoolFlag{
+		Name:  "remap-labels",
+		Usage: "provide the user namespace ID remapping to the snapshotter via label options; requires snapshotter support",
+	},
+	cli.Float64Flag{
+		Name:  "cpus",
+		Usage: "set the CFS cpu qouta",
+		Value: 0.0,
+	},
 }
 
 // NewContainer creates a new container
@@ -137,8 +146,12 @@ func NewContainer(ctx gocontext.Context, client *containerd.Client, context *cli
 				}
 				opts = append(opts,
 					oci.WithUserNamespace([]specs.LinuxIDMapping{uidMap}, []specs.LinuxIDMapping{gidMap}))
-				if context.Bool("read-only") {
-					cOpts = append(cOpts, containerd.WithRemappedSnapshotView(id, image, uidMap.HostID, gidMap.HostID))
+				// use snapshotter opts or the remapped snapshot support to shift the filesystem
+				// currently the only snapshotter known to support the labels is fuse-overlayfs:
+				// https://github.com/AkihiroSuda/containerd-fuse-overlayfs
+				if context.Bool("remap-labels") {
+					cOpts = append(cOpts, containerd.WithNewSnapshot(id, image,
+						containerd.WithRemapperLabels(0, uidMap.HostID, 0, gidMap.HostID, uidMap.Size)))
 				} else {
 					cOpts = append(cOpts, containerd.WithRemappedSnapshot(id, image, uidMap.HostID, gidMap.HostID))
 				}
@@ -170,6 +183,22 @@ func NewContainer(ctx gocontext.Context, client *containerd.Client, context *cli
 		}
 		if context.Bool("seccomp") {
 			opts = append(opts, seccomp.WithDefaultProfile())
+		}
+		if cpus := context.Float64("cpus"); cpus > 0.0 {
+			var (
+				period = uint64(100000)
+				quota  = int64(cpus * 100000.0)
+			)
+			opts = append(opts, oci.WithCPUCFS(quota, period))
+		}
+
+		quota := context.Int64("cpu-quota")
+		period := context.Uint64("cpu-period")
+		if quota != -1 || period != 0 {
+			if cpus := context.Float64("cpus"); cpus > 0.0 {
+				return nil, errors.New("cpus and quota/period should be used separately")
+			}
+			opts = append(opts, oci.WithCPUCFS(quota, period))
 		}
 
 		joinNs := context.StringSlice("with-ns")
@@ -281,15 +310,15 @@ func parseIDMapping(mapping string) (specs.LinuxIDMapping, error) {
 	if len(parts) != 3 {
 		return specs.LinuxIDMapping{}, errors.New("user namespace mappings require the format `container-id:host-id:size`")
 	}
-	cID, err := strconv.ParseUint(parts[0], 0, 16)
+	cID, err := strconv.ParseUint(parts[0], 0, 32)
 	if err != nil {
 		return specs.LinuxIDMapping{}, errors.Wrapf(err, "invalid container id for user namespace remapping")
 	}
-	hID, err := strconv.ParseUint(parts[1], 0, 16)
+	hID, err := strconv.ParseUint(parts[1], 0, 32)
 	if err != nil {
 		return specs.LinuxIDMapping{}, errors.Wrapf(err, "invalid host id for user namespace remapping")
 	}
-	size, err := strconv.ParseUint(parts[2], 0, 16)
+	size, err := strconv.ParseUint(parts[2], 0, 32)
 	if err != nil {
 		return specs.LinuxIDMapping{}, errors.Wrapf(err, "invalid size for user namespace remapping")
 	}

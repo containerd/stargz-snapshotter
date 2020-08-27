@@ -16,11 +16,20 @@
    limitations under the License.
 */
 
-package syscallx
+package containerd
 
-import "syscall"
+import (
+	"fmt"
 
-// Readlink returns the destination of the named symbolic link.
-func Readlink(path string, buf []byte) (n int, err error) {
-	return syscall.Readlink(path, buf)
+	"github.com/containerd/containerd/snapshots"
+)
+
+// WithRemapperLabels creates the labels used by any supporting snapshotter
+// to shift the filesystem ownership (user namespace mapping) automatically; currently
+// supported by the fuse-overlayfs snapshotter
+func WithRemapperLabels(ctrUID, hostUID, ctrGID, hostGID, length uint32) snapshots.Opt {
+	return snapshots.WithLabels(map[string]string{
+		"containerd.io/snapshot/uidmapping": fmt.Sprintf("%d:%d:%d", ctrUID, hostUID, length),
+		"containerd.io/snapshot/gidmapping": fmt.Sprintf("%d:%d:%d", ctrGID, hostGID, length),
+	})
 }
