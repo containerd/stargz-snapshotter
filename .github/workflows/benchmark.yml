@@ -29,6 +29,7 @@ jobs:
     - name: Run benchmark
       run: make benchmark
     - uses: actions/upload-artifact@v1
+      if: ${{ always() }}
       with:
         name: benchmarking-result
         path: ${{ env.BENCHMARK_RESULT_DIR }}

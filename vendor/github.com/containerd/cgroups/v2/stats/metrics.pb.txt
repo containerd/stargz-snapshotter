@@ -55,6 +55,14 @@ file {
       type_name: ".io.containerd.cgroups.v2.HugeTlbStat"
       json_name: "hugetlb"
     }
+    field {
+      name: "memory_events"
+      number: 8
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".io.containerd.cgroups.v2.MemoryEvents"
+      json_name: "memoryEvents"
+    }
   }
   message_type {
     name: "PidsStat"
@@ -364,6 +372,44 @@ file {
       label: LABEL_OPTIONAL
       type: TYPE_UINT64
       json_name: "swapLimit"
+    }
+  }
+  message_type {
+    name: "MemoryEvents"
+    field {
+      name: "low"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT64
+      json_name: "low"
+    }
+    field {
+      name: "high"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT64
+      json_name: "high"
+    }
+    field {
+      name: "max"
+      number: 3
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT64
+      json_name: "max"
+    }
+    field {
+      name: "oom"
+      number: 4
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT64
+      json_name: "oom"
+    }
+    field {
+      name: "oom_kill"
+      number: 5
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT64
+      json_name: "oomKill"
     }
   }
   message_type {

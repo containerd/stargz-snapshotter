@@ -12,8 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-ARG CONTAINERD_VERSION=v1.4.0-beta.1
-ARG RUNC_VERSION=v1.0.0-rc90
+ARG CONTAINERD_VERSION=v1.4.0
+ARG RUNC_VERSION=v1.0.0-rc92
 
 FROM golang:1.13-buster AS golang-base
 
