@@ -333,7 +333,10 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			}, 120*time.Second)
 			return
 		}), 0, l.blob.Size())
-		if err := layerReader.CacheTarGzWithReader(br, cache.Direct()); err != nil {
+		if err := layerReader.Cache(
+			reader.WithReader(br),                // Read contents in background
+			reader.WithCacheOpts(cache.Direct()), // Do not pollute mem cache
+		); err != nil {
 			logCtx.WithError(err).Debug("failed to fetch whole layer")
 			return
 		}
@@ -635,14 +638,15 @@ func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
 		prefetchSize = l.blob.Size()
 	}
 
+	// Fetch the target range
 	if err := l.blob.Cache(0, prefetchSize, opts...); err != nil {
 		return errors.Wrap(err, "failed to prefetch layer")
 	}
-	pr := io.NewSectionReader(readerAtFunc(func(p []byte, off int64) (int, error) {
-		return l.blob.ReadAt(p, off, opts...)
-	}), 0, prefetchSize)
-	err = lr.CacheTarGzWithReader(pr)
-	if err != nil && errors.Cause(err) != io.EOF && errors.Cause(err) != io.ErrUnexpectedEOF {
+
+	// Cache uncompressed contents of the prefetched range
+	if err := lr.Cache(reader.WithFilter(func(e *stargz.TOCEntry) bool {
+		return e.Offset < prefetchSize // Cache only prefetch target
+	})); err != nil {
 		return errors.Wrap(err, "failed to cache prefetched layer")
 	}
 
