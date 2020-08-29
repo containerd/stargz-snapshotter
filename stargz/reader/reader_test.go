@@ -54,9 +54,8 @@ func TestFailReader(t *testing.T) {
 		ReaderAt: stargzFile,
 		success:  true,
 	}
-	bsr := io.NewSectionReader(br, 0, stargzFile.Size())
 	bev := &testTOCEntryVerifier{true}
-	gr, _, err := newReader(bsr, &nopCache{}, bev)
+	gr, _, err := newReader(io.NewSectionReader(br, 0, stargzFile.Size()), &nopCache{}, bev)
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
 	}
@@ -94,7 +93,7 @@ func TestFailReader(t *testing.T) {
 			}
 
 			// tests for caching reader
-			err = gr.CacheTarGzWithReader(bsr)
+			err = gr.Cache()
 			if rs && vs {
 				if err != nil {
 					t.Errorf("failed to cache reader but wanted to succeed")

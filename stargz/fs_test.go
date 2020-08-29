@@ -88,9 +88,9 @@ func nopVerifiableReader(ev verify.TOCEntryVerifier) reader.Reader {
 
 type nopreader struct{}
 
-func (r nopreader) OpenFile(name string) (io.ReaderAt, error)                     { return nil, nil }
-func (r nopreader) Lookup(name string) (*stargz.TOCEntry, bool)                   { return nil, false }
-func (r nopreader) CacheTarGzWithReader(ir io.Reader, opts ...cache.Option) error { return nil }
+func (r nopreader) OpenFile(name string) (io.ReaderAt, error)   { return nil, nil }
+func (r nopreader) Lookup(name string) (*stargz.TOCEntry, bool) { return nil, false }
+func (r nopreader) Cache(opts ...reader.CacheOption) error      { return nil }
 
 type breakBlob struct {
 	success bool

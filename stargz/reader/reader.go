@@ -23,26 +23,25 @@
 package reader
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"strings"
+	"path/filepath"
 	"sync"
 
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/stargz/verify"
 	"github.com/google/crfs/stargz"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 type Reader interface {
 	OpenFile(name string) (io.ReaderAt, error)
 	Lookup(name string) (*stargz.TOCEntry, bool)
-	CacheTarGzWithReader(r io.Reader, opts ...cache.Option) error
+	Cache(opts ...CacheOption) error
 }
 
 // VerifiableReader is a function that produces a Reader with a given verifier.
@@ -110,86 +109,120 @@ func (gr *reader) Lookup(name string) (*stargz.TOCEntry, bool) {
 	return gr.r.Lookup(name)
 }
 
-func (gr *reader) CacheTarGzWithReader(r io.Reader, opts ...cache.Option) error {
-	gzr, err := gzip.NewReader(r)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get gzip reader")
+func (gr *reader) Cache(opts ...CacheOption) (err error) {
+	var cacheOpts cacheOptions
+	for _, o := range opts {
+		o(&cacheOpts)
 	}
-	defer gzr.Close()
-	tr := tar.NewReader(gzr)
-	for {
-		h, err := tr.Next()
+
+	r := gr.r
+	if cacheOpts.reader != nil {
+		if r, err = stargz.Open(cacheOpts.reader); err != nil {
+			return errors.Wrap(err, "failed to parse stargz")
+		}
+	}
+	root, ok := r.Lookup("")
+	if !ok {
+		return fmt.Errorf("failed to get a TOCEntry of the root")
+	}
+
+	filter := func(*stargz.TOCEntry) bool {
+		return true
+	}
+	if cacheOpts.filter != nil {
+		filter = cacheOpts.filter
+	}
+
+	return gr.cacheWithReader(root, r, filter, cacheOpts.cacheOpts...)
+}
+
+func (gr *reader) cacheWithReader(dir *stargz.TOCEntry, r *stargz.Reader, filter func(*stargz.TOCEntry) bool, opts ...cache.Option) (rErr error) {
+	eg, _ := errgroup.WithContext(context.Background())
+	dir.ForeachChild(func(_ string, e *stargz.TOCEntry) bool {
+		if e.Type == "dir" {
+			// Walk through all files on this stargz file.
+			eg.Go(func() error {
+				// Make sure the entry is the immediate child for avoiding loop.
+				if filepath.Dir(filepath.Clean(e.Name)) != filepath.Clean(dir.Name) {
+					return fmt.Errorf("invalid child path %q; must be child of %q",
+						e.Name, dir.Name)
+				}
+				return gr.cacheWithReader(e, r, filter, opts...)
+			})
+			return true
+		} else if e.Type != "reg" {
+			// Only cache regular files
+			return true
+		} else if !filter(e) {
+			// This entry need to be filtered out
+			return true
+		} else if e.Name == stargz.TOCTarName {
+			// We don't need to cache TOC json file
+			return true
+		}
+
+		sr, err := r.OpenFile(e.Name)
 		if err != nil {
-			if err != io.EOF {
-				return errors.Wrapf(err, "failed to read next tar entry")
-			}
-			break
+			rErr = err
+			return false
 		}
-		if h.Name == stargz.TOCTarName {
-			// We don't need to cache prefetch landmarks and TOC json file.
-			continue
-		}
-		fe, ok := gr.r.Lookup(strings.TrimSuffix(h.Name, "/"))
-		if !ok {
-			return fmt.Errorf("failed to get TOCEntry of %q", h.Name)
-		}
+
 		var nr int64
-		for nr < h.Size {
-			ce, ok := gr.r.ChunkEntryForOffset(h.Name, nr)
+		for nr < e.Size {
+			ce, ok := r.ChunkEntryForOffset(e.Name, nr)
 			if !ok {
 				break
 			}
+			nr += ce.ChunkSize
 
-			// make sure that this range is at ce.ChunkOffset for ce.ChunkSize
-			if nr != ce.ChunkOffset {
-				return fmt.Errorf("invalid offset %d != %d", nr, ce.ChunkOffset)
-			}
+			eg.Go(func() error {
+				// Check if the target chunks exists in the cache
+				id := genID(e.Digest, ce.ChunkOffset, ce.ChunkSize)
+				if _, err := gr.cache.FetchAt(id, 0, nil, opts...); err == nil {
+					return nil
+				}
 
-			// Check if the target chunks exists in the cache
-			id := genID(fe.Digest, ce.ChunkOffset, ce.ChunkSize)
-			if _, err := gr.cache.FetchAt(id, 0, nil, opts...); err != nil {
 				// missed cache, needs to fetch and add it to the cache
+				cr := io.NewSectionReader(sr, ce.ChunkOffset, ce.ChunkSize)
 				b := gr.bufPool.Get().(*bytes.Buffer)
+				defer gr.bufPool.Put(b)
 				b.Reset()
 				b.Grow(int(ce.ChunkSize))
 				v, err := gr.verifier.Verifier(ce)
 				if err != nil {
 					return errors.Wrapf(err, "verifier not found %q(off:%d,size:%d)",
-						h.Name, ce.ChunkOffset, ce.ChunkSize)
+						e.Name, ce.ChunkOffset, ce.ChunkSize)
 				}
-				if _, err := io.CopyN(b, io.TeeReader(tr, v), ce.ChunkSize); err != nil {
-					gr.bufPool.Put(b)
+				if _, err := io.CopyN(b, io.TeeReader(cr, v), ce.ChunkSize); err != nil {
 					return errors.Wrapf(err,
 						"failed to read file payload of %q (offset:%d,size:%d)",
-						h.Name, ce.ChunkOffset, ce.ChunkSize)
+						e.Name, ce.ChunkOffset, ce.ChunkSize)
 				}
 				if int64(b.Len()) != ce.ChunkSize {
-					gr.bufPool.Put(b)
 					return fmt.Errorf("unexpected copied data size %d; want %d",
 						b.Len(), ce.ChunkSize)
 				}
 				if !v.Verified() {
-					gr.bufPool.Put(b)
 					return fmt.Errorf("invalid chunk %q (offset:%d,size:%d)",
-						h.Name, ce.ChunkOffset, ce.ChunkSize)
+						e.Name, ce.ChunkOffset, ce.ChunkSize)
 				}
 				gr.cache.Add(id, b.Bytes()[:ce.ChunkSize], opts...)
-				gr.bufPool.Put(b)
 
-				nr += ce.ChunkSize
-				continue
-			}
-
-			// Discard the target chunk
-			if _, err := io.CopyN(ioutil.Discard, tr, ce.ChunkSize); err != nil {
-				return errors.Wrapf(err,
-					"failed to discard file payload of %q (offset:%d,size:%d)",
-					h.Name, ce.ChunkOffset, ce.ChunkSize)
-			}
-			nr += ce.ChunkSize
+				return nil
+			})
 		}
+
+		return true
+	})
+
+	if err := eg.Wait(); err != nil {
+		if rErr != nil {
+			return errors.Wrapf(rErr, "failed to pre-cache some files: %v", err)
+		}
+		return err
 	}
-	return nil
+
+	return
 }
 
 type file struct {
@@ -303,4 +336,30 @@ func positive(n int64) int64 {
 		return 0
 	}
 	return n
+}
+
+type CacheOption func(*cacheOptions)
+
+type cacheOptions struct {
+	cacheOpts []cache.Option
+	filter    func(*stargz.TOCEntry) bool
+	reader    *io.SectionReader
+}
+
+func WithCacheOpts(cacheOpts ...cache.Option) CacheOption {
+	return func(opts *cacheOptions) {
+		opts.cacheOpts = cacheOpts
+	}
+}
+
+func WithFilter(filter func(*stargz.TOCEntry) bool) CacheOption {
+	return func(opts *cacheOptions) {
+		opts.filter = filter
+	}
+}
+
+func WithReader(sr *io.SectionReader) CacheOption {
+	return func(opts *cacheOptions) {
+		opts.reader = sr
+	}
 }
