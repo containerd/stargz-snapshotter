@@ -73,7 +73,7 @@ ENV CONTAINERD_SNAPSHOTTER=stargz
 ENTRYPOINT [ "/entrypoint.sh" ]
 
 # Image which can be used as a node image for KinD
-FROM kindest/node:v1.18.0
+FROM kindest/node:v1.19.0
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /

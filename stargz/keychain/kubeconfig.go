@@ -187,12 +187,12 @@ func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Inte
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				// TODO: support legacy image secret `kubernetes.io/dockercfg`
 				options.FieldSelector = dockerconfigSelector
-				return client.CoreV1().Secrets(metav1.NamespaceAll).List(options)
+				return client.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				// TODO: support legacy image secret `kubernetes.io/dockercfg`
 				options.FieldSelector = dockerconfigSelector
-				return client.CoreV1().Secrets(metav1.NamespaceAll).Watch(options)
+				return client.CoreV1().Secrets(metav1.NamespaceAll).Watch(ctx, options)
 			},
 		},
 		&corev1.Secret{},
