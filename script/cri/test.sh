@@ -46,10 +46,9 @@ RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
     curl https://dl.google.com/go/go1.13.9.linux-amd64.tar.gz \
     | tar -C /usr/local -xz && \
     go get -u github.com/onsi/ginkgo/ginkgo && \
-    git clone https://github.com/kubernetes-sigs/cri-tools \
+    git clone -b v1.19.0 https://github.com/kubernetes-sigs/cri-tools \
               \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
     cd \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
-    git checkout 16911795a3c33833fa0ec83dac1ade3172f6989e && \
     make critest && make install-critest -e BINDIR=\${GOPATH}/bin && \
     git clone -b v1.11.1 https://github.com/containerd/cri \
               \${GOPATH}/src/github.com/containerd/cri && \

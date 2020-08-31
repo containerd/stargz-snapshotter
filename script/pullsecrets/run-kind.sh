@@ -18,7 +18,9 @@ set -euo pipefail
 
 NODE_IMAGE_NAME="stargz-snapshotter-node:1"
 NODE_BASE_IMAGE_NAME="stargz-snapshotter-node-base:1"
+NODE_TEST_CERT_FILE="/usr/local/share/ca-certificates/registry.crt"
 SNAPSHOTTER_KUBECONFIG_PATH=/etc/kubernetes/snapshotter/config.conf
+REGISTRY_HOST=kind-private-registry
 
 # Arguments
 KIND_CLUSTER_NAME="${1}"
@@ -49,12 +51,16 @@ cat <<'EOF' > "${TMP_CONTEXT}/config.stargz.append.toml"
 enable_keychain = true
 kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
 EOF
+cat <<EOF > "${TMP_CONTEXT}/config.containerd.append.toml"
+[plugins."io.containerd.grpc.v1.cri".registry.configs."${REGISTRY_HOST}:5000".tls]
+ca_file = "${NODE_TEST_CERT_FILE}"
+EOF
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${NODE_BASE_IMAGE_NAME}
 
-COPY ./config.stargz.append.toml /tmp/config.toml
-RUN cat /tmp/config.toml >> /etc/containerd-stargz-grpc/config.toml
-
+COPY ./config.stargz.append.toml ./config.containerd.append.toml /tmp/
+RUN cat /tmp/config.stargz.append.toml >> /etc/containerd-stargz-grpc/config.toml && \
+    cat /tmp/config.containerd.append.toml >> /etc/containerd/config.toml
 EOF
 docker build -t "${NODE_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
 
@@ -65,8 +71,9 @@ kind create cluster --name "${KIND_CLUSTER_NAME}" \
      --image "${NODE_IMAGE_NAME}"
 KIND_NODENAME=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sed -n 1p) # must be single node
 docker network connect "${REGISTRY_NETWORK}" "${KIND_NODENAME}"
-docker cp "${KIND_REGISTRY_CA}" "${KIND_NODENAME}:/usr/local/share/ca-certificates/registry.crt"
+docker cp "${KIND_REGISTRY_CA}" "${KIND_NODENAME}:${NODE_TEST_CERT_FILE}"
 docker exec -i "${KIND_NODENAME}" update-ca-certificates
+docker exec -i "${KIND_NODENAME}" systemctl restart stargz-snapshotter
 
 echo "Configuring kubernetes cluster..."
 CONFIGJSON_BASE64="$(cat ${DOCKERCONFIGJSON_DATA} | base64 -i -w 0)"
