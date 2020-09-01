@@ -76,7 +76,7 @@ func main() {
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
 	}
-	rs, err := snbase.NewSnapshotter(ctx, filepath.Join(*rootDir, "snapshotter"), fs, snbase.AsynchronousRemove)
+	rs, err := snbase.NewSnapshotter(filepath.Join(*rootDir, "snapshotter"), fs, snbase.AsynchronousRemove)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
 	}

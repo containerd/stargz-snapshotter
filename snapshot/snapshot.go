@@ -83,7 +83,6 @@ func AsynchronousRemove(config *SnapshotterConfig) error {
 }
 
 type snapshotter struct {
-	context     context.Context
 	root        string
 	ms          *storage.MetaStore
 	asyncRemove bool
@@ -96,7 +95,7 @@ type snapshotter struct {
 // as snapshots. This is implemented based on the overlayfs snapshotter, so
 // diffs are stored under the provided root and a metadata file is stored under
 // the root as same as overlayfs snapshotter.
-func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
+func NewSnapshotter(root string, targetFs FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
 	if targetFs == nil {
 		return nil, fmt.Errorf("Specify filesystem to use")
 	}
@@ -128,7 +127,6 @@ func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts 
 	}
 
 	return &snapshotter{
-		context:     ctx,
 		root:        root,
 		ms:          ms,
 		asyncRemove: config.asyncRemove,
@@ -432,7 +430,7 @@ func (o *snapshotter) cleanupSnapshotDirectory(ctx context.Context, dir string) 
 	// We use Filesystem's Unmount API so that it can do necessary finalization
 	// before/after the unmount.
 	mp := filepath.Join(dir, "fs")
-	if err := o.fs.Unmount(o.context, mp); err != nil {
+	if err := o.fs.Unmount(ctx, mp); err != nil {
 		log.G(ctx).WithError(err).WithField("dir", mp).Debug("failed to unmount")
 	}
 	if err := os.RemoveAll(dir); err != nil {
@@ -628,7 +626,7 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, lab
 		return err
 	}
 
-	if err := o.fs.Mount(o.context, o.upperPath(id), labels); err != nil {
+	if err := o.fs.Mount(ctx, o.upperPath(id), labels); err != nil {
 		return err
 	}
 
@@ -648,7 +646,7 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 	}
 	defer t.Rollback()
 
-	eg, egCtx := errgroup.WithContext(o.context)
+	eg, egCtx := errgroup.WithContext(ctx)
 	for cKey := key; cKey != ""; {
 		id, info, _, err := storage.GetInfo(ctx, cKey)
 		if err != nil {
