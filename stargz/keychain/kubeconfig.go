@@ -88,15 +88,16 @@ func newKeychain(ctx context.Context, kubeconfigPath string) *keychain {
 	kc := &keychain{
 		config: make(map[string]*dcfile.ConfigFile),
 	}
-	logCtx := log.G(ctx).WithField("kubeconfig", kubeconfigPath)
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("kubeconfig", kubeconfigPath))
 	go func() {
 		if kubeconfigPath != "" {
-			logCtx.Debugf("Waiting for kubeconfig being installed...")
+			log.G(ctx).Debugf("Waiting for kubeconfig being installed...")
 			for {
 				if _, err := os.Stat(kubeconfigPath); err == nil {
 					break
 				} else if !os.IsNotExist(err) {
-					logCtx.WithError(err).Warnf("failed to read; Disabling syncing")
+					log.G(ctx).WithError(err).
+						Warnf("failed to read; Disabling syncing")
 					return
 				}
 				time.Sleep(10 * time.Second)
@@ -118,17 +119,17 @@ func newKeychain(ctx context.Context, kubeconfigPath string) *keychain {
 			&clientcmd.ConfigOverrides{}, // no overrides for config
 		).ClientConfig()
 		if err != nil {
-			logCtx.WithError(err).Warnf("failed to load config; Disabling syncing")
+			log.G(ctx).WithError(err).Warnf("failed to load config; Disabling syncing")
 			return
 		}
 
 		client, err := kubernetes.NewForConfig(clientcfg)
 		if err != nil {
-			logCtx.WithError(err).Warnf("failed to prepare client; Disabling syncing")
+			log.G(ctx).WithError(err).Warnf("failed to prepare client; Disabling syncing")
 			return
 		}
 		if err := kc.startSyncSecrets(ctx, client); err != nil {
-			logCtx.WithError(err).Warnf("failed to sync secrets")
+			log.G(ctx).WithError(err).Warnf("failed to sync secrets")
 		}
 	}()
 	return kc

@@ -194,15 +194,14 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// tasks.
 	fs.backgroundTaskManager.DoPrioritizedTask()
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
-	logCtx := log.G(ctx).WithField("mountpoint", mountpoint)
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("mountpoint", mountpoint))
 
 	// Get basic information of this layer.
 	ref, ldgst, layers, prefetchSize, err := fs.parseLabels(labels)
 	if err != nil {
-		logCtx.WithError(err).Debug("failed to get necessary information from labels")
+		log.G(ctx).WithError(err).Debug("failed to get necessary information from labels")
 		return err
 	}
-	logCtx = logCtx.WithField("ref", ref).WithField("digest", ldgst)
 
 	// Resolve the target layer and the all chained layers
 	var (
@@ -233,13 +232,14 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	}
 
 	// Get the resolved layer
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("ref", ref).WithField("digest", ldgst))
 	if resolved == nil {
-		logCtx.Debug("resolve result isn't registered")
+		log.G(ctx).Debug("resolve result isn't registered")
 		return fmt.Errorf("resolve result(%q,%q) isn't registered", ref, ldgst)
 	}
 	l, err := resolved.waitAndGet(30 * time.Second) // get layer with timeout
 	if err != nil {
-		logCtx.WithError(err).Debug("failed to resolve layer")
+		log.G(ctx).WithError(err).Debug("failed to resolve layer")
 		return errors.Wrapf(err, "failed to resolve layer(%q,%q)", ref, ldgst)
 	}
 	if err := fs.check(ctx, l); err != nil { // check the connectivity
@@ -250,28 +250,27 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	if tocDigest, ok := labels[verify.TOCJSONDigestAnnotation]; ok {
 		dgst, err := digest.Parse(tocDigest)
 		if err != nil {
-			logCtx.WithError(err).Debugf("failed to parse passed TOC digest %q (%q,%q)",
-				dgst, ref, ldgst)
+			log.G(ctx).WithError(err).Debugf("failed to parse passed TOC digest %q", dgst)
 			return errors.Wrapf(err, "invalid TOC digest: %v", tocDigest)
 		}
 		if err := l.verify(dgst); err != nil {
-			logCtx.WithError(err).Debugf("invalid layer (%q,%q)", ref, ldgst)
+			log.G(ctx).WithError(err).Debugf("invalid layer")
 			return errors.Wrapf(err, "invalid stargz layer")
 		}
-		logCtx.Debugf("verified (%q,%q)", ref, ldgst)
+		log.G(ctx).Debugf("verified")
 	} else if _, ok := labels[TargetSkipVerifyLabel]; ok && fs.allowNoVerification {
 		// If unverified layer is allowed, use it with warning.
 		// This mode is for legacy stargz archives which don't contain digests
 		// necessary for layer verification.
 		l.skipVerify()
-		logCtx.Warningf("No verification is held for layer (%q,%q)", ref, ldgst)
+		log.G(ctx).Warningf("No verification is held for layer")
 	} else {
 		// Verification must be done. Don't mount this layer.
 		return fmt.Errorf("digest of TOC JSON must be passed")
 	}
 	layerReader, err := l.reader()
 	if err != nil {
-		logCtx.WithError(err).Warningf("failed to get reader for layer (%q,%q)", ref, ldgst)
+		log.G(ctx).WithError(err).Warningf("failed to get reader for layer")
 		return err
 	}
 
@@ -298,14 +297,14 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			defer fs.backgroundTaskManager.DonePrioritizedTask()
 			tr, err := fetchTr()
 			if err != nil {
-				logCtx.WithError(err).Debug("failed to prepare transport for prefetch")
+				log.G(ctx).WithError(err).Debug("failed to prepare transport for prefetch")
 				return
 			}
 			if err := l.prefetch(prefetchSize, remote.WithRoundTripper(tr)); err != nil {
-				logCtx.WithError(err).Debug("failed to prefetched layer")
+				log.G(ctx).WithError(err).Debug("failed to prefetched layer")
 				return
 			}
-			logCtx.Debug("completed to prefetch")
+			log.G(ctx).Debug("completed to prefetch")
 		}()
 	}
 
@@ -319,7 +318,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			fs.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
 				tr, err := fetchTr()
 				if err != nil {
-					logCtx.WithError(err).Debug("failed to prepare transport for background fetch")
+					log.G(ctx).WithError(err).Debug("failed to prepare transport for background fetch")
 					retN, retErr = 0, err
 					return
 				}
@@ -337,10 +336,10 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			reader.WithReader(br),                // Read contents in background
 			reader.WithCacheOpts(cache.Direct()), // Do not pollute mem cache
 		); err != nil {
-			logCtx.WithError(err).Debug("failed to fetch whole layer")
+			log.G(ctx).WithError(err).Debug("failed to fetch whole layer")
 			return
 		}
-		logCtx.Debug("completed to fetch all layer data in background")
+		log.G(ctx).Debug("completed to fetch all layer data in background")
 	}()
 
 	// Mounting stargz
@@ -364,7 +363,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		Debug:      fs.debug,
 	})
 	if err != nil {
-		logCtx.WithError(err).Debug("failed to make filesstem server")
+		log.G(ctx).WithError(err).Debug("failed to make filesstem server")
 		return err
 	}
 
@@ -373,9 +372,10 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 }
 
 func (fs *filesystem) resolve(ctx context.Context, ref, digest string) *resolveResult {
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("ref", ref).WithField("digest", digest))
 	return newResolveResult(func() (*layer, error) {
-		log.G(ctx).Debugf("resolving (%q, %q)", ref, digest)
-		defer log.G(ctx).Debugf("resolved (%q, %q)", ref, digest)
+		log.G(ctx).Debugf("resolving")
+		defer log.G(ctx).Debugf("resolved")
 
 		// Resolve the reference and digest
 		blob, err := fs.resolver.Resolve(ref, digest, fs.httpCache, fs.blobConfig)
@@ -408,43 +408,42 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	fs.backgroundTaskManager.DoPrioritizedTask()
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
 
-	logCtx := log.G(ctx).WithField("mountpoint", mountpoint)
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("mountpoint", mountpoint))
 
 	fs.layerMu.Lock()
 	l := fs.layer[mountpoint]
 	fs.layerMu.Unlock()
 	if l == nil {
-		logCtx.Debug("layer not registered")
+		log.G(ctx).Debug("layer not registered")
 		return fmt.Errorf("layer not registered")
 	}
 
 	// Check the blob connectivity and refresh the connection if possible
 	if err := fs.check(ctx, l); err != nil {
-		logCtx.WithError(err).Warn("check failed")
+		log.G(ctx).WithError(err).Warn("check failed")
 		return err
 	}
 
 	// Wait for prefetch compeletion
 	if err := l.waitForPrefetchCompletion(); err != nil {
-		logCtx.WithError(err).Warn("failed to sync with prefetch completion")
+		log.G(ctx).WithError(err).Warn("failed to sync with prefetch completion")
 	}
 
 	return nil
 }
 
 func (fs *filesystem) check(ctx context.Context, l *layer) error {
-	logCtx := log.G(ctx)
-
 	if err := l.blob.Check(); err != nil {
 		// Check failed. Try to refresh the connection
-		logCtx.WithError(err).Warn("failed to connect to blob; refreshing...")
+		log.G(ctx).WithError(err).Warn("failed to connect to blob; refreshing...")
 		for retry := 0; retry < 3; retry++ {
 			if iErr := fs.resolver.Refresh(l.blob); iErr != nil {
-				logCtx.WithError(iErr).Warnf("failed to refresh connection(%d)", retry)
+				log.G(ctx).WithError(iErr).Warnf("failed to refresh connection(%d)",
+					retry)
 				err = errors.Wrapf(err, "error(%d): %v", retry, iErr)
 				continue // retry
 			}
-			logCtx.Debug("Successfully refreshed connection")
+			log.G(ctx).Debug("Successfully refreshed connection")
 			err = nil
 			break
 		}
