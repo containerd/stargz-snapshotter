@@ -48,6 +48,8 @@ const (
 	//             snapshot
 	// - null    : undetermined
 	remoteSnapshotLogKey = "remote-snapshot-prepared"
+	prepareSucceeded     = "true"
+	prepareFailed        = "false"
 )
 
 // FileSystem is a backing filesystem abstraction.
@@ -217,12 +219,6 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 	// Try to prepare the remote snapshot. If succeeded, we commit the snapshot now
 	// and return ErrAlreadyExists.
-	//
-	// NOTE: If passed labels including a target of a remote snapshot, this method
-	//       must log whether this method succeeded to prepare that remote snapshot
-	//       or not, using the key `remoteSnapshotLogKey` defined in the above. This
-	//       log is used by tests in this project.
-	logCtx := log.G(ctx).WithField("key", key).WithField("parent", parent)
 	var base snapshots.Info
 	for _, opt := range opts {
 		if err := opt(&base); err != nil {
@@ -230,16 +226,23 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		}
 	}
 	if target, ok := base.Labels[targetSnapshotLabel]; ok {
+		// NOTE: If passed labels include a target of the remote snapshot, `Prepare`
+		//       must log whether this method succeeded to prepare that remote snapshot
+		//       or not, using the key `remoteSnapshotLogKey` defined in the above. This
+		//       log is used by tests in this project.
+		lCtx := log.WithLogger(ctx, log.G(ctx).WithField("key", key).WithField("parent", parent))
 		if err := o.prepareRemoteSnapshot(ctx, key, base.Labels); err == nil {
 			base.Labels[remoteLabel] = fmt.Sprintf("remote snapshot") // Mark this snapshot as remote
 			err := o.Commit(ctx, target, key, append(opts, snapshots.WithLabels(base.Labels))...)
 			if err == nil {
-				logCtx.WithField(remoteSnapshotLogKey, "true").Debug("prepared remote snapshot")
+				log.G(lCtx).WithField(remoteSnapshotLogKey, prepareSucceeded).Debug("prepared remote snapshot")
 				return nil, errors.Wrapf(errdefs.ErrAlreadyExists, "target snapshot %q", target)
 			}
-			logCtx.WithError(err).WithField(remoteSnapshotLogKey, "false").Debug("failed to internally commit remote snapshot")
+			log.G(lCtx).WithField(remoteSnapshotLogKey, prepareFailed).
+				WithError(err).Debug("failed to internally commit remote snapshot")
 		} else {
-			logCtx.WithError(err).WithField(remoteSnapshotLogKey, "false").Debug("failed to prepare remote snapshot")
+			log.G(lCtx).WithField(remoteSnapshotLogKey, prepareFailed).
+				WithError(err).Debug("failed to prepare remote snapshot")
 		}
 	}
 
@@ -638,12 +641,12 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, lab
 // checkAvailability checks avaiability of the specified layer and all lower
 // layers using filesystem's checking functionality.
 func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
-	logCtx := log.G(ctx).WithField("key", key)
-	logCtx.Debug("checking layer availability")
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("key", key))
+	log.G(ctx).Debug("checking layer availability")
 
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
-		logCtx.WithError(err).Warn("failed to get transaction")
+		log.G(ctx).WithError(err).Warn("failed to get transaction")
 		return false
 	}
 	defer t.Rollback()
@@ -652,23 +655,22 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 	for cKey := key; cKey != ""; {
 		id, info, _, err := storage.GetInfo(ctx, cKey)
 		if err != nil {
-			logCtx.WithError(err).Warnf("failed to get info of %q", cKey)
+			log.G(ctx).WithError(err).Warnf("failed to get info of %q", cKey)
 			return false
 		}
+		mp := o.upperPath(id)
+		lCtx := log.WithLogger(ctx, log.G(ctx).WithField("mount-point", mp))
 		if _, ok := info.Labels[remoteLabel]; ok {
-			mp := o.upperPath(id)
 			eg.Go(func() error {
-				logCtx.WithField("mount-point", mp).Debug("checking mount point")
+				log.G(lCtx).Debug("checking mount point")
 				if err := o.fs.Check(egCtx, mp); err != nil {
-					logCtx.WithError(err).
-						WithField("mount-point", mp).Warn("layer is unavailable")
+					log.G(lCtx).WithError(err).Warn("layer is unavailable")
 					return err
 				}
 				return nil
 			})
 		} else {
-			logCtx.WithField("mount-point", o.upperPath(id)).
-				Debug("layer is normal snapshot(overlayfs)")
+			log.G(lCtx).Debug("layer is normal snapshot(overlayfs)")
 		}
 		cKey = info.Parent
 	}
