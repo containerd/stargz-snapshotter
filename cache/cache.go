@@ -34,9 +34,9 @@ const (
 )
 
 type DirectoryCacheConfig struct {
-	MaxLRUCacheEntry int  `toml:"max_lru_cache_entry"`
-	MaxCacheFds      int  `toml:"max_cache_fds"`
-	SyncAdd          bool `toml:"sync_add"`
+	MaxLRUCacheEntry int
+	MaxCacheFds      int
+	SyncAdd          bool
 }
 
 // TODO: contents validation.

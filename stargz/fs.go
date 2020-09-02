@@ -56,6 +56,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cache"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
+	"github.com/containerd/stargz-snapshotter/stargz/config"
 	"github.com/containerd/stargz-snapshotter/stargz/handler"
 	"github.com/containerd/stargz-snapshotter/stargz/keychain"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
@@ -105,75 +106,69 @@ const (
 	TargetSkipVerifyLabel = "containerd.io/snapshot/remote/stargz.skipverify"
 )
 
-type Config struct {
-	remote.ResolverConfig             `toml:"resolver"`
-	remote.BlobConfig                 `toml:"blob"`
-	keychain.KubeconfigKeychainConfig `toml:"kubeconfig_keychain"`
-	cache.DirectoryCacheConfig        `toml:"directory_cache"`
-	HTTPCacheType                     string `toml:"http_cache_type"`
-	FSCacheType                       string `toml:"filesystem_cache_type"`
-	ResolveResultEntry                int    `toml:"resolve_result_entry"`
-	PrefetchSize                      int64  `toml:"prefetch_size"`
-	PrefetchTimeoutSec                int64  `toml:"prefetch_timeout_sec"`
-	NoPrefetch                        bool   `toml:"noprefetch"`
-	Debug                             bool   `toml:"debug"`
-	AllowNoVerification               bool   `toml:"allow_no_verification"`
-}
-
-func NewFilesystem(ctx context.Context, root string, config *Config) (_ snbase.FileSystem, err error) {
+func NewFilesystem(ctx context.Context, root string, cfg config.Config) (_ snbase.FileSystem, err error) {
+	dcc := cfg.DirectoryCacheConfig
 	var httpCache cache.BlobCache
-	if config.HTTPCacheType == memoryCacheType {
+	if cfg.HTTPCacheType == memoryCacheType {
 		httpCache = cache.NewMemoryCache()
 	} else {
 		if httpCache, err = cache.NewDirectoryCache(
 			filepath.Join(root, "http"),
-			config.DirectoryCacheConfig,
+			cache.DirectoryCacheConfig{
+				MaxLRUCacheEntry: dcc.MaxLRUCacheEntry,
+				MaxCacheFds:      dcc.MaxCacheFds,
+				SyncAdd:          dcc.SyncAdd,
+			},
 		); err != nil {
 			return nil, errors.Wrap(err, "failed to prepare HTTP cache")
 		}
 	}
 	var fsCache cache.BlobCache
-	if config.FSCacheType == memoryCacheType {
+	if cfg.FSCacheType == memoryCacheType {
 		fsCache = cache.NewMemoryCache()
 	} else {
 		if fsCache, err = cache.NewDirectoryCache(
 			filepath.Join(root, "fscache"),
-			config.DirectoryCacheConfig,
+			cache.DirectoryCacheConfig{
+				MaxLRUCacheEntry: dcc.MaxLRUCacheEntry,
+				MaxCacheFds:      dcc.MaxCacheFds,
+				SyncAdd:          dcc.SyncAdd,
+			},
 		); err != nil {
 			return nil, errors.Wrap(err, "failed to prepare filesystem cache")
 		}
 	}
 	keychain := authn.NewMultiKeychain(
 		authn.DefaultKeychain,
-		keychain.NewKubeconfigKeychain(ctx, config.KubeconfigKeychainConfig),
+		keychain.NewKubeconfigKeychain(ctx, cfg.KubeconfigKeychainConfig),
 	)
-	resolveResultEntry := config.ResolveResultEntry
+	resolveResultEntry := cfg.ResolveResultEntry
 	if resolveResultEntry == 0 {
 		resolveResultEntry = defaultResolveResultEntry
 	}
-	prefetchTimeout := time.Duration(config.PrefetchTimeoutSec) * time.Second
+	prefetchTimeout := time.Duration(cfg.PrefetchTimeoutSec) * time.Second
 	if prefetchTimeout == 0 {
 		prefetchTimeout = defaultPrefetchTimeoutSec * time.Second
 	}
 	return &filesystem{
-		resolver:              remote.NewResolver(keychain, config.ResolverConfig),
-		blobConfig:            config.BlobConfig,
+		resolver:              remote.NewResolver(keychain, cfg.ResolverConfig),
+		blobConfig:            cfg.BlobConfig,
 		httpCache:             httpCache,
 		fsCache:               fsCache,
-		prefetchSize:          config.PrefetchSize,
+		prefetchSize:          cfg.PrefetchSize,
 		prefetchTimeout:       prefetchTimeout,
-		noprefetch:            config.NoPrefetch,
-		debug:                 config.Debug,
+		noprefetch:            cfg.NoPrefetch,
+		debug:                 cfg.Debug,
 		layer:                 make(map[string]*layer),
 		resolveResult:         lru.New(resolveResultEntry),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
-		allowNoVerification:   config.AllowNoVerification,
+		allowNoVerification:   cfg.AllowNoVerification,
 	}, nil
 }
 
 type filesystem struct {
 	resolver              *remote.Resolver
-	blobConfig            remote.BlobConfig
+	blobConfig            config.BlobConfig
 	httpCache             cache.BlobCache
 	fsCache               cache.BlobCache
 	prefetchSize          int64

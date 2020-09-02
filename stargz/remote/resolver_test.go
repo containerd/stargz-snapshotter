@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/containerd/stargz-snapshotter/stargz/config"
 	"github.com/golang/groupcache/lru"
 	"github.com/google/go-containerregistry/pkg/name"
 )
@@ -144,17 +145,17 @@ func TestMirror(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var mirrors []MirrorConfig
+			var mirrors []config.MirrorConfig
 			for _, m := range tt.mirrors {
-				mirrors = append(mirrors, MirrorConfig{
+				mirrors = append(mirrors, config.MirrorConfig{
 					Host: m,
 				})
 			}
 			r := &Resolver{
 				transport: tt.tr,
 				trPool:    lru.New(3000),
-				config: ResolverConfig{
-					Host: map[string]HostConfig{
+				config: config.ResolverConfig{
+					Host: map[string]config.HostConfig{
 						refHost: {
 							Mirrors: mirrors,
 						},
