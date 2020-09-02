@@ -39,6 +39,7 @@ import (
 
 	"github.com/containerd/containerd/reference/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/containerd/stargz-snapshotter/stargz/config"
 	"github.com/golang/groupcache/lru"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -52,31 +53,11 @@ const (
 	defaultPoolEntry     = 3000
 )
 
-type ResolverConfig struct {
-	Host                map[string]HostConfig `toml:"host"`
-	ConnectionPoolEntry int                   `toml:"connection_pool_entry"`
-}
-
-type HostConfig struct {
-	Mirrors []MirrorConfig `toml:"mirrors"`
-}
-
-type MirrorConfig struct {
-	Host     string `toml:"host"`
-	Insecure bool   `toml:"insecure"`
-}
-
-type BlobConfig struct {
-	ValidInterval int64 `toml:"valid_interval"`
-	CheckAlways   bool  `toml:"check_always"`
-	ChunkSize     int64 `toml:"chunk_size"`
-}
-
-func NewResolver(keychain authn.Keychain, config ResolverConfig) *Resolver {
-	if config.Host == nil {
-		config.Host = make(map[string]HostConfig)
+func NewResolver(keychain authn.Keychain, cfg config.ResolverConfig) *Resolver {
+	if cfg.Host == nil {
+		cfg.Host = make(map[string]config.HostConfig)
 	}
-	poolEntry := config.ConnectionPoolEntry
+	poolEntry := cfg.ConnectionPoolEntry
 	if poolEntry == 0 {
 		poolEntry = defaultPoolEntry
 	}
@@ -84,7 +65,7 @@ func NewResolver(keychain authn.Keychain, config ResolverConfig) *Resolver {
 		transport: http.DefaultTransport,
 		trPool:    lru.New(poolEntry),
 		keychain:  keychain,
-		config:    config,
+		config:    cfg,
 		bufPool: sync.Pool{
 			New: func() interface{} {
 				return new(bytes.Buffer)
@@ -98,11 +79,11 @@ type Resolver struct {
 	trPool    *lru.Cache
 	trPoolMu  sync.Mutex
 	keychain  authn.Keychain
-	config    ResolverConfig
+	config    config.ResolverConfig
 	bufPool   sync.Pool
 }
 
-func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config BlobConfig) (Blob, error) {
+func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, cfg config.BlobConfig) (Blob, error) {
 	fetcher, size, err := r.resolve(ref, digest)
 	if err != nil {
 		return nil, err
@@ -111,16 +92,16 @@ func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, config Blo
 		chunkSize     int64
 		checkInterval time.Duration
 	)
-	chunkSize = config.ChunkSize
+	chunkSize = cfg.ChunkSize
 	if chunkSize == 0 { // zero means "use default chunk size"
 		chunkSize = defaultChunkSize
 	}
-	if config.ValidInterval == 0 { // zero means "use default interval"
+	if cfg.ValidInterval == 0 { // zero means "use default interval"
 		checkInterval = defaultValidInterval
 	} else {
-		checkInterval = time.Duration(config.ValidInterval) * time.Second
+		checkInterval = time.Duration(cfg.ValidInterval) * time.Second
 	}
-	if config.CheckAlways {
+	if cfg.CheckAlways {
 		checkInterval = 0
 	}
 	return &blob{
@@ -169,7 +150,7 @@ func (r *Resolver) resolve(ref, digest string) (*fetcher, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	hosts := append(r.config.Host[docker.Domain(named)].Mirrors, MirrorConfig{
+	hosts := append(r.config.Host[docker.Domain(named)].Mirrors, config.MirrorConfig{
 		Host: docker.Domain(named),
 	})
 	rErr := fmt.Errorf("failed to resolve")

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/stargz-snapshotter/stargz/config"
 	dcfile "github.com/docker/cli/cli/config/configfile"
 	dctypes "github.com/docker/cli/cli/config/types"
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -43,11 +44,6 @@ import (
 
 const dockerconfigSelector = "type=" + string(corev1.SecretTypeDockerConfigJson)
 
-type KubeconfigKeychainConfig struct {
-	EnableKeychain bool   `toml:"enable_keychain"`
-	KubeconfigPath string `toml:"kubeconfig_path"`
-}
-
 // NewKubeconfigKeychain provides a keychain which can sync its contents with
 // kubernetes API server by fetching all `kubernetes.io/dockerconfigjson`
 // secrets in the cluster with provided kubeconfig. It's OK that config provides
@@ -59,9 +55,9 @@ type KubeconfigKeychainConfig struct {
 // everything, including booting containerd/kubelet/apiserver and configuring
 // users/roles.
 // TODO: support update of kubeconfig file
-func NewKubeconfigKeychain(ctx context.Context, config KubeconfigKeychainConfig) authn.Keychain {
-	if config.EnableKeychain {
-		return newKeychain(ctx, config.KubeconfigPath)
+func NewKubeconfigKeychain(ctx context.Context, cfg config.KubeconfigKeychainConfig) authn.Keychain {
+	if cfg.EnableKeychain {
+		return newKeychain(ctx, cfg.KubeconfigPath)
 	}
 	return anonKeychain{}
 }

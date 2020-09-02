@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/log"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	stargz "github.com/containerd/stargz-snapshotter/stargz"
+	stargzconfig "github.com/containerd/stargz-snapshotter/stargz/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -61,7 +62,7 @@ func main() {
 
 	var (
 		ctx    = log.WithLogger(context.Background(), log.L)
-		config = &stargz.Config{}
+		config stargzconfig.Config
 	)
 
 	// Get configuration from specified file
