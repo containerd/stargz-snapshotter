@@ -31,8 +31,9 @@ import (
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/log"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
-	stargz "github.com/containerd/stargz-snapshotter/stargz"
-	stargzconfig "github.com/containerd/stargz-snapshotter/stargz/config"
+	"github.com/containerd/stargz-snapshotter/stargz"
+	"github.com/containerd/stargz-snapshotter/stargz/keychain"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/sirupsen/logrus"
 )
 
@@ -61,8 +62,9 @@ func main() {
 	})
 
 	var (
-		ctx    = log.WithLogger(context.Background(), log.L)
-		config stargzconfig.Config
+		ctx     = log.WithLogger(context.Background(), log.L)
+		config  Config
+		sgzOpts []stargz.Option
 	)
 
 	// Get configuration from specified file
@@ -72,8 +74,18 @@ func main() {
 		}
 	}
 
+	// Prepare kubeconfig-based keychain if required
+	if config.KubeconfigKeychainConfig.EnableKeychain {
+		var opts []keychain.KubeconfigOption
+		if kcp := config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
+			opts = append(opts, keychain.WithKubeconfigPath(kcp))
+		}
+		kk := keychain.NewKubeconfigKeychain(ctx, opts...)
+		sgzOpts = append(sgzOpts, stargz.WithKeychain([]authn.Keychain{kk}))
+	}
+
 	// Configure filesystem and snapshotter
-	fs, err := stargz.NewFilesystem(ctx, filepath.Join(*rootDir, "stargz"), config)
+	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"), config.Config, sgzOpts...)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
 	}
