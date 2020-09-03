@@ -58,7 +58,6 @@ import (
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/stargz/config"
 	"github.com/containerd/stargz-snapshotter/stargz/handler"
-	"github.com/containerd/stargz-snapshotter/stargz/keychain"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
 	"github.com/containerd/stargz-snapshotter/stargz/verify"
@@ -106,7 +105,24 @@ const (
 	TargetSkipVerifyLabel = "containerd.io/snapshot/remote/stargz.skipverify"
 )
 
-func NewFilesystem(ctx context.Context, root string, cfg config.Config) (_ snbase.FileSystem, err error) {
+type Option func(*options)
+
+type options struct {
+	keychain []authn.Keychain
+}
+
+func WithKeychain(keychain []authn.Keychain) Option {
+	return func(opts *options) {
+		opts.keychain = keychain
+	}
+}
+
+func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.FileSystem, err error) {
+	var fsOpts options
+	for _, o := range opts {
+		o(&fsOpts)
+	}
+
 	dcc := cfg.DirectoryCacheConfig
 	var httpCache cache.BlobCache
 	if cfg.HTTPCacheType == memoryCacheType {
@@ -138,10 +154,9 @@ func NewFilesystem(ctx context.Context, root string, cfg config.Config) (_ snbas
 			return nil, errors.Wrap(err, "failed to prepare filesystem cache")
 		}
 	}
-	keychain := authn.NewMultiKeychain(
-		authn.DefaultKeychain,
-		keychain.NewKubeconfigKeychain(ctx, cfg.KubeconfigKeychainConfig),
-	)
+	keychain := authn.NewMultiKeychain(append(
+		[]authn.Keychain{authn.DefaultKeychain},
+		fsOpts.keychain...)...)
 	resolveResultEntry := cfg.ResolveResultEntry
 	if resolveResultEntry == 0 {
 		resolveResultEntry = defaultResolveResultEntry

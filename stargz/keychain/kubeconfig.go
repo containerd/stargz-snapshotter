@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/stargz-snapshotter/stargz/config"
 	dcfile "github.com/docker/cli/cli/config/configfile"
 	dctypes "github.com/docker/cli/cli/config/types"
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -44,6 +43,18 @@ import (
 
 const dockerconfigSelector = "type=" + string(corev1.SecretTypeDockerConfigJson)
 
+type options struct {
+	kubeconfigPath string
+}
+
+type KubeconfigOption func(*options)
+
+func WithKubeconfigPath(path string) KubeconfigOption {
+	return func(opts *options) {
+		opts.kubeconfigPath = path
+	}
+}
+
 // NewKubeconfigKeychain provides a keychain which can sync its contents with
 // kubernetes API server by fetching all `kubernetes.io/dockerconfigjson`
 // secrets in the cluster with provided kubeconfig. It's OK that config provides
@@ -55,17 +66,12 @@ const dockerconfigSelector = "type=" + string(corev1.SecretTypeDockerConfigJson)
 // everything, including booting containerd/kubelet/apiserver and configuring
 // users/roles.
 // TODO: support update of kubeconfig file
-func NewKubeconfigKeychain(ctx context.Context, cfg config.KubeconfigKeychainConfig) authn.Keychain {
-	if cfg.EnableKeychain {
-		return newKeychain(ctx, cfg.KubeconfigPath)
+func NewKubeconfigKeychain(ctx context.Context, opts ...KubeconfigOption) authn.Keychain {
+	var kcOpts options
+	for _, o := range opts {
+		o(&kcOpts)
 	}
-	return anonKeychain{}
-}
-
-type anonKeychain struct{}
-
-func (ak anonKeychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
-	return authn.Anonymous, nil
+	return newKeychain(ctx, kcOpts.kubeconfigPath)
 }
 
 type authenticator struct {

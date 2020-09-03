@@ -38,9 +38,6 @@ type Config struct {
 	// BlobConfig is config for layer blob management.
 	BlobConfig `toml:"blob"`
 
-	// KubeconfigKeychainConfig is config for kubeconfig-based keychain.
-	KubeconfigKeychainConfig `toml:"kubeconfig_keychain"`
-
 	// DirectoryCacheConfig is config for directory-based cache.
 	DirectoryCacheConfig `toml:"directory_cache"`
 }
@@ -63,11 +60,6 @@ type BlobConfig struct {
 	ValidInterval int64 `toml:"valid_interval"`
 	CheckAlways   bool  `toml:"check_always"`
 	ChunkSize     int64 `toml:"chunk_size"`
-}
-
-type KubeconfigKeychainConfig struct {
-	EnableKeychain bool   `toml:"enable_keychain"`
-	KubeconfigPath string `toml:"kubeconfig_path"`
 }
 
 type DirectoryCacheConfig struct {
