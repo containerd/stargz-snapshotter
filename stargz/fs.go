@@ -229,6 +229,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 				rr = c.(*resolveResult) // resolving in progress
 			} else if _, err := c.(*resolveResult).get(); err == nil {
 				rr = c.(*resolveResult) // hit successfully resolved cache
+			} else {
+				rr = c.(*resolveResult).retry()
+				fs.resolveResult.Add(key, rr)
 			}
 		}
 		if rr == nil { // missed cache
@@ -383,14 +386,28 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 
 func (fs *filesystem) resolve(ctx context.Context, ref, digest string) *resolveResult {
 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("ref", ref).WithField("digest", digest))
+	var (
+		resolvedBlob   remote.Blob
+		resolvedBlobMu sync.Mutex
+	)
 	return newResolveResult(func() (*layer, error) {
 		log.G(ctx).Debugf("resolving")
-		defer log.G(ctx).Debugf("resolved")
 
 		// Resolve the reference and digest
-		blob, err := fs.resolver.Resolve(ref, digest, fs.httpCache, fs.blobConfig)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to resolve the reference")
+		// If the previous result is cached and can be used, use it.
+		resolvedBlobMu.Lock()
+		blob := resolvedBlob
+		resolvedBlobMu.Unlock()
+		if blob == nil || blob.Check() != nil {
+			var err error
+			blob, err = fs.resolver.Resolve(ref, digest, fs.httpCache, fs.blobConfig)
+			if err != nil {
+				log.G(ctx).WithError(err).Debugf("failed to resolve ref")
+				return nil, errors.Wrap(err, "failed to resolve the reference")
+			}
+			resolvedBlobMu.Lock()
+			resolvedBlob = blob
+			resolvedBlobMu.Unlock()
 		}
 
 		// Get a reader for stargz archive.
@@ -404,9 +421,11 @@ func (fs *filesystem) resolve(ctx context.Context, ref, digest string) *resolveR
 		}), 0, blob.Size())
 		vr, root, err := reader.NewReader(sr, fs.fsCache)
 		if err != nil {
+			log.G(ctx).WithError(err).Debugf("failed to resolve: layer cannot be read")
 			return nil, errors.Wrap(err, "failed to read layer")
 		}
 
+		log.G(ctx).Debugf("resolved")
 		return newLayer(blob, vr, root, fs.prefetchTimeout), nil
 	})
 }
@@ -537,15 +556,16 @@ func lazyTransport(trFunc func() (http.RoundTripper, error)) func() (http.RoundT
 	}
 }
 
-func newResolveResult(init func() (*layer, error)) *resolveResult {
+func newResolveResult(resolveFunc func() (*layer, error)) *resolveResult {
 	rr := &resolveResult{
-		progress: newWaiter(),
+		resolveFunc: resolveFunc,
+		progress:    newWaiter(),
 	}
 	rr.progress.start()
 
 	go func() {
 		rr.resultMu.Lock()
-		rr.layer, rr.err = init()
+		rr.layer, rr.err = resolveFunc()
 		rr.resultMu.Unlock()
 		rr.progress.done()
 	}()
@@ -554,10 +574,11 @@ func newResolveResult(init func() (*layer, error)) *resolveResult {
 }
 
 type resolveResult struct {
-	layer    *layer
-	err      error
-	resultMu sync.Mutex
-	progress *waiter
+	resolveFunc func() (*layer, error)
+	layer       *layer
+	err         error
+	resultMu    sync.Mutex
+	progress    *waiter
 }
 
 func (rr *resolveResult) waitAndGet(timeout time.Duration) (*layer, error) {
@@ -578,6 +599,10 @@ func (rr *resolveResult) get() (*layer, error) {
 
 func (rr *resolveResult) isInProgress() bool {
 	return rr.progress.isInProgress()
+}
+
+func (rr *resolveResult) retry() *resolveResult {
+	return newResolveResult(rr.resolveFunc)
 }
 
 func newLayer(blob remote.Blob, vr reader.VerifiableReader, root *stargz.TOCEntry, prefetchTimeout time.Duration) *layer {
