@@ -72,6 +72,17 @@ VOLUME /run/containerd-stargz-grpc
 ENV CONTAINERD_SNAPSHOTTER=stargz
 ENTRYPOINT [ "/entrypoint.sh" ]
 
+# Image which can be used as containerized `ctr-remote images optimize` command
+FROM ubuntu:20.04 AS oind
+
+RUN apt-get update -y && \
+    apt-get --no-install-recommends install -y fuse runc ca-certificates
+
+COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
+COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
+
+ENTRYPOINT [ "/usr/local/bin/ctr-remote", "images", "optimize" ]
+
 # Image which can be used as a node image for KinD
 FROM kindest/node:v1.19.0
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
