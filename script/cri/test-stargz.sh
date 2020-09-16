@@ -59,28 +59,14 @@ services:
     - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse
-    - type: volume
-      source: containerd-data
-      target: /var/lib/containerd
-      volume:
-        nosuid: false
-    - type: volume
-      source: containerd-stargz-grpc-data
-      target: /var/lib/containerd-stargz-grpc
-      volume:
-        nosuid: false
-    - type: volume
-      source: containerd-stargz-grpc-status
-      target: /run/containerd-stargz-grpc
-      volume:
-        nosuid: false
+    - "critest-containerd-data:/var/lib/containerd"
+    - "critest-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
   registry:
     image: registry:2
     container_name: ${REGISTRY_HOST}
 volumes:
-  containerd-data:
-  containerd-stargz-grpc-data:
-  containerd-stargz-grpc-status:
+  critest-containerd-data:
+  critest-containerd-stargz-grpc-data:
 EOF
 docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate
 

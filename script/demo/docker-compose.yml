@@ -22,21 +22,8 @@ services:
     volumes:
     - /dev/fuse:/dev/fuse
     - "${GOPATH}/src/github.com/containerd/stargz-snapshotter:/go/src/github.com/containerd/stargz-snapshotter:ro"
-    - type: volume
-      source: demo-containerd-data
-      target: /var/lib/containerd
-      volume:
-        nosuid: false
-    - type: volume
-      source: demo-containerd-stargz-grpc-data
-      target: /var/lib/containerd-stargz-grpc
-      volume:
-        nosuid: false
-    - type: volume
-      source: demo-containerd-stargz-grpc-status
-      target: /run/containerd-stargz-grpc
-      volume:
-        nosuid: false
+    - "demo-containerd-data:/var/lib/containerd"
+    - "demo-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
   registry2:
     image: registry:2
     container_name: registry2
@@ -48,4 +35,3 @@ services:
 volumes:
   demo-containerd-data:
   demo-containerd-stargz-grpc-data:
-  demo-containerd-stargz-grpc-status:
