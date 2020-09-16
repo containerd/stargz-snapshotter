@@ -101,21 +101,8 @@ services:
     - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
     - ${AUTH_DIR}:/auth
     - /dev/fuse:/dev/fuse
-    - type: volume
-      source: integration-containerd-data
-      target: /var/lib/containerd
-      volume:
-        nosuid: false
-    - type: volume
-      source: integration-containerd-stargz-grpc-data
-      target: /var/lib/containerd-stargz-grpc
-      volume:
-        nosuid: false
-    - type: volume
-      source: integration-containerd-stargz-grpc-status
-      target: /run/containerd-stargz-grpc
-      volume:
-        nosuid: false
+    - "integration-containerd-data:/var/lib/containerd"
+    - "integration-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
   registry:
     image: registry:2
     container_name: ${REGISTRY_HOST}
@@ -137,7 +124,6 @@ services:
 volumes:
   integration-containerd-data:
   integration-containerd-stargz-grpc-data:
-  integration-containerd-stargz-grpc-status:
 EOF
 
 echo "Testing..."
