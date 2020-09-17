@@ -19,8 +19,10 @@ package handler
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/labels"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -44,15 +46,6 @@ func AppendInfoHandlerWrapper(ref string, prefetchSize int64) func(f images.Hand
 			}
 			switch desc.MediaType {
 			case ocispec.MediaTypeImageManifest, images.MediaTypeDockerSchema2Manifest:
-				var layers string
-				for _, c := range children {
-					if images.IsLayerType(c.MediaType) {
-						layers += fmt.Sprintf("%s,", c.Digest.String())
-					}
-				}
-				if len(layers) >= 1 {
-					layers = layers[:len(layers)-1]
-				}
 				for i := range children {
 					c := &children[i]
 					if images.IsLayerType(c.MediaType) {
@@ -61,7 +54,19 @@ func AppendInfoHandlerWrapper(ref string, prefetchSize int64) func(f images.Hand
 						}
 						c.Annotations[TargetRefLabel] = ref
 						c.Annotations[TargetDigestLabel] = c.Digest.String()
-						c.Annotations[TargetImageLayersLabel] = layers
+						var layers string
+						for _, l := range children[i:] {
+							if images.IsLayerType(l.MediaType) {
+								ls := fmt.Sprintf("%s,", l.Digest.String())
+								// This avoids the label hits the size limitation.
+								// Skipping layers is allowed here and only affects performance.
+								if err := labels.Validate(TargetImageLayersLabel, layers+ls); err != nil {
+									break
+								}
+								layers += ls
+							}
+						}
+						c.Annotations[TargetImageLayersLabel] = strings.TrimSuffix(layers, ",")
 						c.Annotations[TargetPrefetchSizeLabel] = fmt.Sprintf("%d", prefetchSize)
 					}
 				}
