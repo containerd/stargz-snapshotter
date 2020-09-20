@@ -29,6 +29,7 @@ type Config struct {
 	PrefetchSize        int64  `toml:"prefetch_size"`
 	PrefetchTimeoutSec  int64  `toml:"prefetch_timeout_sec"`
 	NoPrefetch          bool   `toml:"noprefetch"`
+	NoBackgroundFetch   bool   `toml:"no_background_fetch"`
 	Debug               bool   `toml:"debug"`
 	AllowNoVerification bool   `toml:"allow_no_verification"`
 
