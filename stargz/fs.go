@@ -173,6 +173,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.Fil
 		prefetchSize:          cfg.PrefetchSize,
 		prefetchTimeout:       prefetchTimeout,
 		noprefetch:            cfg.NoPrefetch,
+		noBackgroundFetch:     cfg.NoBackgroundFetch,
 		debug:                 cfg.Debug,
 		layer:                 make(map[string]*layer),
 		resolveResult:         lru.New(resolveResultEntry),
@@ -189,6 +190,7 @@ type filesystem struct {
 	prefetchSize          int64
 	prefetchTimeout       time.Duration
 	noprefetch            bool
+	noBackgroundFetch     bool
 	debug                 bool
 	layer                 map[string]*layer
 	layerMu               sync.Mutex
@@ -326,34 +328,36 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// interrupt the reading. This can avoid disturbing prioritized tasks
 	// about NW traffic. We read layer with a buffer to reduce num of
 	// requests to the registry.
-	go func() {
-		br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (retN int, retErr error) {
-			fs.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
-				tr, err := fetchTr()
-				if err != nil {
-					log.G(ctx).WithError(err).Debug("failed to prepare transport for background fetch")
-					retN, retErr = 0, err
-					return
-				}
-				retN, retErr = l.blob.ReadAt(
-					p,
-					offset,
-					remote.WithContext(ctx),              // Make cancellable
-					remote.WithRoundTripper(tr),          // Use dedicated Transport
-					remote.WithCacheOpts(cache.Direct()), // Do not pollute mem cache
-				)
-			}, 120*time.Second)
-			return
-		}), 0, l.blob.Size())
-		if err := layerReader.Cache(
-			reader.WithReader(br),                // Read contents in background
-			reader.WithCacheOpts(cache.Direct()), // Do not pollute mem cache
-		); err != nil {
-			log.G(ctx).WithError(err).Debug("failed to fetch whole layer")
-			return
-		}
-		log.G(ctx).Debug("completed to fetch all layer data in background")
-	}()
+	if !fs.noBackgroundFetch {
+		go func() {
+			br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (retN int, retErr error) {
+				fs.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
+					tr, err := fetchTr()
+					if err != nil {
+						log.G(ctx).WithError(err).Debug("failed to prepare transport for background fetch")
+						retN, retErr = 0, err
+						return
+					}
+					retN, retErr = l.blob.ReadAt(
+						p,
+						offset,
+						remote.WithContext(ctx),              // Make cancellable
+						remote.WithRoundTripper(tr),          // Use dedicated Transport
+						remote.WithCacheOpts(cache.Direct()), // Do not pollute mem cache
+					)
+				}, 120*time.Second)
+				return
+			}), 0, l.blob.Size())
+			if err := layerReader.Cache(
+				reader.WithReader(br),                // Read contents in background
+				reader.WithCacheOpts(cache.Direct()), // Do not pollute mem cache
+			); err != nil {
+				log.G(ctx).WithError(err).Debug("failed to fetch whole layer")
+				return
+			}
+			log.G(ctx).Debug("completed to fetch all layer data in background")
+		}()
+	}
 
 	// Mounting stargz
 	// TODO: bind mount the state directory as a read-only fs on snapshotter's side

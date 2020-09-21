@@ -65,7 +65,7 @@ In each metadata JSON file, the following fields are contained,
 
 - `digest` contains the layer digest. This is the same value as that in the image's manifest.
 - `size` is the size bytes of the layer.
-- `fetchedSize` and `fetchedPercent` indicate how many bytes have been fetched for this layer. Stargz snapshotter aggressively downloads this layer in the background so these values gradually increase. When `fetchedPercent` reaches to `100` percents, this layer has been fully downloaded on the node and no further access will occur for reading files.
+- `fetchedSize` and `fetchedPercent` indicate how many bytes have been fetched for this layer. Stargz snapshotter aggressively downloads this layer in the background - unless configured otherwise - so these values gradually increase. When `fetchedPercent` reaches to `100` percents, this layer has been fully downloaded on the node and no further access will occur for reading files.
 
 Note that the state directory layout and the metadata JSON structure are subject to change.
 
