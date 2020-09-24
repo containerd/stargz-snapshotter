@@ -51,6 +51,8 @@ You can bypass this check only if both of the following conditions meet.
 - `allow_no_verification = true` is specified in `config.toml` of stargz snapshotter, and
 - the content descriptor of this layer has an annotation `containerd.io/snapshot/remote/stargz.skipverify` (the value will be ignored).
 
+The other way is to disable verification completely by setting `disable_verification = true` in `config.toml` of stargz snapshotter.
+
 On mounting a layer, stargz snapshotter fetches this layer's TOC from the registry.
 Then it verifies the TOC by recaluculating the digest and comparing it with the one passed from containerd (written in the manifest).
 If the TOC is successfully verified, then the snapshotter mounts this layer using the metadata stored in the TOC.
