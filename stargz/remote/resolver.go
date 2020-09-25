@@ -32,213 +32,171 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/reference/docker"
+	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/stargz/config"
-	"github.com/golang/groupcache/lru"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/pkg/errors"
 )
 
 const (
-	defaultChunkSize     = 50000
-	defaultValidInterval = 60 * time.Second
-	defaultPoolEntry     = 3000
+	defaultChunkSize        = 50000
+	defaultValidIntervalSec = 60
 )
 
-func NewResolver(keychain authn.Keychain, cfg config.ResolverConfig) *Resolver {
-	if cfg.Host == nil {
-		cfg.Host = make(map[string]config.HostConfig)
+// RegistryHosts returns list of docker.RegistryHost based on the host name and
+// labels.
+type RegistryHosts func(host string, labels map[string]string) ([]docker.RegistryHost, error)
+
+func NewResolver(hosts RegistryHosts, cache cache.BlobCache, cfg config.BlobConfig) *Resolver {
+	if cfg.ChunkSize == 0 { // zero means "use default chunk size"
+		cfg.ChunkSize = defaultChunkSize
 	}
-	poolEntry := cfg.ConnectionPoolEntry
-	if poolEntry == 0 {
-		poolEntry = defaultPoolEntry
+	if cfg.ValidInterval == 0 { // zero means "use default interval"
+		cfg.ValidInterval = defaultValidIntervalSec
 	}
+	if cfg.CheckAlways {
+		cfg.ValidInterval = 0
+	}
+
 	return &Resolver{
-		transport: http.DefaultTransport,
-		trPool:    lru.New(poolEntry),
-		keychain:  keychain,
-		config:    cfg,
+		hosts: hosts,
 		bufPool: sync.Pool{
 			New: func() interface{} {
 				return new(bytes.Buffer)
 			},
 		},
+		blobCache:  cache,
+		blobConfig: cfg,
 	}
 }
 
 type Resolver struct {
-	transport http.RoundTripper
-	trPool    *lru.Cache
-	trPoolMu  sync.Mutex
-	keychain  authn.Keychain
-	config    config.ResolverConfig
-	bufPool   sync.Pool
+	hosts      RegistryHosts
+	blobCache  cache.BlobCache
+	blobConfig config.BlobConfig
+	bufPool    sync.Pool
 }
 
-func (r *Resolver) Resolve(ref, digest string, cache cache.BlobCache, cfg config.BlobConfig) (Blob, error) {
-	fetcher, size, err := r.resolve(ref, digest)
+func (r *Resolver) Resolve(ref, digest string, labels map[string]string) (Blob, error) {
+	refspec, err := reference.Parse(ref)
 	if err != nil {
 		return nil, err
 	}
-	var (
-		chunkSize     int64
-		checkInterval time.Duration
-	)
-	chunkSize = cfg.ChunkSize
-	if chunkSize == 0 { // zero means "use default chunk size"
-		chunkSize = defaultChunkSize
+	hosts, err := r.hosts(refspec.Hostname(), labels)
+	if err != nil {
+		return nil, err
 	}
-	if cfg.ValidInterval == 0 { // zero means "use default interval"
-		checkInterval = defaultValidInterval
-	} else {
-		checkInterval = time.Duration(cfg.ValidInterval) * time.Second
+	fetcher, size, err := newFetcher(hosts, refspec, digest)
+	if err != nil {
+		return nil, err
 	}
-	if cfg.CheckAlways {
-		checkInterval = 0
-	}
+
 	return &blob{
 		fetcher:       fetcher,
 		size:          size,
-		keychain:      r.keychain,
-		chunkSize:     chunkSize,
-		cache:         cache,
+		chunkSize:     r.blobConfig.ChunkSize,
+		cache:         r.blobCache,
 		lastCheck:     time.Now(),
-		checkInterval: checkInterval,
+		checkInterval: time.Duration(r.blobConfig.ValidInterval) * time.Second,
 		resolver:      r,
+		refspec:       refspec,
+		digest:        digest,
+		labels:        labels,
 	}, nil
 }
 
-func (r *Resolver) Refresh(target Blob) error {
-	b, ok := target.(*blob)
-	if !ok {
-		return fmt.Errorf("invalid type of blob. must be *blob")
-	}
-
-	// refresh the fetcher
-	b.fetcherMu.Lock()
-	defer b.fetcherMu.Unlock()
-	new, newSize, err := b.fetcher.refresh()
-	if err != nil {
-		return err
-	} else if newSize != b.size {
-		return fmt.Errorf("Invalid size of new blob %d; want %d", newSize, b.size)
-	}
-
-	// update the blob's fetcher with new one
-	b.fetcher = new
-	b.lastCheck = time.Now()
-
-	return nil
-}
-
-func (r *Resolver) resolve(ref, digest string) (*fetcher, int64, error) {
-	var (
-		nref name.Reference
-		url  string
-		tr   http.RoundTripper
-		size int64
-	)
-	named, err := docker.ParseDockerRef(ref)
-	if err != nil {
-		return nil, 0, err
-	}
-	hosts := append(r.config.Host[docker.Domain(named)].Mirrors, config.MirrorConfig{
-		Host: docker.Domain(named),
-	})
+func newFetcher(hosts []docker.RegistryHost, refspec reference.Spec, digest string) (*fetcher, int64, error) {
+	// Try to create fetcher until succeeded
 	rErr := fmt.Errorf("failed to resolve")
 	for _, h := range hosts {
-		// Parse reference
 		if h.Host == "" || strings.Contains(h.Host, "/") {
 			rErr = errors.Wrapf(rErr, "host %q: mirror must be a domain name", h.Host)
-			continue // try another host
+			continue // Try another host
 		}
-		var opts []name.Option
-		if h.Insecure {
-			opts = append(opts, name.Insecure)
-		}
-		sref := fmt.Sprintf("%s/%s", h.Host, docker.Path(named))
-		nref, err = name.ParseReference(sref, opts...)
-		if err != nil {
-			rErr = errors.Wrapf(rErr, "host %q: failed to parse ref %q (%q): %v",
-				h.Host, sref, digest, err)
-			continue // try another host
+
+		// Prepare transport with authorization functionality
+		tr := h.Client.Transport
+		if h.Authorizer != nil {
+			tr = &transport{
+				inner: tr,
+				auth:  h.Authorizer,
+			}
 		}
 
 		// Resolve redirection and get blob URL
-		url, tr, err = r.resolveReference(nref, digest)
+		url, err := redirect(fmt.Sprintf("%s://%s/%s/blobs/%s",
+			h.Scheme,
+			path.Join(h.Host, h.Path),
+			strings.TrimPrefix(refspec.Locator, refspec.Hostname()+"/"),
+			digest), tr)
 		if err != nil {
-			rErr = errors.Wrapf(rErr, "host %q: failed to resolve ref %q (%q): %v",
-				h.Host, nref.String(), digest, err)
-			continue // try another host
+			rErr = errors.Wrapf(rErr, "host %q (ref:%q, digest:%q): failed to redirect: %v",
+				h.Host, refspec, digest, err)
+			continue // Try another host
 		}
 
 		// Get size information
-		size, err = getSize(url, tr)
+		size, err := getSize(url, tr)
 		if err != nil {
 			rErr = errors.Wrapf(rErr, "host %q: failed to get size: %v", h.Host, err)
-			continue // try another host
+			continue // Try another host
 		}
 
-		rErr = nil // Hit one accessible mirror
-		break
-	}
-	if rErr != nil {
-		return nil, 0, errors.Wrapf(rErr, "cannot resolve ref %q (%q)", ref, digest)
+		// Hit one host
+		return &fetcher{
+			url: url,
+			tr:  tr,
+		}, size, nil
 	}
 
-	return &fetcher{
-		resolver: r,
-		ref:      ref,
-		digest:   digest,
-		nref:     nref,
-		url:      url,
-		tr:       tr,
-	}, size, nil
+	return nil, 0, errors.Wrapf(rErr, "cannot resolve ref %q (%q)", refspec, digest)
 }
 
-func (r *Resolver) resolveReference(ref name.Reference, digest string) (string, http.RoundTripper, error) {
-	r.trPoolMu.Lock()
-	defer r.trPoolMu.Unlock()
+type transport struct {
+	inner http.RoundTripper
+	auth  docker.Authorizer
+}
 
-	// Construct endpoint URL from given ref
-	endpointURL := fmt.Sprintf("%s://%s/v2/%s/blobs/%s",
-		ref.Context().Registry.Scheme(),
-		ref.Context().RegistryStr(),
-		ref.Context().RepositoryStr(),
-		digest)
-
-	// Try to use cached transport (cahced per reference name)
-	if tr, ok := r.trPool.Get(ref.Name()); ok {
-		if url, err := redirect(endpointURL, tr.(http.RoundTripper)); err == nil {
-			return url, tr.(http.RoundTripper), nil
+func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	roundTrip := func(req *http.Request) (*http.Response, error) {
+		// authorize the request using docker.Authorizer
+		if err := tr.auth.Authorize(req.Context(), req); err != nil {
+			return nil, err
 		}
+
+		// send the request
+		return tr.inner.RoundTrip(req)
 	}
 
-	// Remove the stale transport from cache
-	r.trPool.Remove(ref.Name())
-
-	// transport is unavailable/expired so refresh the transport and try again
-	tr, err := authnTransport(ref, r.transport, r.keychain)
+	resp, err := roundTrip(req)
 	if err != nil {
-		return "", nil, err
-	}
-	url, err := redirect(endpointURL, tr)
-	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
-	// Update transports cache
-	r.trPool.Add(ref.Name(), tr)
+	// TODO: support more status codes and retries
+	if resp.StatusCode == http.StatusUnauthorized {
 
-	return url, tr, nil
+		// prepare authorization for the target host using docker.Authorizer
+		if err := tr.auth.AddResponses(req.Context(), []*http.Response{resp}); err != nil {
+			if errdefs.IsNotImplemented(err) {
+				return resp, nil
+			}
+			return nil, err
+		}
+
+		// re-authorize and send the request
+		return roundTrip(req.Clone(req.Context()))
+	}
+
+	return resp, nil
 }
 
 func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) {
@@ -292,46 +250,11 @@ func getSize(url string, tr http.RoundTripper) (int64, error) {
 	return strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
 }
 
-func authnTransport(ref name.Reference, tr http.RoundTripper, keychain authn.Keychain) (http.RoundTripper, error) {
-	if keychain == nil {
-		keychain = authn.DefaultKeychain
-	}
-	authn, err := keychain.Resolve(ref.Context())
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to resolve the reference %q", ref)
-	}
-	errCh := make(chan error)
-	var rTr http.RoundTripper
-	go func() {
-		rTr, err = transport.New(
-			ref.Context().Registry,
-			authn,
-			tr,
-			[]string{ref.Scope(transport.PullScope)},
-		)
-		errCh <- err
-	}()
-	select {
-	case err = <-errCh:
-	case <-time.After(10 * time.Second):
-		return nil, fmt.Errorf("authentication timeout")
-	}
-	return rTr, err
-}
-
 type fetcher struct {
-	resolver      *Resolver
-	ref           string
-	digest        string
-	nref          name.Reference
 	url           string
 	tr            http.RoundTripper
 	singleRange   bool
 	singleRangeMu sync.Mutex
-}
-
-func (f *fetcher) refresh() (*fetcher, int64, error) {
-	return f.resolver.resolve(f.ref, f.digest)
 }
 
 type multipartReadCloser interface {
@@ -439,10 +362,6 @@ func (f *fetcher) check() error {
 	}
 
 	return nil
-}
-
-func (f *fetcher) authn(tr http.RoundTripper, keychain authn.Keychain) (http.RoundTripper, error) {
-	return authnTransport(f.nref, tr, keychain)
 }
 
 func (f *fetcher) genID(reg region) string {

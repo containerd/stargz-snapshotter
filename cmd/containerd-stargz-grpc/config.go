@@ -23,9 +23,25 @@ type Config struct {
 
 	// KubeconfigKeychainConfig is config for kubeconfig-based keychain.
 	KubeconfigKeychainConfig `toml:"kubeconfig_keychain"`
+
+	// ResolverConfig is config for resolving registries.
+	ResolverConfig `toml:"resolver"`
 }
 
 type KubeconfigKeychainConfig struct {
 	EnableKeychain bool   `toml:"enable_keychain"`
 	KubeconfigPath string `toml:"kubeconfig_path"`
+}
+
+type ResolverConfig struct {
+	Host map[string]HostConfig `toml:"host"`
+}
+
+type HostConfig struct {
+	Mirrors []MirrorConfig `toml:"mirrors"`
+}
+
+type MirrorConfig struct {
+	Host     string `toml:"host"`
+	Insecure bool   `toml:"insecure"`
 }

@@ -107,6 +107,12 @@ func (r *breakBlob) Check() error {
 	}
 	return nil
 }
+func (r *breakBlob) Refresh() error {
+	if !r.success {
+		return fmt.Errorf("failed")
+	}
+	return nil
+}
 
 // Tests Read method of each file node.
 func TestNodeRead(t *testing.T) {
@@ -381,6 +387,7 @@ func (db *dummyBlob) Size() int64                                               
 func (db *dummyBlob) FetchedSize() int64                                                { return 5 }
 func (db *dummyBlob) Check() error                                                      { return nil }
 func (db *dummyBlob) Cache(offset int64, size int64, option ...remote.Option) error     { return nil }
+func (db *dummyBlob) Refresh() error                                                    { return nil }
 
 type chunkSizeInfo int
 
@@ -792,48 +799,6 @@ func digestFor(content string) string {
 	return fmt.Sprintf("sha256:%x", sum)
 }
 
-func TestLazyTransport(t *testing.T) {
-	ta := lazyTransport(func() (http.RoundTripper, error) {
-		return &okRoundTripper{}, nil
-	})
-
-	// Initialize transport
-	tr1, err := ta()
-	if err != nil {
-		t.Fatalf("failed to initialize transport: %v", err)
-	}
-	if tr1 == nil {
-		t.Errorf("initialized transport is nil")
-		return
-	}
-
-	// Get the created transport again
-	tr2, err := ta()
-	if err != nil {
-		t.Fatalf("failed to get transport: %v", err)
-	}
-	if tr2 == nil {
-		t.Errorf("passed transport is nil")
-		return
-	}
-
-	// Check if these transports are same
-	if tr1 != tr2 {
-		t.Errorf("lazyTransport gave different transports on each time")
-		return
-	}
-}
-
-type okRoundTripper struct{}
-
-func (tr *okRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     make(http.Header),
-		Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
-	}, nil
-}
-
 // Tests prefetch method of each stargz file.
 func TestPrefetch(t *testing.T) {
 	prefetchLandmarkFile := regfile(PrefetchLandmark, "test")
@@ -993,6 +958,7 @@ func (sb *sampleBlob) Cache(offset int64, size int64, option ...remote.Option) e
 	sb.calledPrefetchSize = size
 	return nil
 }
+func (sb *sampleBlob) Refresh() error { return nil }
 
 type testCache struct {
 	membuf map[string]string

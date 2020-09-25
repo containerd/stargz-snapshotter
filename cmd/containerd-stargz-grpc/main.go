@@ -20,21 +20,24 @@ import (
 	"context"
 	"flag"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-
-	"google.golang.org/grpc"
 
 	"github.com/BurntSushi/toml"
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/remotes/docker"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/stargz"
 	"github.com/containerd/stargz-snapshotter/stargz/keychain"
+	"github.com/containerd/stargz-snapshotter/stargz/remote"
 	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -62,9 +65,8 @@ func main() {
 	})
 
 	var (
-		ctx     = log.WithLogger(context.Background(), log.L)
-		config  Config
-		sgzOpts []stargz.Option
+		ctx    = log.WithLogger(context.Background(), log.L)
+		config Config
 	)
 
 	// Get configuration from specified file
@@ -75,17 +77,22 @@ func main() {
 	}
 
 	// Prepare kubeconfig-based keychain if required
+	kc := authn.DefaultKeychain
 	if config.KubeconfigKeychainConfig.EnableKeychain {
 		var opts []keychain.KubeconfigOption
 		if kcp := config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
 			opts = append(opts, keychain.WithKubeconfigPath(kcp))
 		}
-		kk := keychain.NewKubeconfigKeychain(ctx, opts...)
-		sgzOpts = append(sgzOpts, stargz.WithKeychain([]authn.Keychain{kk}))
+		kc = authn.NewMultiKeychain(kc, keychain.NewKubeconfigKeychain(ctx, opts...))
 	}
 
 	// Configure filesystem and snapshotter
-	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"), config.Config, sgzOpts...)
+	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"),
+		config.Config,
+
+		// Use RegistryHosts based on ResolverConfig and keychain
+		stargz.WithRegistryHosts(hostsFromConfig(config.ResolverConfig, kc)),
+	)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
 	}
@@ -136,4 +143,52 @@ func waitForSIGINT() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	<-c
+}
+
+func hostsFromConfig(cfg ResolverConfig, keychain authn.Keychain) remote.RegistryHosts {
+	return func(host string, _ map[string]string) (hosts []docker.RegistryHost, _ error) {
+		for _, h := range append(cfg.Host[host].Mirrors, MirrorConfig{
+			Host: host,
+		}) {
+			tr := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+			config := docker.RegistryHost{
+				Client:       tr,
+				Host:         h.Host,
+				Scheme:       "https",
+				Path:         "/v2",
+				Capabilities: docker.HostCapabilityPull,
+				Authorizer: docker.NewDockerAuthorizer(
+					docker.WithAuthClient(tr),
+					docker.WithAuthCreds(func(host string) (string, string, error) {
+						if host == "registry-1.docker.io" {
+							host = "index.docker.io"
+						}
+						reg, err := name.NewRegistry(host)
+						if err != nil {
+							return "", "", err
+						}
+						authn, err := keychain.Resolve(reg)
+						if err != nil {
+							return "", "", err
+						}
+						acfg, err := authn.Authorization()
+						if err != nil {
+							return "", "", err
+						}
+						if acfg.IdentityToken != "" {
+							return "", acfg.IdentityToken, nil
+						}
+						return acfg.Username, acfg.Password, nil
+					})),
+			}
+			if localhost, _ := docker.MatchLocalhost(config.Host); localhost || h.Insecure {
+				config.Scheme = "http"
+			}
+			if config.Host == "docker.io" {
+				config.Host = "registry-1.docker.io"
+			}
+			hosts = append(hosts, config)
+		}
+		return
+	}
 }
