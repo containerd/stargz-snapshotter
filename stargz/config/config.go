@@ -32,6 +32,7 @@ type Config struct {
 	NoBackgroundFetch   bool   `toml:"no_background_fetch"`
 	Debug               bool   `toml:"debug"`
 	AllowNoVerification bool   `toml:"allow_no_verification"`
+	DisableVerification bool   `toml:"disable_verification"`
 
 	// ResolverConfig is config for resolving registries.
 	ResolverConfig `toml:"resolver"`

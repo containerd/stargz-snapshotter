@@ -179,6 +179,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.Fil
 		resolveResult:         lru.New(resolveResultEntry),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
 		allowNoVerification:   cfg.AllowNoVerification,
+		disableVerification:   cfg.DisableVerification,
 	}, nil
 }
 
@@ -198,6 +199,7 @@ type filesystem struct {
 	resolveResultMu       sync.Mutex
 	backgroundTaskManager *task.BackgroundTaskManager
 	allowNoVerification   bool
+	disableVerification   bool
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
@@ -261,8 +263,13 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		return err
 	}
 
-	// Verify this layer using the TOC JSON digest passed through label.
-	if tocDigest, ok := labels[verify.TOCJSONDigestAnnotation]; ok {
+	// Verify layer's content
+	if fs.disableVerification {
+		// Skip if verification is disabled completely
+		l.skipVerify()
+		log.G(ctx).Debugf("Verification forcefully skipped")
+	} else if tocDigest, ok := labels[verify.TOCJSONDigestAnnotation]; ok {
+		// Verify this layer using the TOC JSON digest passed through label.
 		dgst, err := digest.Parse(tocDigest)
 		if err != nil {
 			log.G(ctx).WithError(err).Debugf("failed to parse passed TOC digest %q", dgst)
