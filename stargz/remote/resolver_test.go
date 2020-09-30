@@ -29,22 +29,24 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"testing"
 
-	"github.com/containerd/stargz-snapshotter/stargz/config"
-	"github.com/golang/groupcache/lru"
-	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/remotes/docker"
 )
 
 func TestMirror(t *testing.T) {
-	ref, err := name.ParseReference("dummyexample.com/library/test")
+	ref := "dummyexample.com/library/test"
+	refspec, err := reference.Parse(ref)
 	if err != nil {
 		t.Fatalf("failed to prepare dummy reference: %v", err)
 	}
 	var (
 		blobDigest = "sha256:deadbeaf"
-		blobPath   = fmt.Sprintf("/v2/%s/blobs/%s", ref.Context().RepositoryStr(), blobDigest)
-		refHost    = ref.Context().RegistryStr()
+		blobPath   = fmt.Sprintf("/v2/%s/blobs/%s",
+			strings.TrimPrefix(refspec.Locator, refspec.Hostname()+"/"), blobDigest)
+		refHost = refspec.Hostname()
 	)
 
 	tests := []struct {
@@ -145,24 +147,17 @@ func TestMirror(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var mirrors []config.MirrorConfig
-			for _, m := range tt.mirrors {
-				mirrors = append(mirrors, config.MirrorConfig{
-					Host: m,
+			var hosts []docker.RegistryHost
+			for _, m := range append(tt.mirrors, refHost) {
+				hosts = append(hosts, docker.RegistryHost{
+					Client:       &http.Client{Transport: tt.tr},
+					Host:         m,
+					Scheme:       "https",
+					Path:         "/v2",
+					Capabilities: docker.HostCapabilityPull,
 				})
 			}
-			r := &Resolver{
-				transport: tt.tr,
-				trPool:    lru.New(3000),
-				config: config.ResolverConfig{
-					Host: map[string]config.HostConfig{
-						refHost: {
-							Mirrors: mirrors,
-						},
-					},
-				},
-			}
-			fetcher, _, err := r.resolve(ref.String(), blobDigest)
+			fetcher, _, err := newFetcher(hosts, refspec, blobDigest)
 			if err != nil {
 				if tt.error {
 					return
@@ -181,199 +176,6 @@ func TestMirror(t *testing.T) {
 	}
 }
 
-func TestPool(t *testing.T) {
-	ref, err := name.ParseReference("dummyexample.com/library/test")
-	if err != nil {
-		t.Fatalf("failed to prepare dummy reference: %v", err)
-	}
-	var (
-		digest  = "sha256:deadbeaf"
-		blobURL = fmt.Sprintf("%s://%s/v2/%s/blobs/%s",
-			ref.Context().Registry.Scheme(),
-			ref.Context().RegistryStr(),
-			ref.Context().RepositoryStr(),
-			digest)
-		redirectedURL  = "https://backendexample.com/blobs/sha256:deadbeaf"
-		okRoundTripper = &sampleRoundTripper{
-			okURLs: []string{`.*`},
-		}
-		redirectRoundTripper = &sampleRoundTripper{
-			redirectURL: map[string]string{
-				regexp.QuoteMeta(blobURL): redirectedURL,
-			},
-			okURLs: []string{regexp.QuoteMeta(ref.Context().RegistryStr())},
-		}
-		unauthorizedRoundTripper = &sampleRoundTripper{
-			withCode: map[string]int{
-				regexp.QuoteMeta(ref.Context().RegistryStr()): http.StatusUnauthorized,
-			},
-			okURLs: []string{`.*`},
-		}
-		notFoundRoundTripper = &sampleRoundTripper{}
-	)
-	tests := []struct {
-		name  string
-		pool  http.RoundTripper
-		base  http.RoundTripper
-		check func(t *testing.T, pool interface{}, url string, err error)
-	}{
-		{
-			name: "create-new-tr",
-			pool: nil,
-			base: okRoundTripper,
-			check: func(t *testing.T, pool interface{}, url string, err error) {
-				if err != nil {
-					t.Errorf("want to success: %v", err)
-					return
-				}
-				if p, ok := pool.(http.RoundTripper); !ok || p == nil {
-					t.Error("new RoundTripper isn't pooled")
-					return
-				}
-				if url != blobURL {
-					t.Errorf("invalid URL %q; want %q", url, blobURL)
-					return
-				}
-			},
-		},
-		{
-			name: "create-new-tr-with-redirect",
-			pool: nil,
-			base: redirectRoundTripper,
-			check: func(t *testing.T, pool interface{}, url string, err error) {
-				if err != nil {
-					t.Errorf("want to success: %v", err)
-					return
-				}
-				if p, ok := pool.(http.RoundTripper); !ok || p == nil {
-					t.Error("new RoundTripper isn't pooled")
-					return
-				}
-				if url != redirectedURL {
-					t.Errorf("invalid URL %q; want %q", url, redirectedURL)
-					return
-				}
-			},
-		},
-		{
-			name: "fail-to-create-new-tr-with-unauthorized",
-			pool: nil,
-			base: unauthorizedRoundTripper,
-			check: func(t *testing.T, pool interface{}, url string, err error) {
-				if err == nil {
-					t.Error("want to fail")
-					return
-				}
-			},
-		},
-		{
-			name: "use-pooled-ok-tr",
-			pool: okRoundTripper,
-			base: notFoundRoundTripper, // won't be used
-			check: func(t *testing.T, pool interface{}, url string, err error) {
-				if err != nil {
-					t.Errorf("want to success: %v", err)
-					return
-				}
-				if p, ok := pool.(http.RoundTripper); !ok || p != okRoundTripper {
-					t.Error("got RoundTripper isn't same as pooled one")
-					return
-				}
-				if url != blobURL {
-					t.Errorf("invalid URL %q; want %q", url, blobURL)
-					return
-				}
-			},
-		},
-		{
-			name: "use-pooled-redirect-tr",
-			pool: redirectRoundTripper,
-			base: notFoundRoundTripper, // won't be used
-			check: func(t *testing.T, pool interface{}, url string, err error) {
-				if err != nil {
-					t.Errorf("want to success: %v", err)
-					return
-				}
-				if p, ok := pool.(http.RoundTripper); !ok || p != redirectRoundTripper {
-					t.Error("got RoundTripper isn't same as pooled one")
-					return
-				}
-				if url != redirectedURL {
-					t.Errorf("invalid URL %q; want %q", url, redirectedURL)
-					return
-				}
-			},
-		},
-		{
-			name: "refresh-unauthorized-tr",
-			pool: unauthorizedRoundTripper,
-			base: okRoundTripper,
-			check: func(t *testing.T, pool interface{}, url string, err error) {
-				if err != nil {
-					t.Errorf("want to success: %v", err)
-					return
-				}
-				if p, ok := pool.(http.RoundTripper); !ok || p == unauthorizedRoundTripper {
-					t.Error("RoundTripper must be refreshed")
-					return
-				}
-				if url != blobURL {
-					t.Errorf("invalid URL %q; want %q", url, blobURL)
-					return
-				}
-			},
-		},
-		{
-			name: "refresh-unauthorized-tr-with-redirect",
-			pool: unauthorizedRoundTripper,
-			base: redirectRoundTripper,
-			check: func(t *testing.T, pool interface{}, url string, err error) {
-				if err != nil {
-					t.Errorf("want to success: %v", err)
-					return
-				}
-				if p, ok := pool.(http.RoundTripper); !ok || p == unauthorizedRoundTripper {
-					t.Error("RoundTripper must be refreshed")
-					return
-				}
-				if url != redirectedURL {
-					t.Errorf("invalid URL %q; want %q", url, redirectedURL)
-					return
-				}
-			},
-		},
-		{
-			name: "fail-to-refresh",
-			pool: unauthorizedRoundTripper,
-			base: notFoundRoundTripper,
-			check: func(t *testing.T, pool interface{}, url string, err error) {
-				if err == nil {
-					t.Error("want to fail")
-					return
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &Resolver{
-				transport: tt.base,
-				trPool:    lru.New(3000),
-			}
-			if tt.pool != nil {
-				r.trPool.Add(ref.Name(), tt.pool)
-			}
-			url, tr, err := r.resolveReference(ref, digest)
-			cached, ok := r.trPool.Get(ref.Name())
-			if ok && cached.(http.RoundTripper) != tr {
-				t.Errorf("Invalid cached transport")
-			}
-			tt.check(t, cached, url, err)
-		})
-	}
-}
-
 type sampleRoundTripper struct {
 	withCode    map[string]int
 	redirectURL map[string]string
@@ -387,6 +189,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 				StatusCode: code,
 				Header:     make(http.Header),
 				Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+				Request:    req,
 			}, nil
 		}
 	}
@@ -398,6 +201,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 				StatusCode: http.StatusMovedPermanently,
 				Header:     header,
 				Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+				Request:    req,
 			}, nil
 		}
 	}
@@ -409,6 +213,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 				StatusCode: http.StatusOK,
 				Header:     header,
 				Body:       ioutil.NopCloser(bytes.NewReader([]byte{0})),
+				Request:    req,
 			}, nil
 		}
 	}
@@ -416,6 +221,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		StatusCode: http.StatusNotFound,
 		Header:     make(http.Header),
 		Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		Request:    req,
 	}, nil
 }
 

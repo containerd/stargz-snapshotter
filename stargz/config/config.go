@@ -34,28 +34,11 @@ type Config struct {
 	AllowNoVerification bool   `toml:"allow_no_verification"`
 	DisableVerification bool   `toml:"disable_verification"`
 
-	// ResolverConfig is config for resolving registries.
-	ResolverConfig `toml:"resolver"`
-
 	// BlobConfig is config for layer blob management.
 	BlobConfig `toml:"blob"`
 
 	// DirectoryCacheConfig is config for directory-based cache.
 	DirectoryCacheConfig `toml:"directory_cache"`
-}
-
-type ResolverConfig struct {
-	Host                map[string]HostConfig `toml:"host"`
-	ConnectionPoolEntry int                   `toml:"connection_pool_entry"`
-}
-
-type HostConfig struct {
-	Mirrors []MirrorConfig `toml:"mirrors"`
-}
-
-type MirrorConfig struct {
-	Host     string `toml:"host"`
-	Insecure bool   `toml:"insecure"`
 }
 
 type BlobConfig struct {

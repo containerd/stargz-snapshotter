@@ -28,25 +28,24 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net/http"
 	"regexp"
 	"sync"
 	"time"
 
+	"github.com/containerd/containerd/reference"
 	"github.com/containerd/stargz-snapshotter/cache"
-	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/pkg/errors"
 )
 
 var contentRangeRegexp = regexp.MustCompile(`bytes ([0-9]+)-([0-9]+)/([0-9]+|\\*)`)
 
 type Blob interface {
-	Authn(tr http.RoundTripper) (http.RoundTripper, error)
 	Check() error
 	Size() int64
 	FetchedSize() int64
 	ReadAt(p []byte, offset int64, opts ...Option) (int, error)
 	Cache(offset int64, size int64, opts ...Option) error
+	Refresh() error
 }
 
 type blob struct {
@@ -54,7 +53,6 @@ type blob struct {
 	fetcherMu sync.Mutex
 
 	size          int64
-	keychain      authn.Keychain
 	chunkSize     int64
 	cache         cache.BlobCache
 	lastCheck     time.Time
@@ -64,13 +62,33 @@ type blob struct {
 	fetchedRegionSetMu sync.Mutex
 
 	resolver *Resolver
+	refspec  reference.Spec
+	digest   string
+	labels   map[string]string
 }
 
-func (b *blob) Authn(tr http.RoundTripper) (http.RoundTripper, error) {
+func (b *blob) Refresh() error {
+	// get fresh registry configuration
+	hosts, err := b.resolver.hosts(b.refspec.Hostname(), b.labels)
+	if err != nil {
+		return err
+	}
+
+	// refresh the fetcher
+	new, newSize, err := newFetcher(hosts, b.refspec, b.digest)
+	if err != nil {
+		return err
+	} else if newSize != b.size {
+		return fmt.Errorf("Invalid size of new blob %d; want %d", newSize, b.size)
+	}
+
+	// update the blob's fetcher with new one
 	b.fetcherMu.Lock()
-	fr := b.fetcher
+	b.fetcher = new
 	b.fetcherMu.Unlock()
-	return fr.authn(tr, b.keychain)
+	b.lastCheck = time.Now()
+
+	return nil
 }
 
 func (b *blob) Check() error {
