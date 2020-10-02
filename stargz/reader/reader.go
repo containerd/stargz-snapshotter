@@ -147,6 +147,13 @@ func (gr *reader) cacheWithReader(ctx context.Context, eg *errgroup.Group, sem *
 	dir.ForeachChild(func(_ string, e *stargz.TOCEntry) bool {
 		if e.Type == "dir" {
 			// Walk through all files on this stargz file.
+
+			// Ignore a TOCEntry of "./" (formated as "" by stargz lib) on root directory
+			// because this points to the root directory itself.
+			if e.Name == "" && dir.Name == "" {
+				return true
+			}
+
 			// Make sure the entry is the immediate child for avoiding loop.
 			if filepath.Dir(filepath.Clean(e.Name)) != filepath.Clean(dir.Name) {
 				rErr = fmt.Errorf("invalid child path %q; must be child of %q",
