@@ -32,6 +32,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -114,6 +115,10 @@ func (r *Resolver) Resolve(ref, digest string, labels map[string]string) (Blob, 
 }
 
 func newFetcher(hosts []docker.RegistryHost, refspec reference.Spec, digest string) (*fetcher, int64, error) {
+	u, err := url.Parse("dummy://" + refspec.Locator)
+	if err != nil {
+		return nil, 0, err
+	}
 	// Try to create fetcher until succeeded
 	rErr := fmt.Errorf("failed to resolve")
 	for _, h := range hosts {
@@ -128,6 +133,9 @@ func newFetcher(hosts []docker.RegistryHost, refspec reference.Spec, digest stri
 			tr = &transport{
 				inner: tr,
 				auth:  h.Authorizer,
+				// Specify pull scope
+				// TODO: The scope generator function in containerd (github.com/containerd/containerd/remotes/docker/scope.go) should be exported and used here.
+				scope: "repository:" + strings.TrimPrefix(u.Path, "/") + ":pull",
 			}
 		}
 
@@ -163,12 +171,14 @@ func newFetcher(hosts []docker.RegistryHost, refspec reference.Spec, digest stri
 type transport struct {
 	inner http.RoundTripper
 	auth  docker.Authorizer
+	scope string
 }
 
 func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx := docker.WithScope(req.Context(), tr.scope)
 	roundTrip := func(req *http.Request) (*http.Response, error) {
 		// authorize the request using docker.Authorizer
-		if err := tr.auth.Authorize(req.Context(), req); err != nil {
+		if err := tr.auth.Authorize(ctx, req); err != nil {
 			return nil, err
 		}
 
@@ -185,7 +195,7 @@ func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if resp.StatusCode == http.StatusUnauthorized {
 
 		// prepare authorization for the target host using docker.Authorizer
-		if err := tr.auth.AddResponses(req.Context(), []*http.Response{resp}); err != nil {
+		if err := tr.auth.AddResponses(ctx, []*http.Response{resp}); err != nil {
 			if errdefs.IsNotImplemented(err) {
 				return resp, nil
 			}
@@ -193,7 +203,7 @@ func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		// re-authorize and send the request
-		return roundTrip(req.Clone(req.Context()))
+		return roundTrip(req.Clone(ctx))
 	}
 
 	return resp, nil
