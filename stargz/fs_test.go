@@ -72,12 +72,12 @@ func TestCheck(t *testing.T) {
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
 	}
 	bb.success = true
-	if err := fs.Check(context.TODO(), "test"); err != nil {
+	if err := fs.Check(context.TODO(), "test", nil); err != nil {
 		t.Errorf("connection failed; wanted to succeed")
 	}
 
 	bb.success = false
-	if err := fs.Check(context.TODO(), "test"); err == nil {
+	if err := fs.Check(context.TODO(), "test", nil); err == nil {
 		t.Errorf("connection succeeded; wanted to fail")
 	}
 }
@@ -107,7 +107,7 @@ func (r *breakBlob) Check() error {
 	}
 	return nil
 }
-func (r *breakBlob) Refresh() error {
+func (r *breakBlob) Refresh(labels map[string]string) error {
 	if !r.success {
 		return fmt.Errorf("failed")
 	}
@@ -387,7 +387,7 @@ func (db *dummyBlob) Size() int64                                               
 func (db *dummyBlob) FetchedSize() int64                                                { return 5 }
 func (db *dummyBlob) Check() error                                                      { return nil }
 func (db *dummyBlob) Cache(offset int64, size int64, option ...remote.Option) error     { return nil }
-func (db *dummyBlob) Refresh() error                                                    { return nil }
+func (db *dummyBlob) Refresh(labels map[string]string) error                            { return nil }
 
 type chunkSizeInfo int
 
@@ -958,7 +958,7 @@ func (sb *sampleBlob) Cache(offset int64, size int64, option ...remote.Option) e
 	sb.calledPrefetchSize = size
 	return nil
 }
-func (sb *sampleBlob) Refresh() error { return nil }
+func (sb *sampleBlob) Refresh(labels map[string]string) error { return nil }
 
 type testCache struct {
 	membuf map[string]string

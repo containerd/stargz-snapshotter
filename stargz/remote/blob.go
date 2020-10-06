@@ -45,7 +45,7 @@ type Blob interface {
 	FetchedSize() int64
 	ReadAt(p []byte, offset int64, opts ...Option) (int, error)
 	Cache(offset int64, size int64, opts ...Option) error
-	Refresh() error
+	Refresh(labels map[string]string) error
 }
 
 type blob struct {
@@ -64,12 +64,11 @@ type blob struct {
 	resolver *Resolver
 	refspec  reference.Spec
 	digest   string
-	labels   map[string]string
 }
 
-func (b *blob) Refresh() error {
+func (b *blob) Refresh(labels map[string]string) error {
 	// get fresh registry configuration
-	hosts, err := b.resolver.hosts(b.refspec.Hostname(), b.labels)
+	hosts, err := b.resolver.hosts(b.refspec.Hostname(), labels)
 	if err != nil {
 		return err
 	}
@@ -97,11 +96,17 @@ func (b *blob) Check() error {
 		// do nothing if not expired
 		return nil
 	}
-	b.lastCheck = now
 	b.fetcherMu.Lock()
 	fr := b.fetcher
 	b.fetcherMu.Unlock()
-	return fr.check()
+	err := fr.check()
+	if err == nil {
+		// update lastCheck only if check succeeded.
+		// on failure, we should check this layer next time again.
+		b.lastCheck = now
+	}
+
+	return err
 }
 
 func (b *blob) Size() int64 {
