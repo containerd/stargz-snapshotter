@@ -110,7 +110,6 @@ func (r *Resolver) Resolve(ref, digest string, labels map[string]string) (Blob, 
 		resolver:      r,
 		refspec:       refspec,
 		digest:        digest,
-		labels:        labels,
 	}, nil
 }
 

@@ -63,7 +63,7 @@ const (
 // directory.
 type FileSystem interface {
 	Mount(ctx context.Context, mountpoint string, labels map[string]string) error
-	Check(ctx context.Context, mountpoint string) error
+	Check(ctx context.Context, mountpoint string, labels map[string]string) error
 	Unmount(ctx context.Context, mountpoint string) error
 }
 
@@ -667,7 +667,7 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 		if _, ok := info.Labels[remoteLabel]; ok {
 			eg.Go(func() error {
 				log.G(lCtx).Debug("checking mount point")
-				if err := o.fs.Check(egCtx, mp); err != nil {
+				if err := o.fs.Check(egCtx, mp, info.Labels); err != nil {
 					log.G(lCtx).WithError(err).Warn("layer is unavailable")
 					return err
 				}

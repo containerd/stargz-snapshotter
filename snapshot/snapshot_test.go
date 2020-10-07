@@ -406,7 +406,7 @@ func (fs *bindFs) Mount(ctx context.Context, mountpoint string, labels map[strin
 	return nil
 }
 
-func (fs *bindFs) Check(ctx context.Context, mountpoint string) error {
+func (fs *bindFs) Check(ctx context.Context, mountpoint string, labels map[string]string) error {
 	if fs.checkFailure {
 		if broken, ok := fs.broken[mountpoint]; ok && broken {
 			return fmt.Errorf("broken")
@@ -427,7 +427,7 @@ func (fs *dummyFs) Mount(ctx context.Context, mountpoint string, labels map[stri
 	return fmt.Errorf("dummy")
 }
 
-func (fs *dummyFs) Check(ctx context.Context, mountpoint string) error {
+func (fs *dummyFs) Check(ctx context.Context, mountpoint string, labels map[string]string) error {
 	return fmt.Errorf("dummy")
 }
 

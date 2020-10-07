@@ -259,7 +259,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		log.G(ctx).WithError(err).Debug("failed to resolve layer")
 		return errors.Wrapf(err, "failed to resolve layer(%q,%q)", ref, ldgst)
 	}
-	if err := fs.check(ctx, l); err != nil { // check the connectivity
+	if err := fs.check(ctx, l, labels); err != nil { // check the connectivity
 		return err
 	}
 
@@ -420,7 +420,7 @@ func (fs *filesystem) resolve(ctx context.Context, ref, digest string, labels ma
 	})
 }
 
-func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
+func (fs *filesystem) Check(ctx context.Context, mountpoint string, labels map[string]string) error {
 	// This is a prioritized task and all background tasks will be stopped
 	// execution so this can avoid being disturbed for NW traffic by background
 	// tasks.
@@ -438,7 +438,7 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	}
 
 	// Check the blob connectivity and refresh the connection if possible
-	if err := fs.check(ctx, l); err != nil {
+	if err := fs.check(ctx, l, labels); err != nil {
 		log.G(ctx).WithError(err).Warn("check failed")
 		return err
 	}
@@ -451,13 +451,13 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string) error {
 	return nil
 }
 
-func (fs *filesystem) check(ctx context.Context, l *layer) error {
+func (fs *filesystem) check(ctx context.Context, l *layer, labels map[string]string) error {
 	if err := l.blob.Check(); err != nil {
 		// Check failed. Try to refresh the connection
 		retrynum := 1
 		log.G(ctx).WithError(err).Warn("failed to connect to blob; refreshing...")
 		for retry := 0; retry < retrynum; retry++ {
-			if iErr := l.blob.Refresh(); iErr != nil {
+			if iErr := l.blob.Refresh(labels); iErr != nil {
 				log.G(ctx).WithError(iErr).Warnf("failed to refresh connection(%d)",
 					retry)
 				err = errors.Wrapf(err, "error(%d): %v", retry, iErr)
