@@ -72,9 +72,16 @@ func (b *blob) Refresh(labels map[string]string) error {
 	if err != nil {
 		return err
 	}
+	for i := range hosts {
+		if hosts[i].RefAlias.String() == "" {
+			// If an alias isn't specified by the config, use the default reference.
+			// TODO: maybe we shouldn't tie a snapshot to a single image reference.
+			hosts[i].RefAlias = b.refspec
+		}
+	}
 
 	// refresh the fetcher
-	new, newSize, err := newFetcher(hosts, b.refspec, b.digest)
+	new, newSize, err := newFetcher(hosts, b.digest)
 	if err != nil {
 		return err
 	} else if newSize != b.size {

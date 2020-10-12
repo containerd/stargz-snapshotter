@@ -147,17 +147,22 @@ func TestMirror(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var hosts []docker.RegistryHost
+			var hosts []RegistryHost
 			for _, m := range append(tt.mirrors, refHost) {
-				hosts = append(hosts, docker.RegistryHost{
-					Client:       &http.Client{Transport: tt.tr},
-					Host:         m,
-					Scheme:       "https",
-					Path:         "/v2",
-					Capabilities: docker.HostCapabilityPull,
+				hosts = append(hosts, RegistryHost{
+					RegistryHost: docker.RegistryHost{
+						Client:       &http.Client{Transport: tt.tr},
+						Host:         m,
+						Scheme:       "https",
+						Path:         "/v2",
+						Capabilities: docker.HostCapabilityPull,
+					},
 				})
 			}
-			fetcher, _, err := newFetcher(hosts, refspec, blobDigest)
+			for i := range hosts {
+				hosts[i].RefAlias = refspec
+			}
+			fetcher, _, err := newFetcher(hosts, blobDigest)
 			if err != nil {
 				if tt.error {
 					return

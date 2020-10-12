@@ -165,8 +165,16 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.Fil
 	if hosts == nil {
 		registries := docker.ConfigureDefaultRegistries(
 			docker.WithPlainHTTP(docker.MatchLocalhost))
-		hosts = func(host string, _ map[string]string) ([]docker.RegistryHost, error) {
-			return registries(host)
+		hosts = func(host string, _ map[string]string) ([]remote.RegistryHost, error) {
+			reghosts, err := registries(host)
+			if err != nil {
+				return nil, err
+			}
+			var remoteHosts []remote.RegistryHost
+			for _, h := range reghosts {
+				remoteHosts = append(remoteHosts, remote.RegistryHost{RegistryHost: h})
+			}
+			return remoteHosts, nil
 		}
 	}
 	return &filesystem{

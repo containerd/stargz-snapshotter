@@ -52,9 +52,18 @@ const (
 	defaultValidIntervalSec = 60
 )
 
-// RegistryHosts returns list of docker.RegistryHost based on the host name and
-// labels.
-type RegistryHosts func(host string, labels map[string]string) ([]docker.RegistryHost, error)
+// RegistryHosts returns list of RegistryHost based on the host name and labels.
+type RegistryHosts func(host string, labels map[string]string) ([]RegistryHost, error)
+
+// RegistryHost represents a complete configuration for a registry
+// host. It's based on containerd's docker.RegistryHost but comes with
+// additional configurations.
+type RegistryHost struct {
+	docker.RegistryHost
+
+	// RefAlias represents the alias of the image reference that stores the targeting layer.
+	RefAlias reference.Spec
+}
 
 func NewResolver(hosts RegistryHosts, cache cache.BlobCache, cfg config.BlobConfig) *Resolver {
 	if cfg.ChunkSize == 0 { // zero means "use default chunk size"
@@ -95,7 +104,14 @@ func (r *Resolver) Resolve(ref, digest string, labels map[string]string) (Blob, 
 	if err != nil {
 		return nil, err
 	}
-	fetcher, size, err := newFetcher(hosts, refspec, digest)
+	for i := range hosts {
+		if hosts[i].RefAlias.String() == "" {
+			// If an alias isn't specified by the config, use the default reference.
+			// TODO: maybe we shouldn't tie a snapshot to a single image reference.
+			hosts[i].RefAlias = refspec
+		}
+	}
+	fetcher, size, err := newFetcher(hosts, digest)
 	if err != nil {
 		return nil, err
 	}
@@ -113,17 +129,18 @@ func (r *Resolver) Resolve(ref, digest string, labels map[string]string) (Blob, 
 	}, nil
 }
 
-func newFetcher(hosts []docker.RegistryHost, refspec reference.Spec, digest string) (*fetcher, int64, error) {
-	u, err := url.Parse("dummy://" + refspec.Locator)
-	if err != nil {
-		return nil, 0, err
-	}
+func newFetcher(hosts []RegistryHost, digest string) (*fetcher, int64, error) {
 	// Try to create fetcher until succeeded
 	rErr := fmt.Errorf("failed to resolve")
 	for _, h := range hosts {
-		if h.Host == "" || strings.Contains(h.Host, "/") {
+		if h.Host == "" || strings.Contains(h.Host, "/") || h.RefAlias.String() == "" {
 			rErr = errors.Wrapf(rErr, "host %q: mirror must be a domain name", h.Host)
 			continue // Try another host
+		}
+		refspec := h.RefAlias
+		u, err := url.Parse("dummy://" + refspec.Locator)
+		if err != nil {
+			return nil, 0, err
 		}
 
 		// Prepare transport with authorization functionality
@@ -164,7 +181,7 @@ func newFetcher(hosts []docker.RegistryHost, refspec reference.Spec, digest stri
 		}, size, nil
 	}
 
-	return nil, 0, errors.Wrapf(rErr, "cannot resolve ref %q (%q)", refspec, digest)
+	return nil, 0, errors.Wrapf(rErr, "cannot resolve %q", digest)
 }
 
 type transport struct {

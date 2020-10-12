@@ -146,7 +146,7 @@ func waitForSIGINT() {
 }
 
 func hostsFromConfig(cfg ResolverConfig, keychain authn.Keychain) remote.RegistryHosts {
-	return func(host string, _ map[string]string) (hosts []docker.RegistryHost, _ error) {
+	return func(host string, _ map[string]string) (hosts []remote.RegistryHost, _ error) {
 		for _, h := range append(cfg.Host[host].Mirrors, MirrorConfig{
 			Host: host,
 		}) {
@@ -187,7 +187,7 @@ func hostsFromConfig(cfg ResolverConfig, keychain authn.Keychain) remote.Registr
 			if config.Host == "docker.io" {
 				config.Host = "registry-1.docker.io"
 			}
-			hosts = append(hosts, config)
+			hosts = append(hosts, remote.RegistryHost{RegistryHost: config})
 		}
 		return
 	}
