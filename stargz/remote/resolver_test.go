@@ -24,6 +24,7 @@ package remote
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -34,6 +35,8 @@ import (
 
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
+	digest "github.com/opencontainers/go-digest"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 func TestMirror(t *testing.T) {
@@ -43,9 +46,9 @@ func TestMirror(t *testing.T) {
 		t.Fatalf("failed to prepare dummy reference: %v", err)
 	}
 	var (
-		blobDigest = "sha256:deadbeaf"
+		blobDigest = digest.FromString("dummy")
 		blobPath   = fmt.Sprintf("/v2/%s/blobs/%s",
-			strings.TrimPrefix(refspec.Locator, refspec.Hostname()+"/"), blobDigest)
+			strings.TrimPrefix(refspec.Locator, refspec.Hostname()+"/"), blobDigest.String())
 		refHost = refspec.Hostname()
 	)
 
@@ -115,7 +118,7 @@ func TestMirror(t *testing.T) {
 			name: "redirected-mirror",
 			tr: &sampleRoundTripper{
 				redirectURL: map[string]string{
-					regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/sha256:deadbeaf",
+					regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/" + blobDigest.String(),
 				},
 				okURLs: []string{`.*`},
 			},
@@ -129,7 +132,7 @@ func TestMirror(t *testing.T) {
 					"backendexample.com": http.StatusInternalServerError,
 				},
 				redirectURL: map[string]string{
-					regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/sha256:deadbeaf",
+					regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/" + blobDigest.String(),
 				},
 				okURLs: []string{`.*`},
 			},
@@ -147,17 +150,19 @@ func TestMirror(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var hosts []docker.RegistryHost
-			for _, m := range append(tt.mirrors, refHost) {
-				hosts = append(hosts, docker.RegistryHost{
-					Client:       &http.Client{Transport: tt.tr},
-					Host:         m,
-					Scheme:       "https",
-					Path:         "/v2",
-					Capabilities: docker.HostCapabilityPull,
-				})
+			hosts := func(host string) (reghosts []docker.RegistryHost, _ error) {
+				for _, m := range append(tt.mirrors, host) {
+					reghosts = append(reghosts, docker.RegistryHost{
+						Client:       &http.Client{Transport: tt.tr},
+						Host:         m,
+						Scheme:       "https",
+						Path:         "/v2",
+						Capabilities: docker.HostCapabilityPull,
+					})
+				}
+				return
 			}
-			fetcher, _, err := newFetcher(hosts, refspec, blobDigest)
+			fetcher, _, err := newFetcher(context.Background(), hosts, refspec, ocispec.Descriptor{Digest: blobDigest})
 			if err != nil {
 				if tt.error {
 					return

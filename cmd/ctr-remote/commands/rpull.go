@@ -26,8 +26,8 @@ import (
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/stargz-snapshotter/stargz"
-	"github.com/containerd/stargz-snapshotter/stargz/handler"
+	sgzconfig "github.com/containerd/stargz-snapshotter/stargz/config"
+	"github.com/containerd/stargz-snapshotter/stargz/source"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli"
 )
@@ -108,7 +108,7 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *rP
 	if config.skipVerify {
 		log.G(pCtx).WithField("image", ref).Warn("content verification disabled")
 		snOpts = append(snOpts, snapshots.WithLabels(map[string]string{
-			stargz.TargetSkipVerifyLabel: "true",
+			sgzconfig.TargetSkipVerifyLabel: "true",
 		}))
 	}
 
@@ -121,7 +121,7 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *rP
 		containerd.WithSchema1Conversion,
 		containerd.WithPullUnpack,
 		containerd.WithPullSnapshotter(remoteSnapshotterName, snOpts...),
-		containerd.WithImageHandlerWrapper(handler.AppendInfoHandlerWrapper(ref, 10*1024*1024)),
+		containerd.WithImageHandlerWrapper(source.AppendDefaultLabelsHandlerWrapper(ref, 10*1024*1024)),
 	}...); err != nil {
 		return err
 	}

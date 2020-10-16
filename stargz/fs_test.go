@@ -41,15 +41,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
+	"github.com/containerd/stargz-snapshotter/stargz/source"
 	"github.com/containerd/stargz-snapshotter/stargz/verify"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sys/unix"
 )
 
@@ -63,17 +67,19 @@ const (
 
 func TestCheck(t *testing.T) {
 	bb := &breakBlob{}
-	l := newLayer(bb, nopVerifiableReader, nil, time.Second)
+	l := newLayer(ocispec.Descriptor{}, bb, nopVerifiableReader, nil, time.Second)
 	l.skipVerify()
 	fs := &filesystem{
 		layer: map[string]*layer{
 			"test": l,
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
+		getSources: source.FromDefaultLabels(
+			docker.ConfigureDefaultRegistries(docker.WithPlainHTTP(docker.MatchLocalhost))),
 	}
 	bb.success = true
 	if err := fs.Check(context.TODO(), "test", nil); err != nil {
-		t.Errorf("connection failed; wanted to succeed")
+		t.Errorf("connection failed; wanted to succeed: %v", err)
 	}
 
 	bb.success = false
@@ -107,7 +113,7 @@ func (r *breakBlob) Check() error {
 	}
 	return nil
 }
-func (r *breakBlob) Refresh(labels map[string]string) error {
+func (r *breakBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	if !r.success {
 		return fmt.Errorf("failed")
 	}
@@ -308,7 +314,7 @@ func TestExistence(t *testing.T) {
 			},
 			want: []check{
 				hasFileDigest("test", digestFor("test")),
-				hasStateFile(t, testStateLayerDigest+".json"),
+				hasStateFile(t, testStateLayerDigest.String()+".json"),
 			},
 		},
 		{
@@ -355,7 +361,7 @@ func TestExistence(t *testing.T) {
 	}
 }
 
-const testStateLayerDigest = "sha256:deadbeef"
+var testStateLayerDigest = digest.FromString("dummy")
 
 func getRootNode(t *testing.T, r *stargz.Reader) *node {
 	root, ok := r.Lookup("")
@@ -365,7 +371,7 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 	rootNode := &node{
 		layer: &testLayer{r},
 		e:     root,
-		s:     newState(testStateLayerDigest, &dummyBlob{}),
+		s:     newState(testStateLayerDigest.String(), &dummyBlob{}),
 	}
 	fusefs.NewNodeFS(rootNode, &fusefs.Options{})
 	return rootNode
@@ -387,7 +393,9 @@ func (db *dummyBlob) Size() int64                                               
 func (db *dummyBlob) FetchedSize() int64                                                { return 5 }
 func (db *dummyBlob) Check() error                                                      { return nil }
 func (db *dummyBlob) Cache(offset int64, size int64, option ...remote.Option) error     { return nil }
-func (db *dummyBlob) Refresh(labels map[string]string) error                            { return nil }
+func (db *dummyBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+	return nil
+}
 
 type chunkSizeInfo int
 
@@ -876,7 +884,7 @@ func TestPrefetch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
-			l := newLayer(blob, vr, nil, time.Second)
+			l := newLayer(ocispec.Descriptor{Digest: testStateLayerDigest}, blob, vr, nil, time.Second)
 			if err := l.verify(dgst); err != nil {
 				t.Errorf("failed to verify reader: %v", err)
 				return
@@ -958,7 +966,9 @@ func (sb *sampleBlob) Cache(offset int64, size int64, option ...remote.Option) e
 	sb.calledPrefetchSize = size
 	return nil
 }
-func (sb *sampleBlob) Refresh(labels map[string]string) error { return nil }
+func (sb *sampleBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+	return nil
+}
 
 type testCache struct {
 	membuf map[string]string
@@ -992,8 +1002,6 @@ func TestWaiter(t *testing.T) {
 		doneTime  time.Time
 		done      = make(chan struct{})
 	)
-
-	w.start()
 
 	go func() {
 		defer close(done)

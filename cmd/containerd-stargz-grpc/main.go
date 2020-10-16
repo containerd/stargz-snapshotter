@@ -33,9 +33,10 @@ import (
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/stargz"
 	"github.com/containerd/stargz-snapshotter/stargz/keychain"
-	"github.com/containerd/stargz-snapshotter/stargz/remote"
+	"github.com/containerd/stargz-snapshotter/stargz/source"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/hashicorp/go-multierror"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -86,12 +87,16 @@ func main() {
 		kc = authn.NewMultiKeychain(kc, keychain.NewKubeconfigKeychain(ctx, opts...))
 	}
 
+	// Use RegistryHosts based on ResolverConfig and keychain
+	hosts := hostsFromConfig(config.ResolverConfig, kc)
+
 	// Configure filesystem and snapshotter
 	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"),
 		config.Config,
-
-		// Use RegistryHosts based on ResolverConfig and keychain
-		stargz.WithRegistryHosts(hostsFromConfig(config.ResolverConfig, kc)),
+		stargz.WithGetSources(sources(
+			sourceFromCRILabels(hosts),      // provides source info based on CRI labels
+			source.FromDefaultLabels(hosts), // provides source info based on default labels
+		)),
 	)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
@@ -145,8 +150,8 @@ func waitForSIGINT() {
 	<-c
 }
 
-func hostsFromConfig(cfg ResolverConfig, keychain authn.Keychain) remote.RegistryHosts {
-	return func(host string, _ map[string]string) (hosts []docker.RegistryHost, _ error) {
+func hostsFromConfig(cfg ResolverConfig, keychain authn.Keychain) docker.RegistryHosts {
+	return func(host string) (hosts []docker.RegistryHost, _ error) {
 		for _, h := range append(cfg.Host[host].Mirrors, MirrorConfig{
 			Host: host,
 		}) {
@@ -188,6 +193,19 @@ func hostsFromConfig(cfg ResolverConfig, keychain authn.Keychain) remote.Registr
 				config.Host = "registry-1.docker.io"
 			}
 			hosts = append(hosts, config)
+		}
+		return
+	}
+}
+
+func sources(ps ...source.GetSources) source.GetSources {
+	return func(labels map[string]string) (source []source.Source, allErr error) {
+		for _, p := range ps {
+			src, err := p(labels)
+			if err == nil {
+				return src, nil
+			}
+			allErr = multierror.Append(allErr, err)
 		}
 		return
 	}

@@ -44,6 +44,7 @@ import (
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/stargz/config"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
 
@@ -52,11 +53,7 @@ const (
 	defaultValidIntervalSec = 60
 )
 
-// RegistryHosts returns list of docker.RegistryHost based on the host name and
-// labels.
-type RegistryHosts func(host string, labels map[string]string) ([]docker.RegistryHost, error)
-
-func NewResolver(hosts RegistryHosts, cache cache.BlobCache, cfg config.BlobConfig) *Resolver {
+func NewResolver(cache cache.BlobCache, cfg config.BlobConfig) *Resolver {
 	if cfg.ChunkSize == 0 { // zero means "use default chunk size"
 		cfg.ChunkSize = defaultChunkSize
 	}
@@ -68,7 +65,6 @@ func NewResolver(hosts RegistryHosts, cache cache.BlobCache, cfg config.BlobConf
 	}
 
 	return &Resolver{
-		hosts: hosts,
 		bufPool: sync.Pool{
 			New: func() interface{} {
 				return new(bytes.Buffer)
@@ -80,26 +76,16 @@ func NewResolver(hosts RegistryHosts, cache cache.BlobCache, cfg config.BlobConf
 }
 
 type Resolver struct {
-	hosts      RegistryHosts
 	blobCache  cache.BlobCache
 	blobConfig config.BlobConfig
 	bufPool    sync.Pool
 }
 
-func (r *Resolver) Resolve(ref, digest string, labels map[string]string) (Blob, error) {
-	refspec, err := reference.Parse(ref)
+func (r *Resolver) Resolve(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (Blob, error) {
+	fetcher, size, err := newFetcher(ctx, hosts, refspec, desc)
 	if err != nil {
 		return nil, err
 	}
-	hosts, err := r.hosts(refspec.Hostname(), labels)
-	if err != nil {
-		return nil, err
-	}
-	fetcher, size, err := newFetcher(hosts, refspec, digest)
-	if err != nil {
-		return nil, err
-	}
-
 	return &blob{
 		fetcher:       fetcher,
 		size:          size,
@@ -108,30 +94,39 @@ func (r *Resolver) Resolve(ref, digest string, labels map[string]string) (Blob, 
 		lastCheck:     time.Now(),
 		checkInterval: time.Duration(r.blobConfig.ValidInterval) * time.Second,
 		resolver:      r,
-		refspec:       refspec,
-		digest:        digest,
 	}, nil
 }
 
-func newFetcher(hosts []docker.RegistryHost, refspec reference.Spec, digest string) (*fetcher, int64, error) {
+func newFetcher(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (*fetcher, int64, error) {
+	reghosts, err := hosts(refspec.Hostname())
+	if err != nil {
+		return nil, 0, err
+	}
+	if desc.Digest.String() == "" {
+		return nil, 0, fmt.Errorf("Digest is mandatory in layer descriptor")
+	}
+	digest := desc.Digest
 	u, err := url.Parse("dummy://" + refspec.Locator)
 	if err != nil {
 		return nil, 0, err
 	}
+
 	// Try to create fetcher until succeeded
 	rErr := fmt.Errorf("failed to resolve")
-	for _, h := range hosts {
-		if h.Host == "" || strings.Contains(h.Host, "/") {
-			rErr = errors.Wrapf(rErr, "host %q: mirror must be a domain name", h.Host)
-			continue // Try another host
+	for _, host := range reghosts {
+		if host.Host == "" || strings.Contains(host.Host, "/") {
+			rErr = errors.Wrapf(rErr, "invalid destination (host %q, ref:%q, digest:%q)",
+				host.Host, refspec, digest)
+			continue // Try another
+
 		}
 
 		// Prepare transport with authorization functionality
-		tr := h.Client.Transport
-		if h.Authorizer != nil {
+		tr := host.Client.Transport
+		if host.Authorizer != nil {
 			tr = &transport{
 				inner: tr,
-				auth:  h.Authorizer,
+				auth:  host.Authorizer,
 				// Specify pull scope
 				// TODO: The scope generator function in containerd (github.com/containerd/containerd/remotes/docker/scope.go) should be exported and used here.
 				scope: "repository:" + strings.TrimPrefix(u.Path, "/") + ":pull",
@@ -139,32 +134,34 @@ func newFetcher(hosts []docker.RegistryHost, refspec reference.Spec, digest stri
 		}
 
 		// Resolve redirection and get blob URL
-		url, err := redirect(fmt.Sprintf("%s://%s/%s/blobs/%s",
-			h.Scheme,
-			path.Join(h.Host, h.Path),
+		url, err := redirect(ctx, fmt.Sprintf("%s://%s/%s/blobs/%s",
+			host.Scheme,
+			path.Join(host.Host, host.Path),
 			strings.TrimPrefix(refspec.Locator, refspec.Hostname()+"/"),
 			digest), tr)
 		if err != nil {
-			rErr = errors.Wrapf(rErr, "host %q (ref:%q, digest:%q): failed to redirect: %v",
-				h.Host, refspec, digest, err)
-			continue // Try another host
+			rErr = errors.Wrapf(rErr, "failed to redirect (host %q, ref:%q, digest:%q): %v",
+				host.Host, refspec, digest, err)
+			continue // Try another
 		}
 
 		// Get size information
-		size, err := getSize(url, tr)
+		// TODO: we should try to use the Size field in the descriptor here.
+		size, err := getSize(ctx, url, tr)
 		if err != nil {
-			rErr = errors.Wrapf(rErr, "host %q: failed to get size: %v", h.Host, err)
-			continue // Try another host
+			rErr = errors.Wrapf(rErr, "failed to get size (host %q, ref:%q, digest:%q): %v",
+				host.Host, refspec, digest, err)
+			continue // Try another
 		}
 
-		// Hit one host
+		// Hit one destination
 		return &fetcher{
 			url: url,
 			tr:  tr,
 		}, size, nil
 	}
 
-	return nil, 0, errors.Wrapf(rErr, "cannot resolve ref %q (%q)", refspec, digest)
+	return nil, 0, errors.Wrapf(rErr, "cannot resolve layer")
 }
 
 type transport struct {
@@ -208,8 +205,8 @@ func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func redirect(ctx context.Context, endpointURL string, tr http.RoundTripper) (url string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	// We use GET request for GCR.
@@ -240,8 +237,8 @@ func redirect(endpointURL string, tr http.RoundTripper) (url string, err error) 
 	return
 }
 
-func getSize(url string, tr http.RoundTripper) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func getSize(ctx context.Context, url string, tr http.RoundTripper) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 	if err != nil {

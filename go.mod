@@ -20,6 +20,7 @@ require (
 	github.com/google/crfs v0.0.0-20191108021818-71d77da419c9
 	github.com/google/go-containerregistry v0.1.2
 	github.com/hanwen/go-fuse/v2 v2.0.3
+	github.com/hashicorp/go-multierror v1.0.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
 	github.com/opencontainers/runc v1.0.0-rc92
