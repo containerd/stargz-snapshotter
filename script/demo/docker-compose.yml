@@ -4,6 +4,12 @@ services:
     build:
       context: ../../
       target: containerd-base
+      args:
+        NO_PROXY: "${NO_PROXY}"
+        HTTP_PROXY: "${HTTP_PROXY}"
+        HTTPS_PROXY: "${HTTPS_PROXY}"
+        http_proxy: "${http_proxy}"
+        https_proxy: "${https_proxy}"
     container_name: containerd_demo
     privileged: true
     stdin_open: true
