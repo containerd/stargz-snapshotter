@@ -227,6 +227,10 @@ github.com/hanwen/go-fuse/v2/fuse
 github.com/hanwen/go-fuse/v2/internal
 github.com/hanwen/go-fuse/v2/internal/utimens
 github.com/hanwen/go-fuse/v2/splice
+# github.com/hashicorp/errwrap v1.0.0
+github.com/hashicorp/errwrap
+# github.com/hashicorp/go-multierror v1.0.0
+github.com/hashicorp/go-multierror
 # github.com/hashicorp/golang-lru v0.5.3
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
@@ -299,6 +303,7 @@ golang.org/x/oauth2/internal
 # golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 golang.org/x/sync/errgroup
 golang.org/x/sync/semaphore
+golang.org/x/sync/singleflight
 # golang.org/x/sys v0.0.0-20200728102440-3e129f6d46b1
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix

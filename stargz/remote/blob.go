@@ -33,7 +33,9 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
 
@@ -45,7 +47,7 @@ type Blob interface {
 	FetchedSize() int64
 	ReadAt(p []byte, offset int64, opts ...Option) (int, error)
 	Cache(offset int64, size int64, opts ...Option) error
-	Refresh(labels map[string]string) error
+	Refresh(ctx context.Context, host docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error
 }
 
 type blob struct {
@@ -56,25 +58,18 @@ type blob struct {
 	chunkSize     int64
 	cache         cache.BlobCache
 	lastCheck     time.Time
+	lastCheckMu   sync.Mutex
 	checkInterval time.Duration
 
 	fetchedRegionSet   regionSet
 	fetchedRegionSetMu sync.Mutex
 
 	resolver *Resolver
-	refspec  reference.Spec
-	digest   string
 }
 
-func (b *blob) Refresh(labels map[string]string) error {
-	// get fresh registry configuration
-	hosts, err := b.resolver.hosts(b.refspec.Hostname(), labels)
-	if err != nil {
-		return err
-	}
-
+func (b *blob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	// refresh the fetcher
-	new, newSize, err := newFetcher(hosts, b.refspec, b.digest)
+	new, newSize, err := newFetcher(ctx, hosts, refspec, desc)
 	if err != nil {
 		return err
 	} else if newSize != b.size {
@@ -85,14 +80,19 @@ func (b *blob) Refresh(labels map[string]string) error {
 	b.fetcherMu.Lock()
 	b.fetcher = new
 	b.fetcherMu.Unlock()
+	b.lastCheckMu.Lock()
 	b.lastCheck = time.Now()
+	b.lastCheckMu.Unlock()
 
 	return nil
 }
 
 func (b *blob) Check() error {
 	now := time.Now()
-	if now.Sub(b.lastCheck) < b.checkInterval {
+	b.lastCheckMu.Lock()
+	lastCheck := b.lastCheck
+	b.lastCheckMu.Unlock()
+	if now.Sub(lastCheck) < b.checkInterval {
 		// do nothing if not expired
 		return nil
 	}
@@ -103,7 +103,9 @@ func (b *blob) Check() error {
 	if err == nil {
 		// update lastCheck only if check succeeded.
 		// on failure, we should check this layer next time again.
+		b.lastCheckMu.Lock()
 		b.lastCheck = now
+		b.lastCheckMu.Unlock()
 	}
 
 	return err
@@ -274,7 +276,9 @@ func (b *blob) fetchRange(allData map[region]io.Writer, opts *options) error {
 	defer mr.Close()
 
 	// Update the check timer because we succeeded to access the blob
+	b.lastCheckMu.Lock()
 	b.lastCheck = time.Now()
+	b.lastCheckMu.Unlock()
 
 	// chunk and cache responsed data. Regions must be aligned by chunk size.
 	// TODO: Reorganize remoteData to make it be aligned by chunk size

@@ -22,6 +22,17 @@
 
 package config
 
+const (
+	// TargetSkipVerifyLabel is a snapshot label key that indicates to skip content
+	// verification for the layer.
+	TargetSkipVerifyLabel = "containerd.io/snapshot/remote/stargz.skipverify"
+
+	// TargetPrefetchSizeLabel is a snapshot label key that indicates size to prefetch
+	// the layer. If the layer is eStargz and contains prefetch landmarks, these config
+	// will be respeced.
+	TargetPrefetchSizeLabel = "containerd.io/snapshot/remote/stargz.prefetch"
+)
+
 type Config struct {
 	HTTPCacheType       string `toml:"http_cache_type"`
 	FSCacheType         string `toml:"filesystem_cache_type"`

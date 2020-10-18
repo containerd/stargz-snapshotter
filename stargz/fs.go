@@ -53,13 +53,14 @@ import (
 	"unsafe"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/stargz/config"
-	"github.com/containerd/stargz-snapshotter/stargz/handler"
 	"github.com/containerd/stargz-snapshotter/stargz/reader"
 	"github.com/containerd/stargz-snapshotter/stargz/remote"
+	"github.com/containerd/stargz-snapshotter/stargz/source"
 	"github.com/containerd/stargz-snapshotter/stargz/verify"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/golang/groupcache/lru"
@@ -67,7 +68,9 @@ import (
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/sys/unix"
 )
 
@@ -84,14 +87,6 @@ const (
 	statFileMode              = syscall.S_IFREG | 0400 // -r--------
 	stateDirMode              = syscall.S_IFDIR | 0500 // dr-x------
 
-	// targetRefLabelCRI is a label which contains image reference passed from CRI plugin
-	targetRefLabelCRI = "containerd.io/snapshot/cri.image-ref"
-	// targetDigestLabelCRI is a label which contains layer digest passed from CRI plugin
-	targetDigestLabelCRI = "containerd.io/snapshot/cri.layer-digest"
-	// targetImageLayersLabel is a label which contains layer digests contained in
-	// the target image and is passed from CRI plugin.
-	targetImageLayersLabel = "containerd.io/snapshot/cri.image-layers"
-
 	// PrefetchLandmark is a file entry which indicates the end position of
 	// prefetch in the stargz file.
 	PrefetchLandmark = ".prefetch.landmark"
@@ -99,20 +94,17 @@ const (
 	// NoPrefetchLandmark is a file entry which indicates that no prefetch should
 	// occur in the stargz file.
 	NoPrefetchLandmark = ".no.prefetch.landmark"
-
-	// TargetSkipVerifyLabel indicates to skip content verification for the layer.
-	TargetSkipVerifyLabel = "containerd.io/snapshot/remote/stargz.skipverify"
 )
 
 type Option func(*options)
 
 type options struct {
-	hosts remote.RegistryHosts
+	getSources source.GetSources
 }
 
-func WithRegistryHosts(hosts remote.RegistryHosts) Option {
+func WithGetSources(s source.GetSources) Option {
 	return func(opts *options) {
-		opts.hosts = hosts
+		opts.getSources = s
 	}
 }
 
@@ -161,16 +153,14 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.Fil
 	if prefetchTimeout == 0 {
 		prefetchTimeout = defaultPrefetchTimeoutSec * time.Second
 	}
-	hosts := fsOpts.hosts
-	if hosts == nil {
-		registries := docker.ConfigureDefaultRegistries(
-			docker.WithPlainHTTP(docker.MatchLocalhost))
-		hosts = func(host string, _ map[string]string) ([]docker.RegistryHost, error) {
-			return registries(host)
-		}
+	getSources := fsOpts.getSources
+	if getSources == nil {
+		getSources = source.FromDefaultLabels(
+			docker.ConfigureDefaultRegistries(docker.WithPlainHTTP(docker.MatchLocalhost)))
 	}
 	return &filesystem{
-		resolver:              remote.NewResolver(hosts, httpCache, cfg.BlobConfig),
+		resolver:              remote.NewResolver(httpCache, cfg.BlobConfig),
+		getSources:            getSources,
 		fsCache:               fsCache,
 		prefetchSize:          cfg.PrefetchSize,
 		prefetchTimeout:       prefetchTimeout,
@@ -179,6 +169,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.Fil
 		debug:                 cfg.Debug,
 		layer:                 make(map[string]*layer),
 		resolveResult:         lru.New(resolveResultEntry),
+		blobResult:            lru.New(resolveResultEntry),
 		backgroundTaskManager: task.NewBackgroundTaskManager(2, 5*time.Second),
 		allowNoVerification:   cfg.AllowNoVerification,
 		disableVerification:   cfg.DisableVerification,
@@ -197,9 +188,13 @@ type filesystem struct {
 	layerMu               sync.Mutex
 	resolveResult         *lru.Cache
 	resolveResultMu       sync.Mutex
+	blobResult            *lru.Cache
+	blobResultMu          sync.Mutex
 	backgroundTaskManager *task.BackgroundTaskManager
 	allowNoVerification   bool
 	disableVerification   bool
+	getSources            source.GetSources
+	resolveG              singleflight.Group
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
@@ -210,57 +205,51 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("mountpoint", mountpoint))
 
-	// Get basic information of this layer.
-	ref, ldgst, layers, prefetchSize, err := fs.parseLabels(labels)
+	// Get source information of this layer.
+	src, err := fs.getSources(labels)
 	if err != nil {
-		log.G(ctx).WithError(err).Debug("failed to get necessary information from labels")
 		return err
+	} else if len(src) == 0 {
+		return fmt.Errorf("source must be passed")
 	}
 
-	// Resolve the target layer and the all chained layers
+	// Resolve the target layer
 	var (
-		resolved *resolveResult
-		target   = append([]string{ldgst}, layers...)
+		resultChan = make(chan *layer)
+		errChan    = make(chan error)
 	)
-	for _, dgst := range target {
-		var (
-			rr  *resolveResult
-			key = fmt.Sprintf("%s/%s", ref, dgst)
-		)
-		fs.resolveResultMu.Lock()
-		if c, ok := fs.resolveResult.Get(key); ok {
-			if c.(*resolveResult).isInProgress() {
-				rr = c.(*resolveResult) // resolving in progress
-			} else if _, err := c.(*resolveResult).get(); err == nil {
-				rr = c.(*resolveResult) // hit successfully resolved cache
-			} else {
-				rr = c.(*resolveResult).retry()
-				fs.resolveResult.Add(key, rr)
+	go func() {
+		rErr := fmt.Errorf("failed to resolve target")
+		for _, s := range src {
+			l, err := fs.resolveLayer(ctx, s.Hosts, s.Name, s.Target)
+			if err == nil {
+				resultChan <- l
+				return
 			}
+			rErr = errors.Wrapf(rErr, "failed to resolve layer %q from %q: %v",
+				s.Target.Digest, s.Name, err)
 		}
-		if rr == nil { // missed cache
-			rr = fs.resolve(ctx, ref, dgst, labels)
-			fs.resolveResult.Add(key, rr)
+		errChan <- rErr
+	}()
+
+	// Also resolve other layers in parallel
+	preResolve := src[0] // TODO: should we pre-resolve blobs in other sources as well?
+	for _, desc := range preResolve.Manifest.Layers {
+		if desc.Digest.String() != preResolve.Target.Digest.String() {
+			go fs.resolveLayer(ctx, preResolve.Hosts, preResolve.Name, desc)
 		}
-		if dgst == ldgst {
-			resolved = rr
-		}
-		fs.resolveResultMu.Unlock()
 	}
 
-	// Get the resolved layer
-	ctx = log.WithLogger(ctx, log.G(ctx).WithField("ref", ref).WithField("digest", ldgst))
-	if resolved == nil {
-		log.G(ctx).Debug("resolve result isn't registered")
-		return fmt.Errorf("resolve result(%q,%q) isn't registered", ref, ldgst)
-	}
-	l, err := resolved.waitAndGet(30 * time.Second) // get layer with timeout
-	if err != nil {
+	// Wait for resolving completion
+	var l *layer
+	select {
+	case l = <-resultChan:
+	case err := <-errChan:
 		log.G(ctx).WithError(err).Debug("failed to resolve layer")
-		return errors.Wrapf(err, "failed to resolve layer(%q,%q)", ref, ldgst)
-	}
-	if err := fs.check(ctx, l, labels); err != nil { // check the connectivity
-		return err
+		return errors.Wrapf(err, "failed to resolve layer")
+	case <-time.After(30 * time.Second):
+		log.G(ctx).Debug("failed to resolve layer (timeout)")
+		return fmt.Errorf("failed to resolve layer (timeout)")
 	}
 
 	// Verify layer's content
@@ -280,7 +269,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			return errors.Wrapf(err, "invalid stargz layer")
 		}
 		log.G(ctx).Debugf("verified")
-	} else if _, ok := labels[TargetSkipVerifyLabel]; ok && fs.allowNoVerification {
+	} else if _, ok := labels[config.TargetSkipVerifyLabel]; ok && fs.allowNoVerification {
 		// If unverified layer is allowed, use it with warning.
 		// This mode is for legacy stargz archives which don't contain digests
 		// necessary for layer verification.
@@ -304,9 +293,13 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// Prefetch this layer. We prefetch several layers in parallel. The first
 	// Check() for this layer waits for the prefetch completion.
 	if !fs.noprefetch {
-		l.doPrefetch()
+		prefetchSize := fs.prefetchSize
+		if psStr, ok := labels[config.TargetPrefetchSizeLabel]; ok {
+			if ps, err := strconv.ParseInt(psStr, 10, 64); err == nil {
+				prefetchSize = ps
+			}
+		}
 		go func() {
-			defer l.donePrefetch()
 			fs.backgroundTaskManager.DoPrioritizedTask()
 			defer fs.backgroundTaskManager.DonePrioritizedTask()
 			if err := l.prefetch(prefetchSize); err != nil {
@@ -352,7 +345,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		fs:    fs,
 		layer: layerReader,
 		e:     l.root,
-		s:     newState(ldgst, l.blob),
+		s:     newState(l.desc.Digest.String(), l.blob),
 		root:  mountpoint,
 	}, &fusefs.Options{
 		AttrTimeout:     &timeSec,
@@ -374,30 +367,39 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	return server.WaitMount()
 }
 
-func (fs *filesystem) resolve(ctx context.Context, ref, digest string, labels map[string]string) *resolveResult {
-	ctx = log.WithLogger(ctx, log.G(ctx).WithField("ref", ref).WithField("digest", digest))
-	var (
-		resolvedBlob   remote.Blob
-		resolvedBlobMu sync.Mutex
-	)
-	return newResolveResult(func() (*layer, error) {
+func (fs *filesystem) resolveLayer(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (*layer, error) {
+	name := refspec.String() + "/" + desc.Digest.String()
+	ctx, cancel := context.WithCancel(log.WithLogger(ctx, log.G(ctx).WithField("src", name)))
+	defer cancel()
+
+	fs.resolveResultMu.Lock()
+	c, ok := fs.resolveResult.Get(name)
+	fs.resolveResultMu.Unlock()
+	if ok && c.(*layer).blob.Check() == nil {
+		return c.(*layer), nil
+	}
+
+	resultChan := fs.resolveG.DoChan(name, func() (interface{}, error) {
 		log.G(ctx).Debugf("resolving")
 
-		// Resolve the reference and digest
-		// If the previous result is cached and can be used, use it.
-		resolvedBlobMu.Lock()
-		blob := resolvedBlob
-		resolvedBlobMu.Unlock()
-		if blob == nil || blob.Check() != nil {
+		// Resolve the blob. The result will be cached for future use. This is effective
+		// in some failure cases including resolving is succeeded but the blob is non-stargz.
+		var blob remote.Blob
+		fs.blobResultMu.Lock()
+		c, ok := fs.blobResult.Get(name)
+		fs.blobResultMu.Unlock()
+		if ok && c.(remote.Blob).Check() == nil {
+			blob = c.(remote.Blob)
+		} else {
 			var err error
-			blob, err = fs.resolver.Resolve(ref, digest, labels)
+			blob, err = fs.resolver.Resolve(ctx, hosts, refspec, desc)
 			if err != nil {
-				log.G(ctx).WithError(err).Debugf("failed to resolve ref")
-				return nil, errors.Wrap(err, "failed to resolve the reference")
+				log.G(ctx).WithError(err).Debugf("failed to resolve source")
+				return nil, errors.Wrap(err, "failed to resolve the source")
 			}
-			resolvedBlobMu.Lock()
-			resolvedBlob = blob
-			resolvedBlobMu.Unlock()
+			fs.blobResultMu.Lock()
+			fs.blobResult.Add(name, blob)
+			fs.blobResultMu.Unlock()
 		}
 
 		// Get a reader for stargz archive.
@@ -415,9 +417,27 @@ func (fs *filesystem) resolve(ctx context.Context, ref, digest string, labels ma
 			return nil, errors.Wrap(err, "failed to read layer")
 		}
 
+		// Combine layer information together
+		l := newLayer(desc, blob, vr, root, fs.prefetchTimeout)
+		fs.resolveResultMu.Lock()
+		fs.resolveResult.Add(name, l)
+		fs.resolveResultMu.Unlock()
+
 		log.G(ctx).Debugf("resolved")
-		return newLayer(blob, vr, root, fs.prefetchTimeout), nil
+		return l, nil
 	})
+
+	var res singleflight.Result
+	select {
+	case res = <-resultChan:
+	case <-time.After(30 * time.Second):
+		fs.resolveG.Forget(name)
+		return nil, fmt.Errorf("failed to resolve layer (timeout)")
+	}
+	if res.Err != nil || res.Val == nil {
+		return nil, fmt.Errorf("failed to resolve layer: %v", res.Err)
+	}
+	return res.Val.(*layer), nil
 }
 
 func (fs *filesystem) Check(ctx context.Context, mountpoint string, labels map[string]string) error {
@@ -437,42 +457,54 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string, labels map[s
 		return fmt.Errorf("layer not registered")
 	}
 
-	// Check the blob connectivity and refresh the connection if possible
+	// Check the blob connectivity and try to refresh the connection on failure
 	if err := fs.check(ctx, l, labels); err != nil {
 		log.G(ctx).WithError(err).Warn("check failed")
 		return err
 	}
 
 	// Wait for prefetch compeletion
-	if err := l.waitForPrefetchCompletion(); err != nil {
-		log.G(ctx).WithError(err).Warn("failed to sync with prefetch completion")
+	if !fs.noprefetch {
+		if err := l.waitForPrefetchCompletion(); err != nil {
+			log.G(ctx).WithError(err).Warn("failed to sync with prefetch completion")
+		}
 	}
 
 	return nil
 }
 
 func (fs *filesystem) check(ctx context.Context, l *layer, labels map[string]string) error {
-	if err := l.blob.Check(); err != nil {
-		// Check failed. Try to refresh the connection
-		retrynum := 1
-		log.G(ctx).WithError(err).Warn("failed to connect to blob; refreshing...")
-		for retry := 0; retry < retrynum; retry++ {
-			if iErr := l.blob.Refresh(labels); iErr != nil {
-				log.G(ctx).WithError(iErr).Warnf("failed to refresh connection(%d)",
-					retry)
-				err = errors.Wrapf(err, "error(%d): %v", retry, iErr)
-				continue // retry
+	err := l.blob.Check()
+	if err == nil {
+		return nil
+	}
+	log.G(ctx).WithError(err).Warn("failed to connect to blob")
+
+	// Check failed. Try to refresh the connection with fresh source information
+	src, err := fs.getSources(labels)
+	if err != nil {
+		return err
+	}
+	var (
+		retrynum = 1
+		rErr     = fmt.Errorf("failed to refresh connection")
+	)
+	for retry := 0; retry < retrynum; retry++ {
+		log.G(ctx).Warnf("refreshing(%d)...", retry)
+		for _, s := range src {
+			err := l.blob.Refresh(ctx, s.Hosts, s.Name, s.Target)
+			if err == nil {
+				log.G(ctx).Debug("Successfully refreshed connection")
+				return nil
 			}
-			log.G(ctx).Debug("Successfully refreshed connection")
-			err = nil
-			break
-		}
-		if err != nil {
-			return err
+			log.G(ctx).WithError(err).Warnf("failed to refresh the layer %q from %q",
+				s.Target.Digest, s.Name)
+			rErr = errors.Wrapf(rErr, "failed(layer:%q, ref:%q): %v",
+				s.Target.Digest, s.Name, err)
 		}
 	}
 
-	return nil
+	return rErr
 }
 
 func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
@@ -491,93 +523,9 @@ func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
 	return syscall.Unmount(mountpoint, syscall.MNT_FORCE)
 }
 
-func (fs *filesystem) parseLabels(labels map[string]string) (rRef, rDigest string, rLayers []string, rPrefetchSize int64, _ error) {
-
-	// mandatory labels
-	if ref, ok := labels[targetRefLabelCRI]; ok {
-		rRef = ref
-	} else if ref, ok := labels[handler.TargetRefLabel]; ok {
-		rRef = ref
-	} else {
-		return "", "", nil, 0, fmt.Errorf("reference hasn't been passed")
-	}
-	if digest, ok := labels[targetDigestLabelCRI]; ok {
-		rDigest = digest
-	} else if digest, ok := labels[handler.TargetDigestLabel]; ok {
-		rDigest = digest
-	} else {
-		return "", "", nil, 0, fmt.Errorf("digest hasn't been passed")
-	}
-	if l, ok := labels[targetImageLayersLabel]; ok {
-		rLayers = strings.Split(l, ",")
-	} else if l, ok := labels[handler.TargetImageLayersLabel]; ok {
-		rLayers = strings.Split(l, ",")
-	} else {
-		return "", "", nil, 0, fmt.Errorf("image layers hasn't been passed")
-	}
-
-	// optional label
-	rPrefetchSize = fs.prefetchSize
-	if psStr, ok := labels[handler.TargetPrefetchSizeLabel]; ok {
-		if ps, err := strconv.ParseInt(psStr, 10, 64); err == nil {
-			rPrefetchSize = ps
-		}
-	}
-
-	return
-}
-
-func newResolveResult(resolveFunc func() (*layer, error)) *resolveResult {
-	rr := &resolveResult{
-		resolveFunc: resolveFunc,
-		progress:    newWaiter(),
-	}
-	rr.progress.start()
-
-	go func() {
-		rr.resultMu.Lock()
-		rr.layer, rr.err = resolveFunc()
-		rr.resultMu.Unlock()
-		rr.progress.done()
-	}()
-
-	return rr
-}
-
-type resolveResult struct {
-	resolveFunc func() (*layer, error)
-	layer       *layer
-	err         error
-	resultMu    sync.Mutex
-	progress    *waiter
-}
-
-func (rr *resolveResult) waitAndGet(timeout time.Duration) (*layer, error) {
-	if err := rr.progress.wait(timeout); err != nil {
-		return nil, err
-	}
-	return rr.get()
-}
-
-func (rr *resolveResult) get() (*layer, error) {
-	rr.resultMu.Lock()
-	defer rr.resultMu.Unlock()
-	if rr.layer == nil && rr.err == nil {
-		return nil, fmt.Errorf("failed to get result")
-	}
-	return rr.layer, rr.err
-}
-
-func (rr *resolveResult) isInProgress() bool {
-	return rr.progress.isInProgress()
-}
-
-func (rr *resolveResult) retry() *resolveResult {
-	return newResolveResult(rr.resolveFunc)
-}
-
-func newLayer(blob remote.Blob, vr reader.VerifiableReader, root *stargz.TOCEntry, prefetchTimeout time.Duration) *layer {
+func newLayer(desc ocispec.Descriptor, blob remote.Blob, vr reader.VerifiableReader, root *stargz.TOCEntry, prefetchTimeout time.Duration) *layer {
 	return &layer{
+		desc:             desc,
 		blob:             blob,
 		verifiableReader: vr,
 		root:             root,
@@ -587,6 +535,7 @@ func newLayer(blob remote.Blob, vr reader.VerifiableReader, root *stargz.TOCEntr
 }
 
 type layer struct {
+	desc             ocispec.Descriptor
 	blob             remote.Blob
 	verifiableReader reader.VerifiableReader
 	root             *stargz.TOCEntry
@@ -619,15 +568,9 @@ func (l *layer) verify(tocDigest digest.Digest) error {
 	return nil
 }
 
-func (l *layer) doPrefetch() {
-	l.prefetchWaiter.start()
-}
+func (l *layer) prefetch(prefetchSize int64) error {
+	defer l.prefetchWaiter.done() // Notify the completion
 
-func (l *layer) donePrefetch() {
-	l.prefetchWaiter.done()
-}
-
-func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
 	lr, err := l.reader()
 	if err != nil {
 		return err
@@ -644,7 +587,7 @@ func (l *layer) prefetch(prefetchSize int64, opts ...remote.Option) error {
 	}
 
 	// Fetch the target range
-	if err := l.blob.Cache(0, prefetchSize, opts...); err != nil {
+	if err := l.blob.Cache(0, prefetchSize); err != nil {
 		return errors.Wrap(err, "failed to prefetch layer")
 	}
 
@@ -685,40 +628,28 @@ func newWaiter() *waiter {
 }
 
 type waiter struct {
-	inProgress     bool
-	inProgressMu   sync.Mutex
+	isDone         bool
+	isDoneMu       sync.Mutex
 	completionCond *sync.Cond
 }
 
-func (w *waiter) start() {
-	w.inProgressMu.Lock()
-	w.inProgress = true
-	w.inProgressMu.Unlock()
-}
-
 func (w *waiter) done() {
-	w.inProgressMu.Lock()
-	w.inProgress = false
-	w.inProgressMu.Unlock()
+	w.isDoneMu.Lock()
+	w.isDone = true
+	w.isDoneMu.Unlock()
 	w.completionCond.Broadcast()
-}
-
-func (w *waiter) isInProgress() bool {
-	w.inProgressMu.Lock()
-	defer w.inProgressMu.Unlock()
-	return w.inProgress
 }
 
 func (w *waiter) wait(timeout time.Duration) error {
 	wait := func() <-chan struct{} {
 		ch := make(chan struct{})
 		go func() {
-			w.inProgressMu.Lock()
-			inProgress := w.inProgress
-			w.inProgressMu.Unlock()
+			w.isDoneMu.Lock()
+			isDone := w.isDone
+			w.isDoneMu.Unlock()
 
 			w.completionCond.L.Lock()
-			if inProgress {
+			if !isDone {
 				w.completionCond.Wait()
 			}
 			w.completionCond.L.Unlock()
@@ -728,9 +659,9 @@ func (w *waiter) wait(timeout time.Duration) error {
 	}
 	select {
 	case <-time.After(timeout):
-		w.inProgressMu.Lock()
-		w.inProgress = false
-		w.inProgressMu.Unlock()
+		w.isDoneMu.Lock()
+		w.isDone = true
+		w.isDoneMu.Unlock()
 		w.completionCond.Broadcast()
 		return fmt.Errorf("timeout(%v)", timeout)
 	case <-wait():
