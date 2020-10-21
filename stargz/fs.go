@@ -1067,8 +1067,8 @@ func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) fusefs.StableAttr {
 	if out.Size%uint64(out.Blksize) > 0 {
 		out.Blocks++
 	}
-	out.Mtime = uint64(e.ModTime().Unix())
-	out.Mtimensec = uint32(e.ModTime().UnixNano())
+	mtime := e.ModTime()
+	out.SetTimes(nil, &mtime, nil)
 	out.Mode = modeOfEntry(e)
 	out.Owner = fuse.Owner{Uid: uint32(e.Uid), Gid: uint32(e.Gid)}
 	out.Rdev = uint32(unix.Mkdev(uint32(e.DevMajor), uint32(e.DevMinor)))
@@ -1094,8 +1094,8 @@ func entryToWhAttr(e *stargz.TOCEntry, out *fuse.Attr) fusefs.StableAttr {
 	out.Size = 0
 	out.Blksize = blockSize
 	out.Blocks = 0
-	out.Mtime = uint64(fi.ModTime().Unix())
-	out.Mtimensec = uint32(fi.ModTime().UnixNano())
+	mtime := fi.ModTime()
+	out.SetTimes(nil, &mtime, nil)
 	out.Mode = syscall.S_IFCHR
 	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
 	out.Rdev = uint32(unix.Mkdev(0, 0))
