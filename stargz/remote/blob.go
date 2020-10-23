@@ -269,7 +269,7 @@ func (b *blob) fetchRange(allData map[region]io.Writer, opts *options) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	mr, err := fr.fetch(ctx, req, opts)
+	mr, err := fr.fetch(ctx, req, true, opts)
 	if err != nil {
 		return err
 	}
