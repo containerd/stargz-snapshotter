@@ -112,7 +112,8 @@ if ! ( cd "${CONTEXT}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
            docker exec -e BENCHMARK_SAMPLES_NUM -i "${BENCHMARKING_CONTAINER}" \
                   script/benchmark/hello-bench/run.sh \
-                  "${BENCHMARK_USER}" ${BENCHMARK_TARGETS} &> "${LOG_FILE}" ) ; then
+                  "${BENCHMARK_REGISTRY:-docker.io}/${BENCHMARK_USER}" \
+                  ${BENCHMARK_TARGETS} &> "${LOG_FILE}" ) ; then
     echo "Failed to run benchmark."
     FAIL=true
 fi

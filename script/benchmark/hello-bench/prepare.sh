@@ -20,11 +20,11 @@ MEASURING_SCRIPT=./script/benchmark/hello-bench/src/hello.py
 
 if [ $# -lt 1 ] ; then
     echo "Specify benchmark target."
-    echo "Ex) ${0} <YOUR_ACCOUNT_NAME> --all"
-    echo "Ex) ${0} <YOUR_ACCOUNT_NAME> alpine busybox"
+    echo "Ex) ${0} <YOUR_REPOSITORY_NAME> --all"
+    echo "Ex) ${0} <YOUR_REPOSITORY_NAME> alpine busybox"
     exit 1
 fi
-TARGET_REPOUSER="${1}"
+TARGET_REPOSITORY="${1}"
 TARGET_IMAGES=${@:2}
 
 if ! which ctr-remote ; then
@@ -35,4 +35,4 @@ if ! which ctr-remote ; then
         install /tmp/out/ctr-remote /usr/local/bin
 fi
 
-"${MEASURING_SCRIPT}" --user=${TARGET_REPOUSER} --op=prepare ${TARGET_IMAGES}
+"${MEASURING_SCRIPT}" --repository=${TARGET_REPOSITORY} --op=prepare ${TARGET_IMAGES}

@@ -42,7 +42,7 @@ $ docker build -t stargz-kind-node https://github.com/containerd/stargz-snapshot
 $ kind create cluster --name stargz-demo --image stargz-kind-node
 ```
 
-Then you can create stargz pods on the cluster. In this example, we create a stargz-converted Node.js pod (`stargz/node:13.13-esgz`) as a demo.
+Then you can create stargz pods on the cluster. In this example, we create a stargz-converted Node.js pod (`ghcr.io/stargz-containers/node:13.13-esgz`) as a demo.
 
 ```yaml
 apiVersion: v1
@@ -52,7 +52,7 @@ metadata:
 spec:
   containers:
   - name: nodejs-stargz
-    image: stargz/node:13.13.0-esgz
+    image: ghcr.io/stargz-containers/node:13.13.0-esgz
     command: ["node"]
     args:
     - -e
@@ -65,7 +65,7 @@ spec:
     - containerPort: 80
 ```
 
-The following command lazily pulls `stargz/node:13.13.0-esgz` from Docker Hub and creates the pod so the time to take for it is shorter than the original image `library/node:13.13`.
+The following command lazily pulls `ghcr.io/stargz-containers/node:13.13.0-esgz` from Github Container Registry and creates the pod so the time to take for it is shorter than the original image `library/node:13.13`.
 
 ```console
 $ kubectl --context kind-stargz-demo apply -f stargz-pod.yaml && kubectl get po nodejs -w

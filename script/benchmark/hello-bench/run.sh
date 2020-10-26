@@ -38,11 +38,11 @@ BENCHMARKOUT_MARK_OUTPUT="BENCHMARK_OUTPUT: "
 
 if [ $# -lt 1 ] ; then
     echo "Specify benchmark target."
-    echo "Ex) ${0} <YOUR_ACCOUNT_NAME> --all"
-    echo "Ex) ${0} <YOUR_ACCOUNT_NAME> alpine busybox"
+    echo "Ex) ${0} <YOUR_REPOSITORY_NAME> --all"
+    echo "Ex) ${0} <YOUR_REPOSITORY_NAME> alpine busybox"
     exit 1
 fi
-TARGET_REPOUSER="${1}"
+TARGET_REPOSITORY="${1}"
 TARGET_IMAGES=${@:2}
 NUM_OF_SAMPLES="${BENCHMARK_SAMPLES_NUM:-1}"
 
@@ -67,8 +67,8 @@ function set_noprefetch {
 
 function measure {
     local OPTION="${1}"
-    local USER="${2}"
-    "${MEASURING_SCRIPT}" ${OPTION} --user=${USER} --op=run --experiments=1 ${@:3}
+    local REPOSITORY="${2}"
+    "${MEASURING_SCRIPT}" ${OPTION} --repository=${REPOSITORY} --op=run --experiments=1 ${@:3}
 }
 
 echo "========="
@@ -110,14 +110,14 @@ for SAMPLE_NO in $(seq ${NUM_OF_SAMPLES}) ; do
 
         if [ "${MODE}" == "${LEGACY_MODE}" ] ; then
             NO_STARGZ_SNAPSHOTTER="true" "${REBOOT_CONTAINERD_SCRIPT}"
-            measure "--mode=legacy" ${TARGET_REPOUSER} ${IMAGE}
+            measure "--mode=legacy" ${TARGET_REPOSITORY} ${IMAGE}
         fi
 
         if [ "${MODE}" == "${STARGZ_MODE}" ] ; then
             echo -n "" > "${TMP_LOG_FILE}"
             set_noprefetch "true" # disable prefetch
             LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
-            measure "--mode=stargz" ${TARGET_REPOUSER} ${IMAGE}
+            measure "--mode=stargz" ${TARGET_REPOSITORY} ${IMAGE}
             check_remote_snapshots "${TMP_LOG_FILE}"
         fi
 
@@ -125,7 +125,7 @@ for SAMPLE_NO in $(seq ${NUM_OF_SAMPLES}) ; do
             echo -n "" > "${TMP_LOG_FILE}"
             set_noprefetch "false" # enable prefetch
             LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
-            measure "--mode=estargz" ${TARGET_REPOUSER} ${IMAGE}
+            measure "--mode=estargz" ${TARGET_REPOSITORY} ${IMAGE}
             check_remote_snapshots "${TMP_LOG_FILE}"
         fi
     done
