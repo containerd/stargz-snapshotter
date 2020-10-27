@@ -130,10 +130,9 @@ class BenchRunner:
                  Bench('node:13.13.0'),
              ]])
 
-    def __init__(self, user='library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER):
+    def __init__(self, repository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER):
         self.docker = 'ctr'
-        self.user = user
-        self.registry = 'docker.io/%s/' % user
+        self.repository = repository
         self.mode = mode
         self.optimizer = optimizer
 
@@ -197,8 +196,8 @@ class BenchRunner:
         return runtime
         
     def run_echo_hello(self, repo, cid):
-        cmd = ('%s c create --net-host %s -- %s%s %s echo hello' %
-               (self.docker, self.snapshotter_opt(), self.registry, self.add_suffix(repo), cid))
+        cmd = ('%s c create --net-host %s -- %s/%s %s echo hello' %
+               (self.docker, self.snapshotter_opt(), self.repository, self.add_suffix(repo), cid))
         print cmd
         startcreate = time.time()
         rc = os.system(cmd)
@@ -209,7 +208,7 @@ class BenchRunner:
     def run_cmd_arg(self, repo, cid, runargs):
         assert(len(runargs.mount) == 0)
         cmd = '%s c create --net-host %s ' % (self.docker, self.snapshotter_opt())
-        cmd += '-- %s%s %s ' % (self.registry, self.add_suffix(repo), cid)
+        cmd += '-- %s/%s %s ' % (self.repository, self.add_suffix(repo), cid)
         cmd += runargs.arg
         print cmd
         startcreate = time.time()
@@ -220,8 +219,8 @@ class BenchRunner:
 
     def run_cmd_arg_wait(self, repo, cid, runargs):
         env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s c create --net-host %s %s -- %s%s %s %s' %
-               (self.docker, self.snapshotter_opt(), env, self.registry, self.add_suffix(repo), cid, runargs.arg))
+        cmd = ('%s c create --net-host %s %s -- %s/%s %s %s' %
+               (self.docker, self.snapshotter_opt(), env, self.repository, self.add_suffix(repo), cid, runargs.arg))
         print cmd
         startcreate = time.time()
         rc = os.system(cmd)
@@ -259,7 +258,7 @@ class BenchRunner:
             a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
             a = tmp_copy(a)
             cmd += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
-        cmd += '-- %s%s %s ' % (self.registry, self.add_suffix(repo), cid)
+        cmd += '-- %s/%s %s ' % (self.repository, self.add_suffix(repo), cid)
         if runargs.stdin_sh:
             cmd += runargs.stdin_sh # e.g., sh -c
 
@@ -284,8 +283,8 @@ class BenchRunner:
         name = bench.name
         print "Pulling the image..."
         startpull = time.time()
-        cmd = ('%s images %s %s%s' %
-               (self.docker_pullbin(), self.pull_subcmd(), self.registry, self.add_suffix(name)))
+        cmd = ('%s images %s %s/%s' %
+               (self.docker_pullbin(), self.pull_subcmd(), self.repository, self.add_suffix(name)))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -311,7 +310,7 @@ class BenchRunner:
         self.mode = ESTARGZ_MODE
         period=10
         cmd = ('%s -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s %s/%s' %
-               (self.optimizer, period, repo, self.user, self.add_suffix(repo)))
+               (self.optimizer, period, repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -324,7 +323,7 @@ class BenchRunner:
         if runargs.arg != "": # FIXME: this is naive...
             entry = '-entrypoint \'["/bin/sh", "-c"]\''
         cmd = ('%s -period %s %s %s %s %s/%s' %
-               (self.optimizer, period, entry, genargs(runargs.arg), repo, self.user, self.add_suffix(repo)))
+               (self.optimizer, period, entry, genargs(runargs.arg), repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -334,7 +333,7 @@ class BenchRunner:
         period = 90
         env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
         cmd = ('%s -period %s %s %s %s %s/%s' %
-               (self.optimizer, period, env, genargs(runargs.arg), repo, self.user, self.add_suffix(repo)))
+               (self.optimizer, period, env, genargs(runargs.arg), repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -343,7 +342,7 @@ class BenchRunner:
         self.mode = ESTARGZ_MODE
         period = 60
         cmd = ('%s -period %s -entrypoint \'["/bin/sh", "-c"]\' %s %s %s/%s' %
-               (self.optimizer, period, genargs(runargs.stdin_sh), repo, self.user, self.add_suffix(repo)))
+               (self.optimizer, period, genargs(runargs.stdin_sh), repo, self.repository, self.add_suffix(repo)))
         print cmd
         p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         print runargs.stdin
@@ -354,12 +353,12 @@ class BenchRunner:
 
     def copy_img(self, repo):
         self.mode = LEGACY_MODE
-        cmd = 'crane copy %s %s/%s' % (repo, self.user, self.add_suffix(repo))
+        cmd = 'crane copy %s %s/%s' % (repo, self.repository, self.add_suffix(repo))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
         self.mode = STARGZ_MODE
-        cmd = '%s --stargz-only %s %s/%s' % (self.optimizer, repo, self.user, self.add_suffix(repo))
+        cmd = '%s --stargz-only %s %s/%s' % (self.optimizer, repo, self.repository, self.add_suffix(repo))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -393,7 +392,7 @@ def main():
     if len(sys.argv) == 1:
         print 'Usage: bench.py [OPTIONS] [BENCHMARKS]'
         print 'OPTIONS:'
-        print '--user=<user>'
+        print '--repository=<repository>'
         print '--all'
         print '--list'
         print '--list-json'
@@ -442,7 +441,7 @@ def main():
             pulltime, createtime, runtime = runner.operation(op, bench, cid)
             elapsed = time.time() - start
             if op == "run":
-                runner.cleanup(cid, '%s%s' % (runner.registry, bench.repo))
+                runner.cleanup(cid, '%s/%s' % (runner.repository, runner.add_suffix(bench.repo)))
             elapsed_times.append(elapsed)
             pull_times.append(pulltime)
             create_times.append(createtime)

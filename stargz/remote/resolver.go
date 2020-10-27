@@ -437,10 +437,7 @@ func (f *fetcher) refreshURL(ctx context.Context) error {
 }
 
 func (f *fetcher) genID(reg region) string {
-	f.urlMu.Lock()
-	url := f.url
-	f.urlMu.Unlock()
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", url, reg.b, reg.e)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.blobURL, reg.b, reg.e)))
 	return fmt.Sprintf("%x", sum)
 }
 
