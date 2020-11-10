@@ -104,6 +104,10 @@ var OptimizeCommand = cli.Command{
 			Name:  "env",
 			Usage: "environment valulable to add or override to the image's default config",
 		},
+		cli.StringSliceFlag{
+			Name:  "mount",
+			Usage: "additional mounts for the container (e.g. type=foo,source=/path,destination=/target,options=bind)",
+		},
 	},
 	Action: func(context *cli.Context) error {
 
@@ -147,6 +151,9 @@ var OptimizeCommand = cli.Command{
 func parseArgs(clicontext *cli.Context) (opts []sampler.Option, err error) {
 	if env := clicontext.StringSlice("env"); len(env) > 0 {
 		opts = append(opts, sampler.WithEnvs(env))
+	}
+	if mounts := clicontext.StringSlice("mount"); len(mounts) > 0 {
+		opts = append(opts, sampler.WithMounts(mounts))
 	}
 	if args := clicontext.String("args"); args != "" {
 		var as []string

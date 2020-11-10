@@ -18,10 +18,13 @@ package sampler
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -127,6 +130,37 @@ func conf2spec(config v1.ImageConfig, rootfs string, opt options) (specs.Spec, e
 		args = opt.args
 	}
 	s.Process.Args = append(entrypoint, args...)
+
+	// Mounts (syntax is compatible to ctr command)
+	// e.g.) "type=foo,source=/path,destination=/target,options=rbind:rw"
+	for _, m := range opt.mounts {
+		r := csv.NewReader(strings.NewReader(m))
+		fields, err := r.Read()
+		if err != nil {
+			return specs.Spec{}, nil
+		}
+		mc := specs.Mount{}
+		for _, field := range fields {
+			v := strings.Split(field, "=")
+			if len(v) != 2 {
+				return specs.Spec{}, fmt.Errorf("invalid (non key=val) mount spec")
+			}
+			key, val := v[0], v[1]
+			switch key {
+			case "type":
+				mc.Type = val
+			case "source", "src":
+				mc.Source = val
+			case "destination", "dst":
+				mc.Destination = val
+			case "options":
+				mc.Options = strings.Split(val, ":")
+			default:
+				return specs.Spec{}, fmt.Errorf("mount option %q not supported", key)
+			}
+		}
+		s.Mounts = append(s.Mounts, mc)
+	}
 
 	return s, nil
 }

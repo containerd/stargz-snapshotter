@@ -25,11 +25,18 @@ type options struct {
 	user       string
 	workingDir string
 	terminal   bool
+	mounts     []string
 }
 
 func WithEnvs(envs []string) Option {
 	return func(opts *options) {
 		opts.envs = envs
+	}
+}
+
+func WithMounts(mounts []string) Option {
+	return func(opts *options) {
+		opts.mounts = mounts
 	}
 }
 
