@@ -33,7 +33,7 @@ const (
 	landmarkContents = 0xf
 )
 
-func Sort(in io.ReaderAt, log []string) (io.Reader, error) {
+func Sort(in io.ReaderAt, log []string) ([]*TarEntry, error) {
 
 	// Import tar file.
 	intar, err := importTar(in)
@@ -47,46 +47,49 @@ func Sort(in io.ReaderAt, log []string) (io.Reader, error) {
 		moveRec(l, intar, sorted)
 	}
 	if len(log) == 0 {
-		sorted.add(&tarEntry{
-			header: &tar.Header{
+		sorted.add(&TarEntry{
+			Header: &tar.Header{
 				Name:     stargz.NoPrefetchLandmark,
 				Typeflag: tar.TypeReg,
 				Size:     int64(len([]byte{landmarkContents})),
 			},
-			payload: bytes.NewReader([]byte{landmarkContents}),
+			Payload: bytes.NewReader([]byte{landmarkContents}),
 		})
 	} else {
-		sorted.add(&tarEntry{
-			header: &tar.Header{
+		sorted.add(&TarEntry{
+			Header: &tar.Header{
 				Name:     stargz.PrefetchLandmark,
 				Typeflag: tar.TypeReg,
 				Size:     int64(len([]byte{landmarkContents})),
 			},
-			payload: bytes.NewReader([]byte{landmarkContents}),
+			Payload: bytes.NewReader([]byte{landmarkContents}),
 		})
 	}
 
 	// Dump all entry and concatinate them.
-	outtar := append(sorted.dump(), intar.dump()...)
+	return append(sorted.dump(), intar.dump()...), nil
+}
 
-	// Export tar file.
+// ReaderFromEntries returns a reader of tar archive that contains entries passed
+// through the arguments.
+func ReaderFromEntries(entries ...*TarEntry) io.Reader {
 	pr, pw := io.Pipe()
 	go func() {
 		tw := tar.NewWriter(pw)
 		defer tw.Close()
-		for _, entry := range outtar {
-			if err := tw.WriteHeader(entry.header); err != nil {
+		for _, entry := range entries {
+			if err := tw.WriteHeader(entry.Header); err != nil {
 				pw.CloseWithError(fmt.Errorf("Failed to write tar header: %v", err))
-				break
+				return
 			}
-			if _, err := io.Copy(tw, entry.payload); err != nil {
+			if _, err := io.Copy(tw, entry.Payload); err != nil {
 				pw.CloseWithError(fmt.Errorf("Failed to write tar payload: %v", err))
-				break
+				return
 			}
 		}
+		pw.Close()
 	}()
-
-	return pr, nil
+	return pr
 }
 
 func importTar(in io.ReaderAt) (*tarFile, error) {
@@ -117,9 +120,9 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 		if _, ok := tf.get(h.Name); ok {
 			return nil, fmt.Errorf("Duplicated entry(%q) is not supported", h.Name)
 		}
-		tf.add(&tarEntry{
-			header:  h,
-			payload: io.NewSectionReader(in, pw.CurrentPos(), h.Size),
+		tf.add(&TarEntry{
+			Header:  h,
+			Payload: io.NewSectionReader(in, pw.CurrentPos(), h.Size),
 		})
 	}
 
@@ -138,21 +141,21 @@ func moveRec(name string, in *tarFile, out *tarFile) {
 	}
 }
 
-type tarEntry struct {
-	header  *tar.Header
-	payload io.ReadSeeker
+type TarEntry struct {
+	Header  *tar.Header
+	Payload io.ReadSeeker
 }
 
 type tarFile struct {
-	index  map[string]*tarEntry
-	stream []*tarEntry
+	index  map[string]*TarEntry
+	stream []*TarEntry
 }
 
-func (f *tarFile) add(e *tarEntry) {
+func (f *tarFile) add(e *TarEntry) {
 	if f.index == nil {
-		f.index = make(map[string]*tarEntry)
+		f.index = make(map[string]*TarEntry)
 	}
-	f.index[e.header.Name] = e
+	f.index[e.Header.Name] = e
 	f.stream = append(f.stream, e)
 }
 
@@ -160,9 +163,9 @@ func (f *tarFile) remove(name string) {
 	if f.index != nil {
 		delete(f.index, name)
 	}
-	var filtered []*tarEntry
+	var filtered []*TarEntry
 	for _, e := range f.stream {
-		if e.header.Name == name {
+		if e.Header.Name == name {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -170,7 +173,7 @@ func (f *tarFile) remove(name string) {
 	f.stream = filtered
 }
 
-func (f *tarFile) get(name string) (e *tarEntry, ok bool) {
+func (f *tarFile) get(name string) (e *TarEntry, ok bool) {
 	if f.index == nil {
 		return nil, false
 	}
@@ -178,6 +181,6 @@ func (f *tarFile) get(name string) (e *tarEntry, ok bool) {
 	return
 }
 
-func (f *tarFile) dump() []*tarEntry {
+func (f *tarFile) dump() []*TarEntry {
 	return f.stream
 }
