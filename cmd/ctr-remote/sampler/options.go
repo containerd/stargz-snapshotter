@@ -19,13 +19,20 @@ package sampler
 type Option func(*options)
 
 type options struct {
-	envs       []string
-	args       []string
-	entrypoint []string
-	user       string
-	workingDir string
-	terminal   bool
-	mounts     []string
+	envs             []string
+	args             []string
+	entrypoint       []string
+	user             string
+	workingDir       string
+	terminal         bool
+	mounts           []string
+	dnsNameservers   []string
+	dnsSearchDomains []string
+	dnsOptions       []string
+	extraHosts       []string
+	cni              bool
+	cniPluginConfDir string
+	cniPluginDir     string
 }
 
 func WithEnvs(envs []string) Option {
@@ -67,5 +74,47 @@ func WithWorkingDir(workingDir string) Option {
 func WithTerminal() Option {
 	return func(opts *options) {
 		opts.terminal = true
+	}
+}
+
+func WithDNSNameservers(dnsNameservers []string) Option {
+	return func(opts *options) {
+		opts.dnsNameservers = dnsNameservers
+	}
+}
+
+func WithDNSSearchDomains(dnsSearchDomains []string) Option {
+	return func(opts *options) {
+		opts.dnsSearchDomains = dnsSearchDomains
+	}
+}
+
+func WithDNSOptions(dnsOptions []string) Option {
+	return func(opts *options) {
+		opts.dnsOptions = dnsOptions
+	}
+}
+
+func WithExtraHosts(extraHosts []string) Option {
+	return func(opts *options) {
+		opts.extraHosts = extraHosts
+	}
+}
+
+func WithCNI() Option {
+	return func(opts *options) {
+		opts.cni = true
+	}
+}
+
+func WithCNIPluginConfDir(cniPluginConfDir string) Option {
+	return func(opts *options) {
+		opts.cniPluginConfDir = cniPluginConfDir
+	}
+}
+
+func WithCNIPluginDir(cniPluginDir string) Option {
+	return func(opts *options) {
+		opts.cniPluginDir = cniPluginDir
 	}
 }

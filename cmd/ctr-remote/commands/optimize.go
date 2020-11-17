@@ -26,6 +26,7 @@ import (
 	"compress/gzip"
 	gocontext "context"
 	"crypto/sha256"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -114,6 +115,35 @@ var OptimizeCommand = cli.Command{
 			Name:  "mount",
 			Usage: "additional mounts for the container (e.g. type=foo,source=/path,destination=/target,options=bind)",
 		},
+		cli.StringFlag{
+			Name:  "dns-nameservers",
+			Usage: "comma-separated nameservers added to the container's /etc/resolv.conf",
+			Value: "8.8.8.8",
+		},
+		cli.StringFlag{
+			Name:  "dns-search-domains",
+			Usage: "comma-separated search domains added to the container's /etc/resolv.conf",
+		},
+		cli.StringFlag{
+			Name:  "dns-options",
+			Usage: "comma-separated options added to the container's /etc/resolv.conf",
+		},
+		cli.StringFlag{
+			Name:  "add-hosts",
+			Usage: "comma-separated hosts configuration (host:IP) added to container's /etc/hosts",
+		},
+		cli.BoolFlag{
+			Name:  "cni",
+			Usage: "enable CNI-based networking",
+		},
+		cli.StringFlag{
+			Name:  "cni-plugin-conf-dir",
+			Usage: "path to the CNI plugins configuration directory",
+		},
+		cli.StringFlag{
+			Name:  "cni-plugin-dir",
+			Usage: "path to the CNI plugins binary directory",
+		},
 	},
 	Action: func(context *cli.Context) error {
 
@@ -185,6 +215,43 @@ func parseArgs(clicontext *cli.Context) (opts []sampler.Option, err error) {
 	}
 	if clicontext.Bool("terminal") {
 		opts = append(opts, sampler.WithTerminal())
+	}
+	if nameservers := clicontext.String("dns-nameservers"); nameservers != "" {
+		fields, err := csv.NewReader(strings.NewReader(nameservers)).Read()
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, sampler.WithDNSNameservers(fields))
+	}
+	if search := clicontext.String("dns-search-domains"); search != "" {
+		fields, err := csv.NewReader(strings.NewReader(search)).Read()
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, sampler.WithDNSSearchDomains(fields))
+	}
+	if dnsopts := clicontext.String("dns-options"); dnsopts != "" {
+		fields, err := csv.NewReader(strings.NewReader(dnsopts)).Read()
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, sampler.WithDNSOptions(fields))
+	}
+	if hosts := clicontext.String("add-hosts"); hosts != "" {
+		fields, err := csv.NewReader(strings.NewReader(hosts)).Read()
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, sampler.WithExtraHosts(fields))
+	}
+	if clicontext.Bool("cni") {
+		opts = append(opts, sampler.WithCNI())
+	}
+	if cniPluginConfDir := clicontext.String("cni-plugin-conf-dir"); cniPluginConfDir != "" {
+		opts = append(opts, sampler.WithCNIPluginConfDir(cniPluginConfDir))
+	}
+	if cniPluginDir := clicontext.String("cni-plugin-dir"); cniPluginDir != "" {
+		opts = append(opts, sampler.WithCNIPluginDir(cniPluginDir))
 	}
 
 	return
