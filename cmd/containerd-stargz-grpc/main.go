@@ -31,9 +31,9 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/keychain"
+	stargzfs "github.com/containerd/stargz-snapshotter/fs"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
-	"github.com/containerd/stargz-snapshotter/stargz"
-	"github.com/containerd/stargz-snapshotter/stargz/source"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/hashicorp/go-multierror"
@@ -91,9 +91,9 @@ func main() {
 	hosts := hostsFromConfig(config.ResolverConfig, kc)
 
 	// Configure filesystem and snapshotter
-	fs, err := stargz.NewFilesystem(filepath.Join(*rootDir, "stargz"),
+	fs, err := stargzfs.NewFilesystem(filepath.Join(*rootDir, "stargz"),
 		config.Config,
-		stargz.WithGetSources(sources(
+		stargzfs.WithGetSources(sources(
 			sourceFromCRILabels(hosts),      // provides source info based on CRI labels
 			source.FromDefaultLabels(hosts), // provides source info based on default labels
 		)),

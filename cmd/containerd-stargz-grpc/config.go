@@ -16,7 +16,7 @@
 
 package main
 
-import "github.com/containerd/stargz-snapshotter/stargz/config"
+import "github.com/containerd/stargz-snapshotter/fs/config"
 
 type Config struct {
 	config.Config

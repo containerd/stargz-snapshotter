@@ -43,7 +43,6 @@ import (
 	"github.com/rs/xid"
 )
 
-// TODO: Enable to specify volumes
 func Run(ctx context.Context, bundle string, config v1.Image, opts ...Option) error {
 	opt := options{}
 	for _, o := range opts {

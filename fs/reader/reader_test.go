@@ -32,7 +32,7 @@ import (
 	"testing"
 
 	"github.com/containerd/stargz-snapshotter/cache"
-	"github.com/containerd/stargz-snapshotter/stargz/verify"
+	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/google/crfs/stargz"
 	digest "github.com/opencontainers/go-digest"
 )
@@ -306,7 +306,7 @@ func makeFile(t *testing.T, contents []byte, chunkSize int64) *file {
 		regfile(testName, string(contents)),
 	}, chunkSizeInfo(chunkSize))
 
-	ev, err := verify.StargzTOC(sr, dgst)
+	ev, err := estargz.VerifyStargzTOC(sr, dgst)
 	if err != nil {
 		t.Fatalf("failed to verify stargz: %v", err)
 	}
@@ -358,57 +358,40 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 		}
 	}
 
-	pr, pw := io.Pipe()
-	go func() {
-		tw := tar.NewWriter(pw)
-		for _, ent := range ents {
-			if err := tw.WriteHeader(ent.header); err != nil {
-				t.Errorf("writing header to the input tar: %v", err)
-				pw.Close()
-				return
-			}
-			if _, err := tw.Write(ent.contents); err != nil {
-				t.Errorf("writing contents to the input tar: %v", err)
-				pw.Close()
-				return
-			}
+	tarBuf := new(bytes.Buffer)
+	tw := tar.NewWriter(tarBuf)
+	for _, ent := range ents {
+		if err := tw.WriteHeader(ent.header); err != nil {
+			t.Fatalf("writing header to the input tar: %v", err)
 		}
-		if err := tw.Close(); err != nil {
-			t.Errorf("closing write of input tar: %v", err)
+		if _, err := tw.Write(ent.contents); err != nil {
+			t.Fatalf("writing contents to the input tar: %v", err)
 		}
-		pw.Close()
-	}()
-	defer func() { go pr.Close(); go pw.Close() }()
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("closing write of input tar: %v", err)
+	}
 
-	var stargzBuf bytes.Buffer
-	w := stargz.NewWriter(&stargzBuf)
-	if chunkSize > 0 {
-		w.ChunkSize = int(chunkSize)
-	}
-	if err := w.AppendTar(pr); err != nil {
-		t.Fatalf("failed to append tar file to stargz: %q", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("failed to close stargz writer: %q", err)
-	}
-	b := stargzBuf.Bytes()
+	tarData := tarBuf.Bytes()
 
-	sgz, dgst, err := verify.NewVerifiableStagz(io.NewSectionReader(
-		bytes.NewReader(b), 0, int64(len(b))))
+	rc, dgst, err := estargz.Build(
+		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
+		nil,
+		estargz.WithChunkSize(int(chunkSize)),
+	)
 	if err != nil {
 		t.Fatalf("failed to build verifiable stargz: %v", err)
 	}
-
 	vsb := new(bytes.Buffer)
-	if _, err := io.Copy(vsb, sgz); err != nil {
-		t.Fatalf("failed to read verifiable stargz: %v", err)
+	if _, err := io.Copy(vsb, rc); err != nil {
+		t.Fatalf("failed to copy built stargz blob: %v", err)
 	}
 	vsbb := vsb.Bytes()
 
 	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), dgst
 }
 
-func newReader(sr *io.SectionReader, cache cache.BlobCache, ev verify.TOCEntryVerifier) (*reader, *stargz.TOCEntry, error) {
+func newReader(sr *io.SectionReader, cache cache.BlobCache, ev estargz.TOCEntryVerifier) (*reader, *stargz.TOCEntry, error) {
 	var r *reader
 	vr, root, err := NewReader(sr, cache)
 	if vr != nil {

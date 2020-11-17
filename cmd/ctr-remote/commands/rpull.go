@@ -26,8 +26,8 @@ import (
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/snapshots"
-	sgzconfig "github.com/containerd/stargz-snapshotter/stargz/config"
-	"github.com/containerd/stargz-snapshotter/stargz/source"
+	fsconfig "github.com/containerd/stargz-snapshotter/fs/config"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli"
 )
@@ -108,7 +108,7 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *rP
 	if config.skipVerify {
 		log.G(pCtx).WithField("image", ref).Warn("content verification disabled")
 		snOpts = append(snOpts, snapshots.WithLabels(map[string]string{
-			sgzconfig.TargetSkipVerifyLabel: "true",
+			fsconfig.TargetSkipVerifyLabel: "true",
 		}))
 	}
 
