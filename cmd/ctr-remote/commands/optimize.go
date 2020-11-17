@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/builder"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sampler"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sorter"
@@ -443,27 +444,21 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 				defer log.G(ctx).Infof("converted")
 
 				// Sort file entry by the accessed order
-				r, err := sorter.Sort(decompressedLayer, mon.DumpLog())
+				entries, err := sorter.Sort(decompressedLayer, mon.DumpLog())
 				if err != nil {
 					return mutate.Addendum{}, errors.Wrap(err, "failed to sort tar")
 				}
 
-				// Compress the archive with stargz
-				w := stargz.NewWriter(stargzFile)
-				if err := w.AppendTar(r); err != nil {
-					return mutate.Addendum{}, errors.Wrapf(err,
-						"failed to append to stargz %q", stargzFile.Name())
-				}
-				if err := w.Close(); err != nil {
-					return mutate.Addendum{}, errors.Wrapf(err,
-						"failed to make stargz file %q", stargzFile.Name())
-				}
-				sinfo, err := stargzFile.Stat()
-				if err != nil {
+				// Build stargz
+				if err := builder.BuildStargz(ctx, entries, stargzFile); err != nil {
 					return mutate.Addendum{}, err
 				}
 
 				// Add chunks digests to TOC JSON
+				sinfo, err := stargzFile.Stat()
+				if err != nil {
+					return mutate.Addendum{}, err
+				}
 				r, jtocDigest, err := verify.NewVerifiableStagz(
 					io.NewSectionReader(stargzFile, 0, sinfo.Size()))
 				if err != nil {

@@ -291,11 +291,11 @@ func TestSort(t *testing.T) {
 			wantTar := tar.NewReader(bytes.NewReader(wantTarData))
 
 			// Sort tar file
-			r, err := Sort(bytes.NewReader(inTarData), tt.log)
+			entries, err := Sort(bytes.NewReader(inTarData), tt.log)
 			if err != nil {
 				t.Fatalf("failed to sort: %q", err)
 			}
-			gotTar := tar.NewReader(r)
+			gotTar := tar.NewReader(ReaderFromEntries(entries...))
 
 			// Compare all
 			for {
