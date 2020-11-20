@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/util"
+	"github.com/containerd/stargz-snapshotter/util/positionwatcher"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/pkg/errors"
@@ -199,7 +199,7 @@ func (n *node) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
 func (n *node) InitNodes() error {
 	ctx := context.Background()
 
-	pw, err := util.NewPositionWatcher(n.tr)
+	pw, err := positionwatcher.NewPositionWatcher(n.tr)
 	if err != nil {
 		return errors.Wrap(err, "Failed to make position watcher")
 	}

@@ -20,7 +20,7 @@
    license that can be found in the NOTICE.md file.
 */
 
-package stargz
+package fs
 
 import (
 	"archive/tar"
@@ -44,10 +44,10 @@ import (
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
-	"github.com/containerd/stargz-snapshotter/stargz/reader"
-	"github.com/containerd/stargz-snapshotter/stargz/remote"
-	"github.com/containerd/stargz-snapshotter/stargz/source"
-	"github.com/containerd/stargz-snapshotter/stargz/verify"
+	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/fs/reader"
+	"github.com/containerd/stargz-snapshotter/fs/remote"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/google/crfs/stargz"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
@@ -88,7 +88,7 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-func nopVerifiableReader(ev verify.TOCEntryVerifier) reader.Reader {
+func nopVerifiableReader(ev estargz.TOCEntryVerifier) reader.Reader {
 	return nopreader{}
 }
 
@@ -286,25 +286,25 @@ func TestExistence(t *testing.T) {
 		{
 			name: "prefetch_landmark",
 			in: []tarent{
-				regfile(PrefetchLandmark, "test"),
+				regfile(estargz.PrefetchLandmark, "test"),
 				directory("foo/"),
-				regfile(fmt.Sprintf("foo/%s", PrefetchLandmark), "test"),
+				regfile(fmt.Sprintf("foo/%s", estargz.PrefetchLandmark), "test"),
 			},
 			want: []check{
-				fileNotExist(PrefetchLandmark),
-				hasFileDigest(fmt.Sprintf("foo/%s", PrefetchLandmark), digestFor("test")),
+				fileNotExist(estargz.PrefetchLandmark),
+				hasFileDigest(fmt.Sprintf("foo/%s", estargz.PrefetchLandmark), digestFor("test")),
 			},
 		},
 		{
 			name: "no_prefetch_landmark",
 			in: []tarent{
-				regfile(NoPrefetchLandmark, "test"),
+				regfile(estargz.NoPrefetchLandmark, "test"),
 				directory("foo/"),
-				regfile(fmt.Sprintf("foo/%s", NoPrefetchLandmark), "test"),
+				regfile(fmt.Sprintf("foo/%s", estargz.NoPrefetchLandmark), "test"),
 			},
 			want: []check{
-				fileNotExist(NoPrefetchLandmark),
-				hasFileDigest(fmt.Sprintf("foo/%s", NoPrefetchLandmark), digestFor("test")),
+				fileNotExist(estargz.NoPrefetchLandmark),
+				hasFileDigest(fmt.Sprintf("foo/%s", estargz.NoPrefetchLandmark), digestFor("test")),
 			},
 		},
 		{
@@ -398,61 +398,67 @@ func (db *dummyBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, re
 }
 
 type chunkSizeInfo int
+type prioritizedFilesInfo []string
+type stargzOnlyInfo bool
 
 func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionReader, digest.Digest) {
 	var chunkSize chunkSizeInfo
+	var prioritizedFiles prioritizedFilesInfo
+	var stargzOnly bool
 	for _, opt := range opts {
 		if v, ok := opt.(chunkSizeInfo); ok {
 			chunkSize = v
+		} else if v, ok := opt.(prioritizedFilesInfo); ok {
+			prioritizedFiles = v
+		} else if v, ok := opt.(stargzOnlyInfo); ok {
+			stargzOnly = bool(v)
 		} else {
 			t.Fatalf("unsupported opt")
 		}
 	}
 
-	pr, pw := io.Pipe()
-	go func() {
-		tw := tar.NewWriter(pw)
-		for _, ent := range ents {
-			if err := tw.WriteHeader(ent.header); err != nil {
-				t.Errorf("writing header to the input tar: %v", err)
-				pw.Close()
-				return
-			}
-			if _, err := tw.Write(ent.contents); err != nil {
-				t.Errorf("writing contents to the input tar: %v", err)
-				pw.Close()
-				return
-			}
+	tarBuf := new(bytes.Buffer)
+	tw := tar.NewWriter(tarBuf)
+	for _, ent := range ents {
+		if err := tw.WriteHeader(ent.header); err != nil {
+			t.Fatalf("writing header to the input tar: %v", err)
 		}
-		if err := tw.Close(); err != nil {
-			t.Errorf("closing write of input tar: %v", err)
+		if _, err := tw.Write(ent.contents); err != nil {
+			t.Fatalf("writing contents to the input tar: %v", err)
 		}
-		pw.Close()
-	}()
-	defer func() { go pr.Close(); go pw.Close() }()
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("closing write of input tar: %v", err)
+	}
+	tarData := tarBuf.Bytes()
 
-	var stargzBuf bytes.Buffer
-	w := stargz.NewWriter(&stargzBuf)
-	if chunkSize > 0 {
-		w.ChunkSize = int(chunkSize)
+	if stargzOnly {
+		stargzBuf := new(bytes.Buffer)
+		w := stargz.NewWriter(stargzBuf)
+		if chunkSize > 0 {
+			w.ChunkSize = int(chunkSize)
+		}
+		if err := w.AppendTar(bytes.NewReader(tarData)); err != nil {
+			t.Fatalf("failed to append tar file to stargz: %q", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("failed to close stargz writer: %q", err)
+		}
+		stargzData := stargzBuf.Bytes()
+		return io.NewSectionReader(bytes.NewReader(stargzData), 0, int64(len(stargzData))), ""
 	}
-	if err := w.AppendTar(pr); err != nil {
-		t.Fatalf("failed to append tar file to stargz: %q", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("failed to close stargz writer: %q", err)
-	}
-	b := stargzBuf.Bytes()
-
-	sgz, dgst, err := verify.NewVerifiableStagz(io.NewSectionReader(
-		bytes.NewReader(b), 0, int64(len(b))))
+	rc, dgst, err := estargz.Build(
+		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
+		[]string(prioritizedFiles),
+		estargz.WithChunkSize(int(chunkSize)),
+	)
 	if err != nil {
 		t.Fatalf("failed to build verifiable stargz: %v", err)
 	}
-
+	defer rc.Close()
 	vsb := new(bytes.Buffer)
-	if _, err := io.Copy(vsb, sgz); err != nil {
-		t.Fatalf("failed to read verifiable stargz: %v", err)
+	if _, err := io.Copy(vsb, rc); err != nil {
+		t.Fatalf("failed to copy built stargz blob: %v", err)
 	}
 	vsbb := vsb.Bytes()
 
@@ -809,15 +815,13 @@ func digestFor(content string) string {
 
 // Tests prefetch method of each stargz file.
 func TestPrefetch(t *testing.T) {
-	prefetchLandmarkFile := regfile(PrefetchLandmark, "test")
-	noPrefetchLandmarkFile := regfile(NoPrefetchLandmark, "test")
 	defaultPrefetchSize := int64(10000)
 	landmarkPosition := func(t *testing.T, l *layer) int64 {
 		lr, err := l.reader()
 		if err != nil {
 			t.Fatalf("failed to get reader from layer: %v", err)
 		}
-		if e, ok := lr.Lookup(PrefetchLandmark); ok {
+		if e, ok := lr.Lookup(estargz.PrefetchLandmark); ok {
 			return e.Offset
 		}
 		return defaultPrefetchSize
@@ -826,58 +830,65 @@ func TestPrefetch(t *testing.T) {
 		return l.blob.Size()
 	}
 	tests := []struct {
-		name         string
-		in           []tarent
-		wantNum      int      // number of chunks wanted in the cache
-		wants        []string // filenames to compare
-		prefetchSize func(*testing.T, *layer) int64
+		name             string
+		in               []tarent
+		wantNum          int      // number of chunks wanted in the cache
+		wants            []string // filenames to compare
+		prefetchSize     func(*testing.T, *layer) int64
+		prioritizedFiles []string
+		stargz           bool
 	}{
 		{
 			name: "default_prefetch",
 			in: []tarent{
 				regfile("foo.txt", sampleData1),
 			},
-			wantNum:      chunkNum(sampleData1),
-			wants:        []string{"foo.txt"},
-			prefetchSize: defaultPrefetchPosition,
+			wantNum:          chunkNum(sampleData1),
+			wants:            []string{"foo.txt"},
+			prefetchSize:     defaultPrefetchPosition,
+			prioritizedFiles: nil,
+			stargz:           true,
 		},
 		{
 			name: "no_prefetch",
 			in: []tarent{
-				noPrefetchLandmarkFile,
 				regfile("foo.txt", sampleData1),
 			},
-			wantNum: 0,
+			wantNum:          0,
+			prioritizedFiles: nil,
 		},
 		{
 			name: "prefetch",
 			in: []tarent{
 				regfile("foo.txt", sampleData1),
-				prefetchLandmarkFile,
 				regfile("bar.txt", sampleData2),
 			},
-			wantNum:      chunkNum(sampleData1),
-			wants:        []string{"foo.txt"},
-			prefetchSize: landmarkPosition,
+			wantNum:          chunkNum(sampleData1),
+			wants:            []string{"foo.txt"},
+			prefetchSize:     landmarkPosition,
+			prioritizedFiles: []string{"foo.txt"},
 		},
 		{
 			name: "with_dir",
 			in: []tarent{
 				directory("foo/"),
 				regfile("foo/bar.txt", sampleData1),
-				prefetchLandmarkFile,
 				directory("buz/"),
 				regfile("buz/buzbuz.txt", sampleData2),
 			},
-			wantNum:      chunkNum(sampleData1),
-			wants:        []string{"foo/bar.txt"},
-			prefetchSize: landmarkPosition,
+			wantNum:          chunkNum(sampleData1),
+			wants:            []string{"foo/bar.txt"},
+			prefetchSize:     landmarkPosition,
+			prioritizedFiles: []string{"foo/", "foo/bar.txt"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sr, dgst := buildStargz(t, tt.in, chunkSizeInfo(sampleChunkSize))
+			sr, dgst := buildStargz(t, tt.in,
+				chunkSizeInfo(sampleChunkSize),
+				prioritizedFilesInfo(tt.prioritizedFiles),
+				stargzOnlyInfo(tt.stargz))
 			blob := newBlob(sr)
 			cache := &testCache{membuf: map[string]string{}, t: t}
 			vr, _, err := reader.NewReader(sr, cache)
@@ -885,7 +896,9 @@ func TestPrefetch(t *testing.T) {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
 			l := newLayer(ocispec.Descriptor{Digest: testStateLayerDigest}, blob, vr, nil, time.Second)
-			if err := l.verify(dgst); err != nil {
+			if tt.stargz {
+				l.skipVerify()
+			} else if err := l.verify(dgst); err != nil {
 				t.Errorf("failed to verify reader: %v", err)
 				return
 			}

@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package verify
+package estargz
 
 import (
 	"archive/tar"
@@ -38,28 +38,28 @@ type check func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap m
 func TestDigestAndVerify(t *testing.T) {
 	tests := []struct {
 		name    string
-		tarInit func(t *testing.T, dgstMap map[string]digest.Digest) (stream io.ReadCloser)
+		tarInit func(t *testing.T, dgstMap map[string]digest.Digest) (blob *io.SectionReader)
 		checks  []check
 	}{
 		{
 			name: "no-regfile",
-			tarInit: func(t *testing.T, dgstMap map[string]digest.Digest) (stream io.ReadCloser) {
-				return tarStream(
+			tarInit: func(t *testing.T, dgstMap map[string]digest.Digest) (blob *io.SectionReader) {
+				return tarBlob(t,
 					directory("test/"),
 				)
 			},
 			checks: []check{
 				checkStargzTOC,
 				checkVerifyTOC,
-				checkVerifyInvalidStargzFail(tarStream(
+				checkVerifyInvalidStargzFail(tarBlob(t,
 					directory("test2/"), // modified
 				)),
 			},
 		},
 		{
 			name: "small-files",
-			tarInit: func(t *testing.T, dgstMap map[string]digest.Digest) (stream io.ReadCloser) {
-				return tarStream(
+			tarInit: func(t *testing.T, dgstMap map[string]digest.Digest) (blob *io.SectionReader) {
+				return tarBlob(t,
 					regDigest(t, "baz.txt", "", dgstMap),
 					regDigest(t, "foo.txt", "a", dgstMap),
 					directory("test/"),
@@ -69,11 +69,11 @@ func TestDigestAndVerify(t *testing.T) {
 			checks: []check{
 				checkStargzTOC,
 				checkVerifyTOC,
-				checkVerifyInvalidStargzFail(tarStream(
-					reg(t, "baz.txt", ""),
-					reg(t, "foo.txt", "M"), // modified
+				checkVerifyInvalidStargzFail(tarBlob(t,
+					reg("baz.txt", ""),
+					reg("foo.txt", "M"), // modified
 					directory("test/"),
-					reg(t, "test/bar.txt", "bbb"),
+					reg("test/bar.txt", "bbb"),
 				)),
 				checkVerifyInvalidTOCEntryFail("foo.txt"),
 				checkVerifyBrokenContentFail("foo.txt"),
@@ -81,8 +81,8 @@ func TestDigestAndVerify(t *testing.T) {
 		},
 		{
 			name: "big-files",
-			tarInit: func(t *testing.T, dgstMap map[string]digest.Digest) (stream io.ReadCloser) {
-				return tarStream(
+			tarInit: func(t *testing.T, dgstMap map[string]digest.Digest) (blob *io.SectionReader) {
+				return tarBlob(t,
 					regDigest(t, "baz.txt", "bazbazbazbazbazbazbaz", dgstMap),
 					regDigest(t, "foo.txt", "a", dgstMap),
 					directory("test/"),
@@ -92,11 +92,11 @@ func TestDigestAndVerify(t *testing.T) {
 			checks: []check{
 				checkStargzTOC,
 				checkVerifyTOC,
-				checkVerifyInvalidStargzFail(tarStream(
-					reg(t, "baz.txt", "bazbazbazMMMbazbazbaz"), // modified
-					reg(t, "foo.txt", "a"),
+				checkVerifyInvalidStargzFail(tarBlob(t,
+					reg("baz.txt", "bazbazbazMMMbazbazbaz"), // modified
+					reg("foo.txt", "a"),
 					directory("test/"),
-					reg(t, "test/bar.txt", "testbartestbar"),
+					reg("test/bar.txt", "testbartestbar"),
 				)),
 				checkVerifyInvalidTOCEntryFail("test/bar.txt"),
 				checkVerifyBrokenContentFail("test/bar.txt"),
@@ -104,11 +104,11 @@ func TestDigestAndVerify(t *testing.T) {
 		},
 		{
 			name: "with-non-regfiles",
-			tarInit: func(t *testing.T, dgstMap map[string]digest.Digest) (stream io.ReadCloser) {
-				return tarStream(
+			tarInit: func(t *testing.T, dgstMap map[string]digest.Digest) (blob *io.SectionReader) {
+				return tarBlob(t,
 					regDigest(t, "baz.txt", "bazbazbazbazbazbazbaz", dgstMap),
 					regDigest(t, "foo.txt", "a", dgstMap),
-					symLink("barlink", "test/bar.txt"),
+					symlink("barlink", "test/bar.txt"),
 					directory("test/"),
 					regDigest(t, "test/bar.txt", "testbartestbar", dgstMap),
 					directory("test2/"),
@@ -118,12 +118,12 @@ func TestDigestAndVerify(t *testing.T) {
 			checks: []check{
 				checkStargzTOC,
 				checkVerifyTOC,
-				checkVerifyInvalidStargzFail(tarStream(
-					reg(t, "baz.txt", "bazbazbazbazbazbazbaz"),
-					reg(t, "foo.txt", "a"),
-					symLink("barlink", "test/bar.txt"),
+				checkVerifyInvalidStargzFail(tarBlob(t,
+					reg("baz.txt", "bazbazbazbazbazbazbaz"),
+					reg("foo.txt", "a"),
+					symlink("barlink", "test/bar.txt"),
 					directory("test/"),
-					reg(t, "test/bar.txt", "testbartestbar"),
+					reg("test/bar.txt", "testbartestbar"),
 					directory("test2/"),
 					link("test2/bazlink", "foo.txt"), // modified
 				)),
@@ -137,13 +137,20 @@ func TestDigestAndVerify(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Get original tar file and chunk digests
 			dgstMap := make(map[string]digest.Digest)
+			tarBlob := tt.tarInit(t, dgstMap)
 
-			r, tocDigest := tar2sgz(t, tt.tarInit(t, dgstMap))
+			rc, tocDigest, err := Build(tarBlob, nil, WithChunkSize(chunkSize))
+			if err != nil {
+				t.Fatalf("failed to convert stargz: %v", err)
+			}
+			defer rc.Close()
 			buf := new(bytes.Buffer)
-			if _, err := io.Copy(buf, r); err != nil {
-				t.Fatalf("failed to get converted stargz")
+			if _, err := io.Copy(buf, rc); err != nil {
+				t.Fatalf("failed to copy built stargz blob: %v", err)
 			}
 			newStargz := buf.Bytes()
+			// NoPrefetchLandmark is added during `Bulid`, which is expected behaviour.
+			dgstMap[chunkID(NoPrefetchLandmark, 0, int64(len([]byte{landmarkContents})))] = digest.FromBytes([]byte{landmarkContents})
 
 			for _, check := range tt.checks {
 				check(t, newStargz, tocDigest, dgstMap)
@@ -212,9 +219,8 @@ func checkStargzTOC(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstM
 				return
 			}
 
-			// Get the original digest to make sure the file contents are
-			// kept unchanged from the original tar, during the whole
-			// conversion steps.
+			// Get the original digest to make sure the file contents are kept unchanged
+			// from the original tar, during the whole conversion steps.
 			id := chunkID(h.Name, n, ce.ChunkSize)
 			want, ok := dgstMap[id]
 			if !ok {
@@ -268,7 +274,7 @@ func checkVerifyTOC(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstM
 		t.Errorf("failed to parse converted stargz: %v", err)
 		return
 	}
-	ev, err := StargzTOC(io.NewSectionReader(
+	ev, err := VerifyStargzTOC(io.NewSectionReader(
 		bytes.NewReader(sgzData), 0, int64(len(sgzData))),
 		tocDigest,
 	)
@@ -390,7 +396,7 @@ func checkVerifyInvalidTOCEntryFail(filename string) check {
 					t.Fatalf("failed to get converted stargz")
 				}
 				isgz := buf.Bytes()
-				if _, err := StargzTOC(io.NewSectionReader(bytes.NewReader(isgz), 0, int64(len(isgz))), newTocDigest); err == nil {
+				if _, err := VerifyStargzTOC(io.NewSectionReader(bytes.NewReader(isgz), 0, int64(len(isgz))), newTocDigest); err == nil {
 					t.Errorf("must fail for invalid TOC")
 					return
 				}
@@ -401,17 +407,20 @@ func checkVerifyInvalidTOCEntryFail(filename string) check {
 
 // checkVerifyInvalidStargzFail checks if the verification detects that the
 // given stargz file doesn't match to the expected digest and returns error.
-func checkVerifyInvalidStargzFail(invalid io.ReadCloser) check {
+func checkVerifyInvalidStargzFail(invalid *io.SectionReader) check {
 	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest) {
-		m, _ := tar2sgz(t, invalid)
-
+		rc, _, err := Build(invalid, nil, WithChunkSize(chunkSize))
+		if err != nil {
+			t.Fatalf("failed to convert stargz: %v", err)
+		}
+		defer rc.Close()
 		buf := new(bytes.Buffer)
-		if _, err := io.Copy(buf, m); err != nil {
-			t.Fatalf("failed to get converted stargz")
+		if _, err := io.Copy(buf, rc); err != nil {
+			t.Fatalf("failed to copy built stargz blob: %v", err)
 		}
 		mStargz := buf.Bytes()
 
-		_, err := StargzTOC(io.NewSectionReader(
+		_, err = VerifyStargzTOC(io.NewSectionReader(
 			bytes.NewReader(mStargz), 0, int64(len(mStargz))), tocDigest)
 		if err == nil {
 			t.Errorf("must fail for invalid stargz")
@@ -430,7 +439,7 @@ func checkVerifyBrokenContentFail(filename string) check {
 			t.Fatalf("failed to parse converted stargz: %v", err)
 			return
 		}
-		ev, err := StargzTOC(io.NewSectionReader(
+		ev, err := VerifyStargzTOC(io.NewSectionReader(
 			bytes.NewReader(sgzData), 0, int64(len(sgzData))),
 			tocDigest,
 		)
@@ -480,43 +489,17 @@ func chunkID(name string, offset, size int64) string {
 	return fmt.Sprintf("%s-%d-%d", name, offset, size)
 }
 
-func tar2sgz(t *testing.T, ts io.ReadCloser) (io.Reader, digest.Digest) {
-	defer ts.Close()
-
-	buf := new(bytes.Buffer)
-
-	// Convert tar to stargz
-	w := stargz.NewWriter(buf)
-	w.ChunkSize = chunkSize
-	if err := w.AppendTar(ts); err != nil {
-		t.Fatalf("failed to append tar: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("failed to finalize stargz: %v", err)
-	}
-	orgStargz := buf.Bytes()
-
-	// Rewrite stargz TOC JSON with chunk-level digests
-	r, tocDigest, err := NewVerifiableStagz(io.NewSectionReader(
-		bytes.NewReader(orgStargz), 0, int64(len(orgStargz))))
-	if err != nil {
-		t.Fatalf("failed to convert stargz: %v", err)
-	}
-
-	return r, tocDigest
-}
-
 type rewriteFunc func(t *testing.T, toc *jtoc, sgz *io.SectionReader)
 
 func rewriteTOCJSON(t *testing.T, sgz *io.SectionReader, rewrite rewriteFunc) (newSgz io.Reader, tocDigest digest.Digest) {
-	toc, err := extractTOCJSON(sgz)
+	blob, err := parseStargz(sgz)
 	if err != nil {
 		t.Fatalf("failed to extract TOC JSON: %v", err)
 	}
 
-	rewrite(t, toc.jtoc, sgz)
+	rewrite(t, blob.jtoc, sgz)
 
-	tocJSON, err := json.Marshal(toc.jtoc)
+	tocJSON, err := json.Marshal(blob.jtoc)
 	if err != nil {
 		t.Fatalf("failed to marshal TOC JSON: %v", err)
 	}
@@ -560,62 +543,14 @@ func rewriteTOCJSON(t *testing.T, sgz *io.SectionReader, rewrite rewriteFunc) (n
 	if _, err := sgz.Seek(0, io.SeekStart); err != nil {
 		t.Fatalf("failed to reset the seek position of stargz: %v", err)
 	}
-	if _, err := toc.footer.Seek(0, io.SeekStart); err != nil {
+	if _, err := blob.footer.Seek(0, io.SeekStart); err != nil {
 		t.Fatalf("failed to reset the seek position of footer: %v", err)
 	}
 	return io.MultiReader(
-		io.LimitReader(sgz, toc.offset), // Original stargz (before TOC JSON)
-		pr,                              // Rewritten TOC JSON
-		toc.footer,                      // Unmodified footer (because tocOffset is unchanged)
+		io.LimitReader(sgz, blob.jtocOffset), // Original stargz (before TOC JSON)
+		pr,                                   // Rewritten TOC JSON
+		blob.footer,                          // Unmodified footer (because tocOffset is unchanged)
 	), dgstr.Digest()
-}
-
-type appender func(w *tar.Writer) error
-
-func tarStream(appenders ...appender) io.ReadCloser {
-	pr, pw := io.Pipe()
-	go func() {
-		tw := tar.NewWriter(pw)
-		for _, f := range appenders {
-			if err := f(tw); err != nil {
-				pw.CloseWithError(err)
-				return
-			}
-		}
-		if err := tw.Close(); err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-	}()
-	return pr
-}
-
-func directory(name string) appender {
-	if !strings.HasSuffix(name, "/") {
-		panic(fmt.Sprintf("dir %q must have suffix /", name))
-	}
-	return func(w *tar.Writer) error {
-		return w.WriteHeader(&tar.Header{
-			Typeflag: tar.TypeDir,
-			Name:     name,
-		})
-	}
-}
-
-func reg(t *testing.T, name string, contentStr string) appender {
-	return func(w *tar.Writer) error {
-		if err := w.WriteHeader(&tar.Header{
-			Typeflag: tar.TypeReg,
-			Name:     name,
-			Size:     int64(len(contentStr)),
-		}); err != nil {
-			return err
-		}
-		if _, err := io.CopyN(w, bytes.NewReader([]byte(contentStr)), int64(len(contentStr))); err != nil {
-			return err
-		}
-		return nil
-	}
 }
 
 func regDigest(t *testing.T, name string, contentStr string, digestMap map[string]digest.Digest) appender {
@@ -655,33 +590,13 @@ func regDigest(t *testing.T, name string, contentStr string, digestMap map[strin
 	}
 }
 
-func link(name string, linkname string) appender {
-	return func(w *tar.Writer) error {
-		return w.WriteHeader(&tar.Header{
-			Typeflag: tar.TypeLink,
-			Name:     name,
-			Linkname: linkname,
-		})
-	}
-}
-
-func symLink(name string, linkname string) appender {
-	return func(w *tar.Writer) error {
-		return w.WriteHeader(&tar.Header{
-			Typeflag: tar.TypeSymlink,
-			Name:     name,
-			Linkname: linkname,
-		})
-	}
-}
-
 func listDigests(sgz *io.SectionReader) (map[int64]digest.Digest, error) {
-	toc, err := extractTOCJSON(sgz)
+	blob, err := parseStargz(sgz)
 	if err != nil {
 		return nil, err
 	}
 	digestMap := make(map[int64]digest.Digest)
-	for _, e := range toc.jtoc.Entries {
+	for _, e := range blob.jtoc.Entries {
 		if e.Type == "reg" || e.Type == "chunk" {
 			if e.Type == "reg" && e.Size == 0 {
 				continue // ignores empty file

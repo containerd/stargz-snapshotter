@@ -24,6 +24,7 @@ package commands
 
 import (
 	"compress/gzip"
+	"context"
 	gocontext "context"
 	"crypto/sha256"
 	"encoding/csv"
@@ -40,11 +41,10 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/builder"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sampler"
-	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sorter"
-	"github.com/containerd/stargz-snapshotter/stargz/verify"
+	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/util/tempfiles"
 	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
@@ -311,12 +311,16 @@ func convert(ctx gocontext.Context, clicontext *cli.Context, srcRef, dstRef name
 		if err != nil {
 			return err
 		}
-		var done func()
-		addendums, done, err = optimize(ctx, clicontext, layers, manifest, config, runopts...)
+		layerFiles := tempfiles.NewTempFiles()
+		defer func() {
+			if err := layerFiles.CleanupAll(); err != nil {
+				log.G(ctx).WithError(err).Warn("failed to cleanup layer files")
+			}
+		}()
+		addendums, err = optimize(ctx, clicontext, layers, manifest, config, layerFiles, runopts...)
 		if err != nil {
 			return err
 		}
-		defer done()
 	}
 	srcCfg, err := srcImg.ConfigFile()
 	if err != nil {
@@ -342,11 +346,11 @@ func convert(ctx gocontext.Context, clicontext *cli.Context, srcRef, dstRef name
 }
 
 // The order of the "in" list must be base layer first, top layer last.
-func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer, manifest *regpkg.Manifest, config imgpkg.Image, opts ...sampler.Option) (out []mutate.Addendum, done func(), err error) {
+func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer, manifest *regpkg.Manifest, config imgpkg.Image, layerFiles *tempfiles.TempFiles, opts ...sampler.Option) ([]mutate.Addendum, error) {
 	// Setup temporary workspace
 	tmpRoot, err := ioutil.TempDir("", "optimize-work")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer os.RemoveAll(tmpRoot)
 	log.G(ctx).Debugf("workspace directory: %q", tmpRoot)
@@ -365,49 +369,30 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 		eg           errgroup.Group
 		lowerdirs    []string
 		convertLayer = make([](func() (mutate.Addendum, error)), len(in))
-		layerFiles   []*os.File
-		layerFilesMu sync.Mutex
 	)
-	done = func() {
-		for _, f := range layerFiles {
-			if err := f.Close(); err != nil {
-				log.G(ctx).WithError(err).Warnf("failed to close tmpfile %v", f.Name())
-			}
-			if err := os.Remove(f.Name()); err != nil {
-				log.G(ctx).WithError(err).Warnf("failed to remove tmpfile %v", f.Name())
-			}
-		}
-	}
 	for i := range in {
 		i := i
 		dgst, err := in[i].Digest()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		ctx := log.WithLogger(ctx, log.G(ctx).WithField("digest", dgst))
 		mp, err := mktemp(fmt.Sprintf("lower%d", i))
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		defer syscall.Unmount(mp, syscall.MNT_FORCE)
 		lowerdirs = append([]string{mp}, lowerdirs...) // top layer first, base layer last (for overlayfs).
 		eg.Go(func() error {
 			// TODO: These files should be deduplicated.
-			compressedFile, err := ioutil.TempFile("", "compresseddata")
+			compressedFile, err := layerFiles.TempFile("", "compresseddata")
 			if err != nil {
 				return err
 			}
-			decompressedFile, err := ioutil.TempFile("", "decompresseddata")
+			decompressedFile, err := layerFiles.TempFile("", "decompresseddata")
 			if err != nil {
 				return err
 			}
-			stargzFile, err := ioutil.TempFile("", "stargzdata")
-			if err != nil {
-				return err
-			}
-			layerFilesMu.Lock()
-			layerFiles = append(layerFiles, compressedFile, decompressedFile, stargzFile)
-			layerFilesMu.Unlock()
 
 			// Mount the layer
 			r, err := in[i].Compressed()
@@ -429,69 +414,33 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 			}
 
 			// Prepare converters according to the layer type
-			cinfo, err := compressedFile.Stat()
-			if err != nil {
-				return err
-			}
-			dinfo, err := decompressedFile.Stat()
-			if err != nil {
-				return err
-			}
-			compressedLayer := io.NewSectionReader(compressedFile, 0, cinfo.Size())
-			decompressedLayer := io.NewSectionReader(decompressedFile, 0, dinfo.Size())
-			ctar := func() (mutate.Addendum, error) {
-				log.G(ctx).Debugf("converting...")
-				defer log.G(ctx).Infof("converted")
-
-				// Sort file entry by the accessed order
-				entries, err := sorter.Sort(decompressedLayer, mon.DumpLog())
-				if err != nil {
-					return mutate.Addendum{}, errors.Wrap(err, "failed to sort tar")
-				}
-
-				// Build stargz
-				if err := builder.BuildStargz(ctx, entries, stargzFile); err != nil {
-					return mutate.Addendum{}, err
-				}
-
-				// Add chunks digests to TOC JSON
-				sinfo, err := stargzFile.Stat()
-				if err != nil {
-					return mutate.Addendum{}, err
-				}
-				r, jtocDigest, err := verify.NewVerifiableStagz(
-					io.NewSectionReader(stargzFile, 0, sinfo.Size()))
-				if err != nil {
-					return mutate.Addendum{}, err
-				}
-				log.G(ctx).WithField("TOC JSON digest", jtocDigest).
-					Debugf("calculated digest")
-
-				return mutate.Addendum{
-					Layer: &gzipLayer{r: r},
-					Annotations: map[string]string{
-						verify.TOCJSONDigestAnnotation: jtocDigest.String(),
-					},
-				}, nil
-			}
 			var cvts []func() (mutate.Addendum, error)
 			if tocdgst, ok := getTOCDigest(manifest, dgst); ok && clicontext.Bool("reuse") {
 				// If this layer is a valid eStargz, try to reuse this layer.
 				// If no access occur to this layer during the specified workload,
 				// this layer will be reused without conversion.
+				compressedLayer, err := fileSectionReader(compressedFile)
+				if err != nil {
+					return err
+				}
 				f, err := converterFromEStargz(ctx, tocdgst, in[i], compressedLayer, mon)
 				if err == nil {
 					// TODO: remotely mount it instead of downloading the layer.
 					cvts = append(cvts, f)
 				}
 			}
-			convertLayer[i] = converters(append(cvts, ctar)...)
+			decompressedLayer, err := fileSectionReader(decompressedFile)
+			if err != nil {
+				return err
+			}
+			convertLayer[i] = converters(
+				append(cvts, converterFromTar(ctx, decompressedLayer, mon))...)
 			log.G(ctx).Infof("unpacked")
 			return nil
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// prepare FileSystem Bundle
@@ -501,13 +450,13 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 		workdir  string
 	)
 	if bundle, err = mktemp("bundle"); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if upperdir, err = mktemp("upperdir"); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if workdir, err = mktemp("workdir"); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var (
 		rootfs = sampler.GetRootfsPathUnder(bundle)
@@ -515,10 +464,10 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 			strings.Join(lowerdirs, ":"), upperdir, workdir)
 	)
 	if err = os.Mkdir(rootfs, 0777); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err = syscall.Mount("overlay", rootfs, "overlay", 0, option); err != nil {
-		return nil, nil, errors.Wrapf(err, "mount overlayfs on %q with data %q", rootfs, option)
+		return nil, errors.Wrapf(err, "mount overlayfs on %q with data %q", rootfs, option)
 	}
 	defer syscall.Unmount(rootfs, syscall.MNT_FORCE)
 
@@ -527,7 +476,7 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 		time.Duration(clicontext.Int("period"))*time.Second)
 	defer cancel()
 	if err = sampler.Run(runCtx, bundle, config, opts...); err != nil {
-		return nil, nil, errors.Wrap(err, "failed to run the sampler")
+		return nil, errors.Wrap(err, "failed to run the sampler")
 	}
 
 	// get converted layers
@@ -550,11 +499,31 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	out = adds
 
-	return
+	return adds, nil
+}
+
+func converterFromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor) func() (mutate.Addendum, error) {
+	return func() (mutate.Addendum, error) {
+		log.G(ctx).Debugf("converting...")
+		defer log.G(ctx).Infof("converted")
+
+		rc, jtocDigest, err := estargz.Build(sr, mon.DumpLog())
+		if err != nil {
+			return mutate.Addendum{}, err
+		}
+		log.G(ctx).WithField("TOC JSON digest", jtocDigest).
+			Debugf("calculated digest")
+
+		return mutate.Addendum{
+			Layer: &gzipLayer{rc: rc},
+			Annotations: map[string]string{
+				estargz.TOCJSONDigestAnnotation: jtocDigest.String(),
+			},
+		}, nil
+	}
 }
 
 func converterFromEStargz(ctx gocontext.Context, tocdgst ocidigest.Digest, l regpkg.Layer, sr *io.SectionReader, mon logger.Monitor) (func() (mutate.Addendum, error), error) {
@@ -562,7 +531,7 @@ func converterFromEStargz(ctx gocontext.Context, tocdgst ocidigest.Digest, l reg
 	if _, err := stargz.Open(sr); err != nil {
 		return nil, err
 	}
-	if _, err := verify.StargzTOC(sr, tocdgst); err != nil {
+	if _, err := estargz.VerifyStargzTOC(sr, tocdgst); err != nil {
 		return nil, err
 	}
 	dgst, err := l.Digest()
@@ -587,7 +556,7 @@ func converterFromEStargz(ctx gocontext.Context, tocdgst ocidigest.Digest, l reg
 				size: sr.Size(),
 			},
 			Annotations: map[string]string{
-				verify.TOCJSONDigestAnnotation: tocdgst.String(),
+				estargz.TOCJSONDigestAnnotation: tocdgst.String(),
 			},
 		}, nil
 	}, nil
@@ -599,7 +568,7 @@ func getTOCDigest(manifest *regpkg.Manifest, dgst regpkg.Hash) (ocidigest.Digest
 	}
 	for _, desc := range manifest.Layers {
 		if desc.Digest.Algorithm == dgst.Algorithm && desc.Digest.Hex == dgst.Hex {
-			dgstStr, ok := desc.Annotations[verify.TOCJSONDigestAnnotation]
+			dgstStr, ok := desc.Annotations[estargz.TOCJSONDigestAnnotation]
 			if ok {
 				if tocdgst, err := ocidigest.Parse(dgstStr); err == nil {
 					return tocdgst, true
@@ -621,6 +590,14 @@ func converters(cs ...func() (mutate.Addendum, error)) func() (mutate.Addendum, 
 		}
 		return
 	}
+}
+
+func fileSectionReader(file *os.File) (*io.SectionReader, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return io.NewSectionReader(file, 0, info.Size()), nil
 }
 
 type writer func([]byte) (int, error)
@@ -717,7 +694,7 @@ func (l *layer) Uncompressed() (io.ReadCloser, error) {
 }
 
 type gzipLayer struct {
-	r    io.Reader
+	rc   io.ReadCloser
 	diff *hash.Hash // registered after computation completed
 	hash *hash.Hash // registered after computation completed
 	size *int64     // registered after computation completed
@@ -772,8 +749,9 @@ func (l *gzipLayer) Compressed() (io.ReadCloser, error) {
 			h    = sha256.New()
 			size int64
 		)
+		defer l.rc.Close()
 		zr, err := gzip.NewReader(io.TeeReader(
-			l.r,
+			l.rc,
 			io.MultiWriter(pw, writer(func(b []byte) (int, error) {
 				n, err := h.Write(b)
 				size += int64(n)
