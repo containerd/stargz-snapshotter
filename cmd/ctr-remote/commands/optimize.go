@@ -31,16 +31,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"hash"
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sampler"
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -51,13 +52,14 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	regpkg "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/partial"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/google/go-containerregistry/pkg/v1/stream"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 	"github.com/hashicorp/go-multierror"
 	ocidigest "github.com/opencontainers/go-digest"
-	imgpkg "github.com/opencontainers/image-spec/specs-go/v1"
+	spec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -69,7 +71,7 @@ const defaultPeriod = 10
 var OptimizeCommand = cli.Command{
 	Name:      "optimize",
 	Usage:     "optimize an image with user-specified workload",
-	ArgsUsage: "[flags] <input-ref> <output-ref>",
+	ArgsUsage: "<input-ref> <output-ref>",
 	Flags: []cli.Flag{
 		cli.BoolFlag{
 			Name:  "plain-http",
@@ -145,6 +147,18 @@ var OptimizeCommand = cli.Command{
 			Name:  "cni-plugin-dir",
 			Usage: "path to the CNI plugins binary directory",
 		},
+		cli.StringFlag{
+			Name:  "platform",
+			Usage: "platform specifier of the source image",
+		},
+		cli.BoolFlag{
+			Name:  "all-platforms",
+			Usage: "targeting all platform of the source image",
+		},
+		cli.BoolFlag{
+			Name:  "no-optimization",
+			Usage: "convert image without optimization",
+		},
 	},
 	Action: func(context *cli.Context) error {
 
@@ -167,21 +181,59 @@ var OptimizeCommand = cli.Command{
 			return errors.Wrap(err, "failed to parse args")
 		}
 
-		// Convert and push image
-		srcRef, err := parseReference(src, context)
+		// Parse references
+		srcIO, err := parseReference(src, context)
 		if err != nil {
 			return errors.Wrapf(err, "failed to parse source ref %q", src)
 		}
-		dstRef, err := parseReference(dst, context)
+		dstIO, err := parseReference(dst, context)
 		if err != nil {
 			return errors.Wrapf(err, "failed to parse destination ref %q", dst)
 		}
-		err = convert(ctx, context, srcRef, dstRef, opts...)
-		if err != nil {
-			return errors.Wrapf(err, "failed to convert image %q -> %q",
-				srcRef.String(), dstRef.String())
+
+		// Parse platform information
+		var platform *spec.Platform
+		if context.Bool("all-platforms") {
+			platform = nil
+		} else if pStr := context.String("platform"); pStr != "" {
+			p, err := platforms.Parse(pStr)
+			if err != nil {
+				return errors.Wrapf(err, "failed to parse platform %q", pStr)
+			}
+			platform = &p
+		} else {
+			p := platforms.DefaultSpec()
+			platform = &p
 		}
-		return nil
+
+		tf := tempfiles.NewTempFiles()
+		defer func() {
+			if err := tf.CleanupAll(); err != nil {
+				log.G(ctx).WithError(err).Warn("failed to cleanup layer files")
+			}
+		}()
+
+		// Convert and push the image
+		srcIndex, err := srcIO.readIndex()
+		if err != nil {
+			// No index found. Try to deal it as a thin image.
+			log.G(ctx).Warn("index not found; treating as a thin image with ignoring the platform option")
+			srcImage, err := srcIO.readImage()
+			if err != nil {
+				return err
+			}
+			p := platforms.DefaultSpec()
+			dstImage, err := convertImage(ctx, context, srcImage, &p, tf, opts...)
+			if err != nil {
+				return err
+			}
+			return dstIO.writeImage(dstImage)
+		}
+		dstIndex, err := convertIndex(ctx, context, srcIndex, platform, tf, opts...)
+		if err != nil {
+			return err
+		}
+		return dstIO.writeIndex(dstIndex)
 	},
 }
 
@@ -258,95 +310,168 @@ func parseArgs(clicontext *cli.Context) (opts []sampler.Option, err error) {
 	return
 }
 
-func parseReference(path string, clicontext *cli.Context) (name.Reference, error) {
+func parseReference(ref string, clicontext *cli.Context) (imageIO, error) {
+	if strings.HasPrefix(ref, "local://") {
+		abspath, err := filepath.Abs(strings.TrimPrefix(ref, "local://"))
+		if err != nil {
+			return nil, err
+		}
+		return localImage{abspath}, nil
+	}
 	var opts []name.Option
-	if strings.HasPrefix(path, "http://") {
-		path = strings.TrimPrefix(path, "http://")
+	if strings.HasPrefix(ref, "http://") {
+		ref = strings.TrimPrefix(ref, "http://")
 		if clicontext.Bool("plain-http") {
 			opts = append(opts, name.Insecure)
 		} else {
-			return nil, fmt.Errorf("\"--plain-http\" option must be specified to connect to %q using HTTP", path)
+			return nil, fmt.Errorf("\"--plain-http\" option must be specified to connect to %q using HTTP", ref)
 		}
 	}
-	ref, err := name.ParseReference(path, opts...)
+	remoteRef, err := name.ParseReference(ref, opts...)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse reference %q", path)
+		return nil, errors.Wrapf(err, "failed to parse reference %q", ref)
 	}
-
-	return ref, nil
+	return remoteImage{remoteRef}, nil
 }
 
-func convert(ctx gocontext.Context, clicontext *cli.Context, srcRef, dstRef name.Reference, runopts ...sampler.Option) error {
-	// Pull source image
-	srcImg, err := remote.Image(srcRef, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+func convertIndex(ctx gocontext.Context, clicontext *cli.Context, srcIndex regpkg.ImageIndex, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (regpkg.ImageIndex, error) {
+	var addendums []mutate.IndexAddendum
+	manifest, err := srcIndex.IndexManifest()
 	if err != nil {
-		return errors.Wrapf(err, "failed to pull image from %q", srcRef.String())
+		return nil, err
+	}
+	for _, m := range manifest.Manifests {
+		p := platforms.DefaultSpec()
+		if m.Platform != nil {
+			p = *(specPlatform(m.Platform))
+		}
+		if platform != nil {
+			if !platforms.NewMatcher(*platform).Match(p) {
+				continue
+			}
+		}
+		srcImg, err := srcIndex.Image(m.Digest)
+		if err != nil {
+			return nil, err
+		}
+		cctx := log.WithLogger(ctx, log.G(ctx).WithField("platform", platforms.Format(p)))
+		dstImg, err := convertImage(cctx, clicontext, srcImg, &p, tf, runopts...)
+		if err != nil {
+			return nil, err
+		}
+		desc, err := partial.Descriptor(dstImg)
+		if err != nil {
+			return nil, err
+		}
+		desc.Platform = m.Platform // inherit the platform information
+		addendums = append(addendums, mutate.IndexAddendum{
+			Add:        dstImg,
+			Descriptor: *desc,
+		})
+	}
+	if len(addendums) == 0 {
+		return nil, fmt.Errorf("no target image is specified")
 	}
 
-	// Optimize the image
+	// Push the converted image
+	return mutate.AppendManifests(empty.Index, addendums...), nil
+}
+
+func convertImage(ctx gocontext.Context, clicontext *cli.Context, srcImg regpkg.Image, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (dstImg regpkg.Image, _ error) {
 	// The order of the list is base layer first, top layer last.
 	layers, err := srcImg.Layers()
 	if err != nil {
-		return errors.Wrap(err, "failed to get image layers")
+		return nil, errors.Wrap(err, "failed to get image layers")
 	}
 	addendums := make([]mutate.Addendum, len(layers))
 	if clicontext.Bool("stargz-only") {
+		// TODO: enable to reuse layers
+		var eg errgroup.Group
+		var addendumsMu sync.Mutex
 		for i, l := range layers {
-			r, err := l.Uncompressed()
-			if err != nil {
-				return errors.Wrapf(err, "failed to convert layer(%d) to stargz", i)
-			}
-			addendums[i] = mutate.Addendum{Layer: &layer{r: r}}
+			i, l := i, l
+			eg.Go(func() error {
+				newL, err := buildStargzLayer(l, tf)
+				if err != nil {
+					return err
+				}
+				addendumsMu.Lock()
+				addendums[i] = mutate.Addendum{Layer: newL}
+				addendumsMu.Unlock()
+				return nil
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			return nil, errors.Wrapf(err, "failed to convert layer to stargz")
+		}
+	} else if clicontext.Bool("no-optimize") || !platforms.NewMatcher(platforms.DefaultSpec()).Match(*platform) {
+		// Do not run the optimization container if the option requires it or
+		// the source image doesn't match to the platform where this command runs on.
+		log.G(ctx).Warn("Platform mismatch or optimization disabled; converting without optimization")
+		// TODO: enable to reuse layers
+		var eg errgroup.Group
+		var addendumsMu sync.Mutex
+		for i, l := range layers {
+			i, l := i, l
+			eg.Go(func() error {
+				newL, jtocDigest, err := buildEStargzLayer(l, tf)
+				if err != nil {
+					return err
+				}
+				addendumsMu.Lock()
+				addendums[i] = mutate.Addendum{
+					Layer: newL,
+					Annotations: map[string]string{
+						estargz.TOCJSONDigestAnnotation: jtocDigest.String(),
+					},
+				}
+				addendumsMu.Unlock()
+				return nil
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			return nil, errors.Wrapf(err, "failed to convert layer to stargz")
 		}
 	} else {
-		configData, err := srcImg.RawConfigFile()
+		addendums, err = optimize(ctx, clicontext, srcImg, tf, runopts...)
 		if err != nil {
-			return err
-		}
-		var config imgpkg.Image
-		if err := json.Unmarshal(configData, &config); err != nil {
-			return errors.Wrap(err, "failed to parse image config file")
-		}
-		manifest, err := srcImg.Manifest()
-		if err != nil {
-			return err
-		}
-		layerFiles := tempfiles.NewTempFiles()
-		defer func() {
-			if err := layerFiles.CleanupAll(); err != nil {
-				log.G(ctx).WithError(err).Warn("failed to cleanup layer files")
-			}
-		}()
-		addendums, err = optimize(ctx, clicontext, layers, manifest, config, layerFiles, runopts...)
-		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	srcCfg, err := srcImg.ConfigFile()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	srcCfg.RootFS.DiffIDs = []regpkg.Hash{}
 	srcCfg.History = []regpkg.History{}
 	img, err := mutate.ConfigFile(empty.Image, srcCfg)
 	if err != nil {
-		return err
-	}
-	img, err = mutate.Append(img, addendums...)
-	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// Push the optimized image.
-	if err := remote.Write(dstRef, img, remote.WithAuthFromKeychain(authn.DefaultKeychain)); err != nil {
-		return errors.Wrapf(err, "failed to push image to %q", dstRef.String())
-	}
-
-	return nil
+	return mutate.Append(img, addendums...)
 }
 
-// The order of the "in" list must be base layer first, top layer last.
-func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer, manifest *regpkg.Manifest, config imgpkg.Image, layerFiles *tempfiles.TempFiles, opts ...sampler.Option) ([]mutate.Addendum, error) {
+func optimize(ctx gocontext.Context, clicontext *cli.Context, srcImg regpkg.Image, tf *tempfiles.TempFiles, opts ...sampler.Option) ([]mutate.Addendum, error) {
+	// Get image's basic information
+	manifest, err := srcImg.Manifest()
+	if err != nil {
+		return nil, err
+	}
+	configData, err := srcImg.RawConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	var config spec.Image
+	if err := json.Unmarshal(configData, &config); err != nil {
+		return nil, errors.Wrap(err, "failed to parse image config file")
+	}
+	// The order is base layer first, top layer last.
+	in, err := srcImg.Layers()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get image layers")
+	}
+
 	// Setup temporary workspace
 	tmpRoot, err := ioutil.TempDir("", "optimize-work")
 	if err != nil {
@@ -385,11 +510,11 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 		lowerdirs = append([]string{mp}, lowerdirs...) // top layer first, base layer last (for overlayfs).
 		eg.Go(func() error {
 			// TODO: These files should be deduplicated.
-			compressedFile, err := layerFiles.TempFile("", "compresseddata")
+			compressedFile, err := tf.TempFile("", "compresseddata")
 			if err != nil {
 				return err
 			}
-			decompressedFile, err := layerFiles.TempFile("", "decompresseddata")
+			decompressedFile, err := tf.TempFile("", "decompresseddata")
 			if err != nil {
 				return err
 			}
@@ -434,7 +559,7 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 				return err
 			}
 			convertLayer[i] = converters(
-				append(cvts, converterFromTar(ctx, decompressedLayer, mon))...)
+				append(cvts, converterFromTar(ctx, decompressedLayer, mon, tf))...)
 			log.G(ctx).Infof("unpacked")
 			return nil
 		})
@@ -505,7 +630,7 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, in []regpkg.Layer,
 	return adds, nil
 }
 
-func converterFromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor) func() (mutate.Addendum, error) {
+func converterFromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *tempfiles.TempFiles) func() (mutate.Addendum, error) {
 	return func() (mutate.Addendum, error) {
 		log.G(ctx).Debugf("converting...")
 		defer log.G(ctx).Infof("converted")
@@ -514,11 +639,14 @@ func converterFromTar(ctx context.Context, sr *io.SectionReader, mon logger.Moni
 		if err != nil {
 			return mutate.Addendum{}, err
 		}
-		log.G(ctx).WithField("TOC JSON digest", jtocDigest).
-			Debugf("calculated digest")
-
+		defer rc.Close()
+		log.G(ctx).WithField("TOC JSON digest", jtocDigest).Debugf("calculated digest")
+		l, err := newStaticCompressedLayer(rc, tf)
+		if err != nil {
+			return mutate.Addendum{}, err
+		}
 		return mutate.Addendum{
-			Layer: &gzipLayer{rc: rc},
+			Layer: l,
 			Annotations: map[string]string{
 				estargz.TOCJSONDigestAnnotation: jtocDigest.String(),
 			},
@@ -549,7 +677,7 @@ func converterFromEStargz(ctx gocontext.Context, tocdgst ocidigest.Digest, l reg
 		}
 		log.G(ctx).Infof("no access occur; copying without conversion")
 		return mutate.Addendum{
-			Layer: &staticCompressedLayer{
+			Layer: staticCompressedLayer{
 				r:    sr,
 				diff: diff,
 				hash: dgst,
@@ -560,6 +688,212 @@ func converterFromEStargz(ctx gocontext.Context, tocdgst ocidigest.Digest, l reg
 			},
 		}, nil
 	}, nil
+}
+
+func converters(cs ...func() (mutate.Addendum, error)) func() (mutate.Addendum, error) {
+	return func() (add mutate.Addendum, allErr error) {
+		for _, f := range cs {
+			a, err := f()
+			if err == nil {
+				return a, nil
+			}
+			allErr = multierror.Append(allErr, err)
+		}
+		return
+	}
+}
+
+func buildStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regpkg.Layer, error) {
+	r, err := uncompressed.Uncompressed()
+	if err != nil {
+		return nil, err
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		w := stargz.NewWriter(pw)
+		if err := w.AppendTar(r); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		if err := w.Close(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return newStaticCompressedLayer(pr, tf)
+}
+
+func buildEStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regpkg.Layer, ocidigest.Digest, error) {
+	tftmp := tempfiles.NewTempFiles() // Shorter lifetime than tempfiles passed by argument
+	defer tftmp.CleanupAll()
+	r, err := uncompressed.Uncompressed()
+	if err != nil {
+		return nil, "", err
+	}
+	file, err := tftmp.TempFile("", "tmpdata")
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := io.Copy(file, r); err != nil {
+		return nil, "", err
+	}
+	sr, err := fileSectionReader(file)
+	if err != nil {
+		return nil, "", err
+	}
+	rc, jtocDigest, err := estargz.Build(sr, nil) // no optimization
+	if err != nil {
+		return nil, "", err
+	}
+	defer rc.Close()
+	l, err := newStaticCompressedLayer(rc, tf)
+	if err != nil {
+		return nil, "", err
+	}
+	return l, jtocDigest, err
+}
+
+func newStaticCompressedLayer(compressed io.Reader, tf *tempfiles.TempFiles) (regpkg.Layer, error) {
+	file, err := tf.TempFile("", "layerdata")
+	if err != nil {
+		return nil, err
+	}
+	var (
+		diff = sha256.New()
+		h    = sha256.New()
+	)
+	zr, err := gzip.NewReader(io.TeeReader(compressed, io.MultiWriter(file, h)))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	if _, err := io.Copy(diff, zr); err != nil {
+		return nil, err
+	}
+	sr, err := fileSectionReader(file)
+	if err != nil {
+		return nil, err
+	}
+	return staticCompressedLayer{
+		r: sr,
+		diff: regpkg.Hash{
+			Algorithm: "sha256",
+			Hex:       hex.EncodeToString(diff.Sum(nil)),
+		},
+		hash: regpkg.Hash{
+			Algorithm: "sha256",
+			Hex:       hex.EncodeToString(h.Sum(nil)),
+		},
+		size: sr.Size(),
+	}, nil
+}
+
+type staticCompressedLayer struct {
+	r    io.Reader
+	diff regpkg.Hash
+	hash regpkg.Hash
+	size int64
+}
+
+func (l staticCompressedLayer) Digest() (regpkg.Hash, error) {
+	return l.hash, nil
+}
+
+func (l staticCompressedLayer) Size() (int64, error) {
+	return l.size, nil
+}
+
+func (l staticCompressedLayer) DiffID() (regpkg.Hash, error) {
+	return l.diff, nil
+}
+
+func (l staticCompressedLayer) MediaType() (types.MediaType, error) {
+	return types.DockerLayer, nil
+}
+
+func (l staticCompressedLayer) Compressed() (io.ReadCloser, error) {
+	// TODO: We should pass l.closerFunc to ggcr as Close() of io.ReadCloser
+	//       but ggcr currently doesn't call Close() so we close it manually on EOF.
+	//       See also: https://github.com/google/go-containerregistry/pull/768
+	return ioutil.NopCloser(l.r), nil
+}
+
+func (l staticCompressedLayer) Uncompressed() (io.ReadCloser, error) {
+	return nil, errors.New("unsupported")
+}
+
+// imageIO is an interface for helpers of reading/writing images to/from somewhere.
+type imageIO interface {
+	readIndex() (regpkg.ImageIndex, error)
+	writeIndex(index regpkg.ImageIndex) error
+	readImage() (regpkg.Image, error)
+	writeImage(image regpkg.Image) error
+}
+
+// remoteImage is a helper for reading/writing images stored in the remote registry.
+type remoteImage struct {
+	remoteRef name.Reference
+}
+
+func (ri remoteImage) readIndex() (regpkg.ImageIndex, error) {
+	return remote.Index(ri.remoteRef, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+}
+
+func (ri remoteImage) writeIndex(index regpkg.ImageIndex) error {
+	return remote.WriteIndex(ri.remoteRef, index, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+}
+
+func (ri remoteImage) readImage() (regpkg.Image, error) {
+	desc, err := remote.Get(ri.remoteRef, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	if err != nil {
+		return nil, err
+	}
+	return desc.Image()
+}
+
+func (ri remoteImage) writeImage(image regpkg.Image) error {
+	return remote.Write(ri.remoteRef, image, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+}
+
+// localImage is a helper for reading/writing images stored in the OCI Image Layout directory.
+type localImage struct {
+	localPath string
+}
+
+func (li localImage) readIndex() (regpkg.ImageIndex, error) {
+	lp, err := layout.FromPath(li.localPath)
+	if err != nil {
+		return nil, err
+	}
+	return lp.ImageIndex()
+}
+
+func (li localImage) writeIndex(index regpkg.ImageIndex) error {
+	_, err := layout.Write(li.localPath, index)
+	return err
+}
+
+func (li localImage) readImage() (regpkg.Image, error) {
+	// OCI Image Layout doesn't have representation of thin image
+	return nil, fmt.Errorf("thin image cannot be read from local")
+}
+
+func (li localImage) writeImage(image regpkg.Image) error {
+	// OCI layout requires index so create it.
+	// TODO: Should we add platform information here?
+	desc, err := partial.Descriptor(image)
+	if err != nil {
+		return err
+	}
+	_, err = layout.Write(li.localPath, mutate.AppendManifests(
+		empty.Index,
+		mutate.IndexAddendum{
+			Add:        image,
+			Descriptor: *desc,
+		},
+	))
+	return err
 }
 
 func getTOCDigest(manifest *regpkg.Manifest, dgst regpkg.Hash) (ocidigest.Digest, bool) {
@@ -579,19 +913,6 @@ func getTOCDigest(manifest *regpkg.Manifest, dgst regpkg.Hash) (ocidigest.Digest
 	return "", false
 }
 
-func converters(cs ...func() (mutate.Addendum, error)) func() (mutate.Addendum, error) {
-	return func() (add mutate.Addendum, allErr error) {
-		for _, f := range cs {
-			a, err := f()
-			if err == nil {
-				return a, nil
-			}
-			allErr = multierror.Append(allErr, err)
-		}
-		return
-	}
-}
-
 func fileSectionReader(file *os.File) (*io.SectionReader, error) {
 	info, err := file.Stat()
 	if err != nil {
@@ -600,217 +921,13 @@ func fileSectionReader(file *os.File) (*io.SectionReader, error) {
 	return io.NewSectionReader(file, 0, info.Size()), nil
 }
 
-type writer func([]byte) (int, error)
-
-func (f writer) Write(b []byte) (int, error) { return f(b) }
-
-type layer struct {
-	r    io.Reader
-	diff *regpkg.Hash // registered after compression completed
-	hash *hash.Hash   // registered after compression completed
-	size *int64       // registered after compression completed
-	mu   sync.Mutex
-}
-
-func (l *layer) Digest() (regpkg.Hash, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.hash == nil {
-		return regpkg.Hash{}, stream.ErrNotComputed
+// specPlatform converts ggcr's platform struct to OCI's struct
+func specPlatform(p *regpkg.Platform) *spec.Platform {
+	return &spec.Platform{
+		Architecture: p.Architecture,
+		OS:           p.OS,
+		OSVersion:    p.OSVersion,
+		OSFeatures:   p.OSFeatures,
+		Variant:      p.Variant,
 	}
-	return regpkg.Hash{
-		Algorithm: "sha256",
-		Hex:       hex.EncodeToString((*l.hash).Sum(nil)),
-	}, nil
-}
-
-func (l *layer) Size() (int64, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.size == nil {
-		return -1, stream.ErrNotComputed
-	}
-	return *l.size, nil
-}
-
-func (l *layer) DiffID() (regpkg.Hash, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.diff == nil {
-		return regpkg.Hash{}, stream.ErrNotComputed
-	}
-	return *l.diff, nil
-}
-
-func (l *layer) MediaType() (types.MediaType, error) {
-	return types.DockerLayer, nil
-}
-
-func (l *layer) Compressed() (io.ReadCloser, error) {
-	pr, pw := io.Pipe()
-	go func() {
-		var (
-			diff regpkg.Hash
-			h    = sha256.New()
-			size int64
-			err  error
-		)
-		w := stargz.NewWriter(io.MultiWriter(pw, writer(func(b []byte) (int, error) {
-			n, err := h.Write(b)
-			size += int64(n)
-			return n, err
-		})))
-		if err := w.AppendTar(l.r); err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-		if err := w.Close(); err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-		diff, err = regpkg.NewHash(w.DiffID())
-		if err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-
-		// registers all computed information
-		l.mu.Lock()
-		l.diff = &diff
-		l.hash = &h
-		l.size = &size
-		l.mu.Unlock()
-
-		pw.Close()
-	}()
-	return ioutil.NopCloser(pr), nil
-}
-
-func (l *layer) Uncompressed() (io.ReadCloser, error) {
-	return ioutil.NopCloser(l.r), nil
-}
-
-type gzipLayer struct {
-	rc   io.ReadCloser
-	diff *hash.Hash // registered after computation completed
-	hash *hash.Hash // registered after computation completed
-	size *int64     // registered after computation completed
-	mu   sync.Mutex
-}
-
-func (l *gzipLayer) Digest() (regpkg.Hash, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.hash == nil {
-		return regpkg.Hash{}, stream.ErrNotComputed
-	}
-	return regpkg.Hash{
-		Algorithm: "sha256",
-		Hex:       hex.EncodeToString((*l.hash).Sum(nil)),
-	}, nil
-}
-
-func (l *gzipLayer) Size() (int64, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.size == nil {
-		return -1, stream.ErrNotComputed
-	}
-	return *l.size, nil
-}
-
-func (l *gzipLayer) DiffID() (regpkg.Hash, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.diff == nil {
-		return regpkg.Hash{}, stream.ErrNotComputed
-	}
-	return regpkg.Hash{
-		Algorithm: "sha256",
-		Hex:       hex.EncodeToString((*l.diff).Sum(nil)),
-	}, nil
-}
-
-func (l *gzipLayer) MediaType() (types.MediaType, error) {
-	return types.DockerLayer, nil
-}
-
-func (l *gzipLayer) Compressed() (io.ReadCloser, error) {
-	pr, pw := io.Pipe()
-	go func() {
-		var (
-			diff = sha256.New()
-			h    = sha256.New()
-			size int64
-		)
-		defer l.rc.Close()
-		zr, err := gzip.NewReader(io.TeeReader(
-			l.rc,
-			io.MultiWriter(pw, writer(func(b []byte) (int, error) {
-				n, err := h.Write(b)
-				size += int64(n)
-				return n, err
-			})),
-		))
-		if err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-		defer zr.Close()
-		if _, err := io.Copy(diff, zr); err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-
-		// registers all computed information
-		l.mu.Lock()
-		l.diff = &diff
-		l.hash = &h
-		l.size = &size
-		l.mu.Unlock()
-
-		pw.Close()
-	}()
-	return ioutil.NopCloser(pr), nil
-}
-
-func (l *gzipLayer) Uncompressed() (io.ReadCloser, error) {
-	return nil, errors.New("unsupported")
-}
-
-type staticCompressedLayer struct {
-	r    io.Reader
-	diff regpkg.Hash
-	hash regpkg.Hash
-	size int64
-}
-
-func (l *staticCompressedLayer) Digest() (regpkg.Hash, error) {
-	return l.hash, nil
-}
-
-func (l *staticCompressedLayer) Size() (int64, error) {
-	return l.size, nil
-}
-
-func (l *staticCompressedLayer) DiffID() (regpkg.Hash, error) {
-	return l.diff, nil
-}
-
-func (l *staticCompressedLayer) MediaType() (types.MediaType, error) {
-	return types.DockerLayer, nil
-}
-
-func (l *staticCompressedLayer) Compressed() (io.ReadCloser, error) {
-	return ioutil.NopCloser(l.r), nil
-}
-
-func (l *staticCompressedLayer) Uncompressed() (io.ReadCloser, error) {
-	return nil, errors.New("unsupported")
 }
