@@ -1,0 +1,37 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    name: Release
+    env:
+      OUTPUT_DIR: ${{ github.workspace }}/out
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build Binary
+      env:
+        DOCKER_BUILDKIT: 1
+      run: |
+        mkdir ${OUTPUT_DIR}
+        RELEASE_TAG="${GITHUB_REF##*/}"
+        TAR_FILE_NAME="stargz-snapshotter-${RELEASE_TAG}-linux-amd64.tar.gz"
+        SHA256SUM_FILE_NAME="${TAR_FILE_NAME}.sha256sum"
+        docker build --target release-binaries -o - . | gzip > "${OUTPUT_DIR}/${TAR_FILE_NAME}"
+        ( cd ${OUTPUT_DIR}; sha256sum ${TAR_FILE_NAME} ) > "${OUTPUT_DIR}/${SHA256SUM_FILE_NAME}"
+    - name: Create Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        RELEASE_TAG="${GITHUB_REF##*/}"
+        cat <<EOF > ${GITHUB_WORKSPACE}/release-note.txt
+        ${RELEASE_TAG}
+
+        (TBD)
+        EOF
+        ASSET_FLAGS=()
+        for F in ${OUTPUT_DIR}/*; do ASSET_FLAGS+=("-a" "$F"); done
+        hub release create "${ASSET_FLAGS[@]}" -F ${GITHUB_WORKSPACE}/release-note.txt --draft "${RELEASE_TAG}"

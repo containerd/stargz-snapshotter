@@ -44,6 +44,10 @@ RUN cd $GOPATH/src/github.com/containerd/stargz-snapshotter && \
     PREFIX=/out/ GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make containerd-stargz-grpc && \
     PREFIX=/out/ GO_BUILD_FLAGS=${CTR_REMOTE_BUILD_FLAGS} make ctr-remote
 
+# Binaries for release
+FROM scratch AS release-binaries
+COPY --from=snapshotter-dev /out/* /
+
 # Base image which contains containerd with default snapshotter
 # `docker-ce-cli` is used only for users to `docker login` to registries (e.g. DockerHub)
 # with configuring ~/.docker/config.json
