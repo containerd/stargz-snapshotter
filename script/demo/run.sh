@@ -22,6 +22,7 @@ CONTAINERD_ROOT=/var/lib/containerd/
 REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/containerd-stargz-grpc/
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
+CNI_CONFIG_DIR=/etc/cni/net.d/
 
 RETRYNUM=30
 RETRYINTERVAL=1
@@ -62,9 +63,10 @@ function cleanup {
 }
 
 echo "copying config from repo..."
-mkdir -p /etc/containerd /etc/containerd-stargz-grpc && \
+mkdir -p "${CONTAINERD_CONFIG_DIR}" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}" "${CNI_CONFIG_DIR}" && \
     cp "${REPO}/script/demo/config.containerd.toml" "${CONTAINERD_CONFIG_DIR}config.toml" && \
-    cp "${REPO}/script/demo/config.stargz.toml" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml"
+    cp "${REPO}/script/demo/config.stargz.toml" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml" && \
+    cp "${REPO}/script/demo/config.cni.conflist" "${CNI_CONFIG_DIR}optimizer.conflist"
 
 echo "cleaning up the environment..."
 kill_all "containerd"

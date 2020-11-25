@@ -79,6 +79,8 @@ For more details, refer to the [overview doc](./docs/overview.md).
 
 ## Creating stargz images and further optimization
 
+For more examples and details about the image converter `ctr-remote`, refer to [this doc](./docs/ctr-remote.md).
+
 For lazy pulling images, you need to prepare stargz images first. You can use [CRFS-official `stargzify`](https://github.com/google/crfs/tree/master/stargz/stargzify) command or our `ctr-remote` command which has further optimization functionality. You can also try our pre-converted images listed in [this doc](./docs/pre-converted-images.md). For more details about stargz and the optimization, refer to [this doc](./docs/stargz-estargz.md)
 
 In this section, we introduce `ctr-remote` command for converting images into stargz with further optimization for the performance of reading files. On-demand lazy pulling improves the performance of pull but it has runtime performance penalty because reading files induce remotely downloading contents. For solving this, `ctr-remote` has *workload-based* optimization for images. This section shows how to convert and pull an image lazily using `ctr-remote` command and briefly describes workload-based optimization.
