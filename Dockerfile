@@ -76,6 +76,16 @@ VOLUME /run/containerd-stargz-grpc
 ENV CONTAINERD_SNAPSHOTTER=stargz
 ENTRYPOINT [ "/entrypoint.sh" ]
 
+# Image which can be used for interactive demo environment
+FROM containerd-base AS demo
+RUN apt-get update && apt-get install -y iptables && \
+    # Make CNI plugins manipulate iptables instead of nftables
+    # as this test runs in a Docker container that network is configured with iptables.
+    # c.f. https://github.com/moby/moby/issues/26824
+    update-alternatives --set iptables /usr/sbin/iptables-legacy && \
+    mkdir -p /opt/cni/bin && \
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/v0.8.6/cni-plugins-linux-amd64-v0.8.6.tgz | tar xzv -C /opt/cni/bin
+
 # Image which can be used as containerized `ctr-remote images optimize` command
 FROM ubuntu:20.04 AS oind
 

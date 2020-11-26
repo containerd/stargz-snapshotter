@@ -3,7 +3,7 @@ services:
   containerd_demo:
     build:
       context: ../../
-      target: containerd-base
+      target: demo
       args:
         NO_PROXY: "${NO_PROXY}"
         HTTP_PROXY: "${HTTP_PROXY}"
