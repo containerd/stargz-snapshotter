@@ -33,7 +33,10 @@ version = 2
 # Use stargz snapshotter through CRI
 [plugins."io.containerd.grpc.v1.cri".containerd]
   snapshotter = "stargz"
+  disable_snapshot_annotations = false
 ```
+
+**Note that `disable_snapshot_annotations = false` is required since containerd > 1.4.2**
 
 This repo contains [a Dockerfile as a KinD node image](./Dockerfile) which includes the above configuration. You can use it with [KinD](https://github.com/kubernetes-sigs/kind) like the following,
 
