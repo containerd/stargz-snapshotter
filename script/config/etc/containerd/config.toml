@@ -8,6 +8,7 @@ version = 2
 [plugins."io.containerd.grpc.v1.cri".containerd]
   default_runtime_name = "runc"
   snapshotter = "stargz"
+  disable_snapshot_annotations = false
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
   runtime_type = "io.containerd.runc.v2"
 

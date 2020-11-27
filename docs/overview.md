@@ -46,6 +46,7 @@ version = 2
 # Use stargz snapshotter through CRI
 [plugins."io.containerd.grpc.v1.cri".containerd]
   snapshotter = "stargz"
+  disable_snapshot_annotations = false
 ```
 
 This repo contains [a Dockerfile as a KinD node image](/Dockerfile) which includes the above configuration.
