@@ -281,6 +281,9 @@ func moveRec(name string, in *tarFile, out *tarFile) {
 	}
 	parent, _ := path.Split(strings.TrimSuffix(name, "/"))
 	moveRec(parent, in, out)
+	if e, ok := in.get(name); ok && e.header.Typeflag == tar.TypeLink {
+		moveRec(e.header.Linkname, in, out)
+	}
 	if e, ok := in.get(name); ok {
 		out.add(e)
 		in.remove(name)
