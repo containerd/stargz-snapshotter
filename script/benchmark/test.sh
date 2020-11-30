@@ -23,6 +23,7 @@ BENCHMARKING_BASE_IMAGE_NAME="benchmark-image-base"
 BENCHMARKING_NODE_IMAGE_NAME="benchmark-image-test"
 BENCHMARKING_NODE=hello-bench
 BENCHMARKING_CONTAINER=hello-bench-container
+BENCHMARKING_CNI_PLUGIN_URL="https://github.com/containernetworking/plugins/releases/download/v0.8.7/cni-plugins-linux-amd64-v0.8.7.tgz"
 
 if [ "${BENCHMARKING_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
@@ -46,7 +47,9 @@ cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${BENCHMARKING_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
-    apt-get --no-install-recommends install -y python jq && \
+    apt-get --no-install-recommends install -y python jq iptables && \
+    update-alternatives --set iptables /usr/sbin/iptables-legacy && \
+    mkdir -p /opt/cni/bin && curl -Ls "${BENCHMARKING_CNI_PLUGIN_URL}" | tar xzv -C /opt/cni/bin && \
     git clone https://github.com/google/go-containerregistry \
               \${GOPATH}/src/github.com/google/go-containerregistry && \
     cd \${GOPATH}/src/github.com/google/go-containerregistry && \
@@ -55,6 +58,7 @@ RUN apt-get update -y && \
 
 COPY ./config/config.containerd.toml /etc/containerd/config.toml
 COPY ./config/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
+COPY ./config/config.cni.conflist /etc/cni/net.d/optimizer.conflist
 
 ENV CONTAINERD_SNAPSHOTTER=""
 
