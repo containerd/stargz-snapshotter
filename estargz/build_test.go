@@ -650,6 +650,19 @@ func TestSort(t *testing.T) {
 				reg("baz.txt", "baz"),
 			),
 		},
+		{
+			name: "hardlink",
+			in: tarBlob(t,
+				reg("baz.txt", "aaaaa"),
+				link("bazlink", "baz.txt"),
+			),
+			log: []string{"bazlink"},
+			want: tarBlob(t,
+				reg("baz.txt", "aaaaa"),
+				link("bazlink", "baz.txt"),
+				prefetchLandmark(),
+			),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
