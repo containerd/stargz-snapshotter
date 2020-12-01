@@ -309,7 +309,7 @@ class BenchRunner:
     def convert_echo_hello(self, repo):
         self.mode = ESTARGZ_MODE
         period=10
-        cmd = ('%s -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s %s/%s' %
+        cmd = ('%s -cni -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s %s/%s' %
                (self.optimizer, period, repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
@@ -322,7 +322,7 @@ class BenchRunner:
         entry = ""
         if runargs.arg != "": # FIXME: this is naive...
             entry = '-entrypoint \'["/bin/sh", "-c"]\''
-        cmd = ('%s -period %s %s %s %s %s/%s' %
+        cmd = ('%s -cni -period %s %s %s %s %s/%s' %
                (self.optimizer, period, entry, genargs(runargs.arg), repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
@@ -332,7 +332,7 @@ class BenchRunner:
         self.mode = ESTARGZ_MODE
         period = 90
         env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s -period %s %s %s %s %s/%s' %
+        cmd = ('%s -cni -period %s %s %s %s %s/%s' %
                (self.optimizer, period, env, genargs(runargs.arg), repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
@@ -340,9 +340,14 @@ class BenchRunner:
 
     def convert_cmd_stdin(self, repo, runargs):
         self.mode = ESTARGZ_MODE
+        mounts = ''
+        for a,b in runargs.mount:
+            a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
+            a = tmp_copy(a)
+            mounts += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
         period = 60
-        cmd = ('%s -period %s -entrypoint \'["/bin/sh", "-c"]\' %s %s %s/%s' %
-               (self.optimizer, period, genargs(runargs.stdin_sh), repo, self.repository, self.add_suffix(repo)))
+        cmd = ('%s -cni -period %s %s -entrypoint \'["/bin/sh", "-c"]\' %s %s %s/%s' %
+               (self.optimizer, period, mounts, genargs(runargs.stdin_sh), repo, self.repository, self.add_suffix(repo)))
         print cmd
         p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         print runargs.stdin
