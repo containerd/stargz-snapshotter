@@ -17,7 +17,7 @@
 set -euo pipefail
 
 LEGACY_MODE="legacy"
-STARGZ_MODE="stargz"
+ESTARGZ_NOOPT_MODE="estargz-noopt"
 ESTARGZ_MODE="estargz"
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
@@ -91,7 +91,7 @@ for SAMPLE_NO in $(seq ${NUM_OF_SAMPLES}) ; do
     echo -n "" > "${WORKLOADS_LIST}"
     # Randomize workloads
     for IMAGE in ${TARGET_IMAGES} ; do
-        for MODE in ${LEGACY_MODE} ${STARGZ_MODE} ${ESTARGZ_MODE} ; do
+        for MODE in ${LEGACY_MODE} ${ESTARGZ_NOOPT_MODE} ${ESTARGZ_MODE} ; do
             echo "${IMAGE},${MODE}" >> "${WORKLOADS_LIST}"
         done
     done
@@ -113,11 +113,11 @@ for SAMPLE_NO in $(seq ${NUM_OF_SAMPLES}) ; do
             measure "--mode=legacy" ${TARGET_REPOSITORY} ${IMAGE}
         fi
 
-        if [ "${MODE}" == "${STARGZ_MODE}" ] ; then
+        if [ "${MODE}" == "${ESTARGZ_NOOPT_MODE}" ] ; then
             echo -n "" > "${TMP_LOG_FILE}"
             set_noprefetch "true" # disable prefetch
             LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
-            measure "--mode=stargz" ${TARGET_REPOSITORY} ${IMAGE}
+            measure "--mode=estargz-noopt" ${TARGET_REPOSITORY} ${IMAGE}
             check_remote_snapshots "${TMP_LOG_FILE}"
         fi
 
