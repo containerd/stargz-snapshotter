@@ -1,81 +1,231 @@
-# Stargz and eStargz Archive Format
+# eStargz: Standard-Compatible Extensions to Tar.gz Layers for Lazy Pulling Container Images
 
-This doc describes image layer archive formats *stargz* and *eStargz* used in this project for enabling *lazy image pull*.
+This doc describes the extension to image layers for enabling *lazy image pulling*.
+The extended layer format is called *eStargz* in this project.
+eStargz is backward-compatible to tar.gz layers used in the current [OCI](https://github.com/opencontainers/image-spec/)/[Docker](https://github.com/moby/moby/blob/master/image/spec/v1.2.md) Image Specs so eStargz-formatted images can be pushed to and lazily pulled from standard registries.
+Furthermore, they can run even on extension-agnostic runtimes (e.g. Docker).
 
-Currently, [OCI](https://github.com/opencontainers/image-spec/)/[Docker](https://github.com/moby/moby/blob/master/image/spec/v1.2.md) Image Spec uses tar.gz (or tar) for archiving layers but these formats don't suit to lazy pull.
-Stargz and eStargz solve this problem and enable lazy pull with stargz snapshotter.
-They are still compatible with legacy tar.gz so runtimes can use these formats as legacy tar.gz image layers.
+This extension is based on stargz (stands for *seekable tar.gz*) proposed by [Google CRFS](https://github.com/google/crfs) project (initially [discussed in Go community](https://github.com/golang/go/issues/30829)).
+eStargz is an extended-version of stargz and comes with additional features including chunk-level verification and runtime performance optimization.
 
-![the overview of stargz and eStargz](/docs/images/stargz-estargz.png)
+Notational convention follows [OCI Image Spec](https://github.com/opencontainers/image-spec/blob/v1.0.1/spec.md#notational-conventions).
 
-## Stargz archive format
+## Overview
 
-When pulling an image lazily, the runtime doesn’t download the entire contents but fetches necessary data chunks *on-demand*.
-For archiving this, runtimes need to *selectively* fetch and extract files in the image layers.
-However current OCI Image Spec uses tar and tar.gz archive formats for archiving layers, which don't suit to this use-case because of the following reasons,
+When lazily pulling an image from the registry, necessary chunks of its layers are fetched *on-demand* during running the container, instead of downloading the entire contents of that image at once.
+For achieving this, runtimes need to *selectively* fetch and extract files contents in the layer.
+However, current OCI/Docker Image Spec uses tar (optionally with compression) for archiving layers, which doesn't suit to this use-case because of the following reasons,
 
-1. We need to scan the whole archive even for finding and extracting single file entry.
+1. The entire archive needs to be scanned even for finding and extracting a single file.
 2. If the archive is compressed by gzip, this is no longer seekable.
+3. File entries in the archive cannot be verified separately (In Docker/OCI specs, verification is done for *the entire contents of the layer*, not per entry).
 
-[Stargz](https://github.com/google/crfs) is an archive format proposed by Google for solving these issues and enables lazy pull.
-Initially, this format was [discussed in Go community](https://github.com/golang/go/issues/30829) for optimizing their building system.
-Stargz stands for *seekable tar.gz* and it's file entries can be selectively extracted.
-This archive is still valid tar.gz so stargz archived layers are still usable as legacy tar.gz layers for legacy runtimes.
+eStargz is a tar.gz-compatible archive format which solves these issues and enables lazy pulling.
+Each file (or chunk for large files) in eStargz can be extracted selectively and verified separately.
+Additionally, eStargz has a feature called *prioritized files* for mitigating runtime performance drawbacks caused by on-demand fetching of each file/chunk.
+This format is compatible to tar.gz so eStargz layers are storable to container registries, lazily-pullable from container registries and still runnable even on eStargz-agnostic runtimes.
 
-### The structure of stargz
+This doc defines the basic structure of eStargz layer that has the above features.
+For details about content verfication in eStargz, please refer to [Content Verification in eStargz](/docs/verification.md).
 
-In stargz archive, each tar entries of regular files are separately compressed by gzip.
-A stargz archive is the concatenation of these gzip members, which is still valid gzip.
-For large files, the contents are chunked into several gzip members.
-Entries which only contains file metadata (e.g. symlink) are put in a gzip member together with the neighbouring entries.
+## The structure
 
-An index file entry called *TOC* is contained following the gzip entries.
-This file is a JSON file which records the size and offset of chunks corresponding to each file's contents in the stargz archive as well as the each file's metadata (name, file type, owners, etc).
-[All keys available in TOC are defined in the CRFS project repo](https://github.com/google/crfs/blob/71d77da419c90be7b05d12e59945ac7a8c94a543/stargz/stargz.go#L214-L218).
+![The structure of eStargz](/docs/images/estargz-structure.png)
 
-At the tail of stargz, a *footer* is appended.
-This is an empty gzip entry whose header (extra field) contains the offset of TOC in the archive.
-The footer is defined to be 47 bytes (1 byte = 8 bits in gzip).
-[The bit structure of the footer is defined in the CRFS project repo](https://github.com/google/crfs/blob/71d77da419c90be7b05d12e59945ac7a8c94a543/stargz/stargz.go#L38-L48).
+In eStargz archive, each non-empty regular file is separately compressed by gzip.
+This structure is inherited from [stargz](https://github.com/google/crfs).
 
-Runtimes can first read the tail 47 bytes footer of the archive and get the offset of TOC.
-Each file's metadata is recorded in the TOC so runtimes don't need to extract other parts of the stargz archive as long as it only uses file metadata.
-If runtime needs to get regular file's contents, it gets size and offset of the chunk corresponded to the file contents in the TOC and extract that range without scanning the whole archive.
-By combining this with HTTP Range Request supported by [OCI](https://github.com/opencontainers/distribution-spec/blob/master/spec.md#fetch-blob-part)/[Docker](https://docs.docker.com/registry/spec/api/#fetch-blob-part) registry API, runtimes can selectively download file entries from registries
+The gzip headers MUST locate at the following locations.
 
-For more detailed structure, refer to the [CRFS project repo](https://github.com/google/crfs).
+- The top of the tar archive
+- The top of the payload of each non-empty regular file entry except *TOC*
+- The top of *TOC* tar header
+- The top of *footer* (described in the later section)
 
-## eStargz archive format
+The gzip headers MAY locate at the following locations.
 
-Lazy pull costs extra time for reading files which induces remotely fetching file contents.
-The eStargz archive format is an extended version of stargz for solving this problem by the ability to indicate *the likely accessed files* during runtime.
-Runtimes can prefetch these files, which hopefully increases cache hit ratio and mitigates the read overhead.
-This format is backwards compatible to stargz so can be used as legacy tar.gz layers by legacy runtimes.
+- The end of the payload of each non-empty regular file entry
+- Arbitrary location within the payload of non-empty regular file entry
 
-eStargz also has content verification functionality based on OCI [_digests_](https://github.com/opencontainers/image-spec/blob/v1.0.1/descriptor.md#digests).
-See the [verification documentation](/docs/verification.md) for more detail.
+The gzip header locations described in the second item MAY be used for chunking large regular files into several gzip members.
+Each chunked member is called *chunk* in this doc.
+An eStargz archive is the concatenation of these gzip members, which is a still valid gzip.
 
-### The structure of eStargz
+## TOC, TOCEntries and Footer
 
-The structure of eStargz is same as stargz archive except it can indicate the information about likely accessed files as the *order* of file entries, with some [*landmark* file entries](https://github.com/containerd/stargz-snapshotter/blob/28af649b55ac39efc547b2e7f14f81a33a8212e1/stargz/fs.go#L93-L99).
+### TOC and TOCEntries
+
+A regular file entry called *TOC* MUST be contained as the last tar entry in the archive.
+TOC MUST be a JSON file and MUST be named `stargz.index.json`.
+
+TOC records all file's metadata (e.g. name, file type, owners, offset etc) in the tar archive, except TOC itself.
+The TOC is defined as the following.
+
+- **`version`** *int*
+
+   This REQUIRED property contains the version of the TOC. This value MUST be `1`.
+
+- **`entries`** *array of objects*
+
+   Each item in the array MUST be a TOCEntry.
+   This property MUST contain TOCEntries that reflect all tar entries and chunks, except `stargz.index.json`.
+
+The TOCEntry is defined as the following.
+If the information written in TOCEntry differs from the corresponding tar entry, TOCEntry SHOULD be respected.
+TOCEntries fields other than `chunkDigest` are inherited from [stargz](https://github.com/google/crfs).
+
+- **`name`** *string*
+
+  This REQUIRED property contains the name of the tar entry.
+  This MUST be the complete path stored in the tar file.
+
+- **`type`** *string*
+
+  This REQUIRED property contains the type of the tar entry.
+  This MUST be either of the following.
+  - `dir`: directory
+  - `reg`: regular file
+  - `symlink`: symbolic link
+  - `hardlink`: hard link
+  - `char`: character device
+  - `block`: block device
+  - `fifo`: fifo
+  - `chunk`: a chunk of regular file data
+  As described in the above section, a regular file can be divided into several chunks.
+  Corresponding to the first chunk of that file, TOCEntry typed `reg` MUST be contained.
+  Corresponding to the chunks after 2nd, TOCEntries typed `chunk` MUST be contained.
+  `chunk`-typed TOCEntry must set offset, chunkOffset and chunkSize properties.
+
+- **`size`** *uint64*
+
+  This OPTIONAL property contains the uncompressed size of the regular file tar entry.
+
+- **`modtime`** *string*
+
+  This OPTIONAL property contains the modification time of the tar entry.
+  Empty means zero or unknown.
+  Otherwize, the value is in UTC RFC3339 format.
+
+- **`linkName`** *string*
+
+  This OPTIONAL property contains the link target of `symlink` and `hardlink`.
+
+- **`mode`** *int64*
+
+  This OPTIONAL property contains the permission and mode bits.
+
+- **`uid`** *uint*
+
+  This OPTIONAL property contains the user ID of the owner of this file.
+
+- **`gid`** *uint*
+
+  This OPTIONAL property contains the group ID of the owner of this file.
+
+- **`userName`** *string*
+
+  This OPTIONAL property contains the username of the owner.
+
+- **`groupName`** *string*
+
+  This OPTIONAL property contains the groupname of the owner.
+
+- **`offset`** *int64*
+
+  This OPTIONAL property contains the offset of the gzip header of the regular file or chunk in the archive.
+
+- **`devMajor`** *int*
+
+  This OPTIONAL property contains the major device number for character and block device files.
+
+- **`devMinor`** *int*
+
+  This OPTIONAL property contains the minor device number for character and block device files.
+
+- **`xattrs`** *string-bytes map*
+
+  This OPTIONAL property contains the extended attribute for the tar entry.
+
+- **`digest`** *string*
+
+  This OPTIONAL property contains the OCI [Digest](https://github.com/opencontainers/image-spec/blob/v1.0.1/descriptor.md#digests) of the regular file contents.
+  TOCEntries of non-empty `reg` file MUST set this property.
+
+- **`chunkOffset`** *int64*
+
+  This OPTIONAL property contains the offset of this chunk in the regular file payload.
+  Note that this is the offset of this chunk in the decompressed file content.
+  TOCEntries of `chunk` type MUST set this property.
+
+- **`chunkSize`** *int64*
+
+  This OPTIONAL property contains the decompressed size of this chunk.
+  The last `chunk` in a `reg` file or `reg` file that isn't chunked MUST set this property to zero.
+  Other `reg` and `chunk` MUST set this property.
+
+- **`chunkDigest`** *string*
+
+  This OPTIONAL property contains an OCI [Digest](https://github.com/opencontainers/image-spec/blob/v1.0.1/descriptor.md#digests) of this chunk.
+  TOCEntries of non-empty `reg` and `chunk` MUST set this property.
+  This MAY be used for verifying the data of this entry in the way described in [Content Verification in eStargz](/docs/verification.md).
+
+### Footer
+
+At the end of the archive, a *footer* MUST be appended.
+This MUST be an empty gzip member ([RFC1952](https://tools.ietf.org/html/rfc1952)) whose [Extra field](https://tools.ietf.org/html/rfc1952#section-2.3.1.1) contains the offset of TOC in the archive.
+The footer MUST be the following 51 bytes (1 byte = 8 bits in gzip).
+
+```
+- 10 bytes  gzip header
+- 2  bytes  XLEN (length of Extra field) = 26 (4 bytes header + 16 hex digits + len("STARGZ"))
+- 2  bytes  Extra: SI1 = 'S', SI2 = 'G'
+- 2  bytes  Extra: LEN = 22 (16 hex digits + len("STARGZ"))
+- 22 bytes  Extra: subfield = fmt.Sprintf("%016xSTARGZ", offsetOfTOC)
+- 5  bytes  flate header
+- 8  bytes  gzip footer
+(End of eStargz)
+```
+
+Runtimes MAY first read and parse the footer of the archive to get the offset of TOC.
+Each file's metadata is recorded in the TOC so runtimes don't need to extract other parts of the archive as long as it only uses file metadata.
+If runtime needs to get a regular file's content, it MAY get size and offset information of that content from the TOC and MAY extract that range without scanning the whole archive.
+By combining this with HTTP Range Request supported by [OCI Distribution Spec](https://github.com/opencontainers/distribution-spec/blob/master/spec.md#fetch-blob-part) and [Docker Registry API](https://docs.docker.com/registry/spec/api/#fetch-blob-part), runtimes can selectively download file entries from registries
+
+### Notes on compatibility with stargz
+
+eStargz is designed aiming to the compatibility with tar.gz.
+For achieving this, eStargz's footer structure is incompatible to [stargz's one](https://github.com/google/crfs/blob/71d77da419c90be7b05d12e59945ac7a8c94a543/stargz/stargz.go#L36-L49).
+eStargz adds SI1, SI2 and LEN fields to the footer for making it compliant to [Extra field definition in RFC1952](https://tools.ietf.org/html/rfc1952#section-2.3.1.1).
+TOC, TOCEntry and the position of gzip headers are still compatible with stargz.
+
+## Prioritized Files and Landmark Files
+
+![Prioritized files and landmark files](/docs/images/estargz-landmark.png)
+
+Lazy pulling costs extra time for reading files which induces remotely fetching file contents.
+The eStargz archive mitigates this problem with the ability to indicate the likely accessed files called *prioritized files*.
+Runtimes can leverage this information (e.g. for prefetching prioritized files) for increasing cache hit ratio and mitigating the read overhead (example usage of this information in Stargz Snapshotter is described in the later section).
+
+eStargz indicates the information about prioritized files as the *order* of file entries, with some [*landmark* file entries](https://github.com/containerd/stargz-snapshotter/blob/28af649b55ac39efc547b2e7f14f81a33a8212e1/stargz/fs.go#L93-L99).
+
 File entries in eStargz are grouped into the following groups,
 
-- files *likely accessed* by containers during runtime, and
-- files not likely accessed
+- A. files *likely accessed* by containers during runtime (i.e. prioritized files), and
+- B. files not likely accessed
 
-An eStargz archive is made with two separated areas corresponding to these groups.
-A special file entry *prefetch landmark* (named `.prefetch.landmark`) indicates the border between these two areas.
+If there are no files belong to A, a landmark file *no-prefetch landmark* MUST be contained in the archive.
+If there are files belong to A, an eStargz archive MUST be made with two separated areas corresponding to these groups and a landmark file *prefetch landmark* MUST be containerd at the border between these two areas.
 That is, entries stored in the range between the top and the prefetch landmark are likely accessed during runtime.
-In the range of likely accessed files, entries are sorted by a possible accessed order.
-If there are no files possibly accessed in the archive, another type of landmark file *no-prefetch landmark* (named `.no.prefetch.landmark`) is contained in the archive.
-These landmark files can be any file type but the content offset must be recorded in the TOC of the stargz archive.
 
-On container startup, runtimes can prefetch the range where likely accessed files are contained, which can mitigate the read overhead.
-If runtimes find no-prefetch landmark, they don't need to prefetch anything.
+Both of landmark files MUST be regular file entries with 4 bits contents 0xf.
+Prefetch landmark MUST be registered to TOC as a TOCEntry named `.prefetch.landmark` and no-prefetch landmark MUST be registered as a TOCEntry named `.no.prefetch.landmark`.
 
-### eStargz and workload-based image optimization in Stargz Snapshotter
+On container startup, the runtime SHOULD prefetch the range where prioritized files are contained.
+When the runtime finds no-prefetch landmark, it SHOULD NOT prefetch anything.
 
-Stargz Snapshotter makes use of eStargz for *workload-based* optimization for mitigating overhead of reading files.
+## Example use-case of prioritized files: workload-based image optimization in Stargz Snapshotter
+
+Stargz Snapshotter makes use of eStargz's prioritized files for *workload-based* optimization for mitigating overhead of reading files.
 
 Generally, container images are built with purpose and the workloads are determined at the build.
 In many cases, a workload is defined in the Dockerfile using some parameters including entrypoint command, environment variables and user.
@@ -84,12 +234,60 @@ Stargz snapshotter provides an image converter command `ctr-remote images optimi
 This leverages eStargz archive format and mitigates reading performance for files that are *likely accessed* in the workload defined in the Dockerfile.
 
 When converting the image, this command runs the specified workload in a sandboxed environment and profiles all file accesses.
-This command regards all accessed files as likely accessed also in production.
+This command regards all accessed files as likely accessed also in production (i.e. prioritized files).
 Then it constructs eStargz archive by
 
 - locating accessed files from top of the archive, with sorting them by the accessed order,
 - putting prefetch landmark file entry at the end of this range, and
 - locating all other files (not accessed files) after the prefetch landmark.
 
-Before running container, stargz snapshotter prefetches and pre-caches this range by a single HTTP Range Request.
-This can increase the cache hit rate for the specified workload and mitigates runtime overheads.
+Before running the container, stargz snapshotter prefetches and pre-caches the range where prioritized files are contained, by a single HTTP Range Request.
+This can increase the cache hit rate for the specified workload and can mitigate runtime overheads.
+
+## Example of TOC
+
+You can inspect TOC JSON generated by `ctr-remote` converter like the following:
+
+```
+ctr-remote i optimize ghcr.io/stargz-containers/alpine:3.10.2-org local:///tmp/alpine
+cat /tmp/alpine/blobs/sha256/eec0c3d59c45a5ed4a7343afe3e871ce1cc99fb5db2b29af49fe67b6ad23ee62 \
+  | tar xzOf -  stargz.index.json | jq
+```
+
+Then you will get the TOC JSON something like:
+
+```json
+{
+  "version": 1,
+  "entries": [
+    {
+      "name": "etc/",
+      "type": "dir",
+      "modtime": "2019-08-20T10:30:43Z",
+      "mode": 16877,
+      "NumLink": 0
+    },
+    {
+      "name": "etc/passwd",
+      "type": "reg",
+      "size": 1230,
+      "modtime": "2019-06-17T09:00:16Z",
+      "mode": 33188,
+      "offset": 123,
+      "NumLink": 0,
+      "digest": "sha256:832cd0f75b227d13aac82b1f70b7f90191a4186c151f9db50851d209c45ede11",
+      "chunkDigest": "sha256:832cd0f75b227d13aac82b1f70b7f90191a4186c151f9db50851d209c45ede11"
+    },
+    {
+      "name": "etc/group",
+      "type": "reg",
+      "size": 697,
+      "modtime": "2019-06-17T09:00:16Z",
+      "mode": 33188,
+      "offset": 675,
+      "NumLink": 0,
+      "digest": "sha256:132d13f9260edf201efd1400b830ec39d25769c1a5b5a5dc74acdfed126f9d0a",
+      "chunkDigest": "sha256:132d13f9260edf201efd1400b830ec39d25769c1a5b5a5dc74acdfed126f9d0a"
+    },
+... (omit) ...
+```

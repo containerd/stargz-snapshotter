@@ -1,4 +1,4 @@
-# Containerd Stargz Snapshotter Overview
+# Containerd Stargz Snapshotter Plugin Overview
 
 __Before get through this overview document, we recommend you to read [README](README.md).__
 
@@ -15,8 +15,10 @@ The actual image contents can be fetched *lazily* so runtimes can startup contai
 We call these remotely mounted layers as *remote snapshots*.
 
 *Stargz Snapshotter* is a remote snapshotter plugin implementation which supports standard compatible remote snapshots functionality.
-This leverages [*stargz* image format by Google](https://github.com/google/crfs) which enables lazy distribution but is backwards-compatible with container standards.
-When you run a container image and it is formatted by stargz, stargz snapshotter prepares container's rootfs layers as remote snapshots by mounting layers from [OCI](https://github.com/opencontainers/distribution-spec)/[Docker](https://docs.docker.com/registry/spec/api/) standard registries to the node, instead of pulling the entire image contents.
+This snapshotter leverages [eStargz](/docs/stargz-estargz.md) image, which is lazily-pullable and still standard-compatible.
+Because of this conpatibility, eStargz image can be pushed to and lazily pulled from [OCI](https://github.com/opencontainers/distribution-spec)/[Docker](https://docs.docker.com/registry/spec/api/) registries (e.g. ghcr.io).
+Furthermore, images can run even on eStargz-agnostic runtimes (e.g. Docker).
+When you run a container image and it is formatted by eStargz, stargz snapshotter prepares container's rootfs layers as remote snapshots by mounting layers from the registry to the node, instead of pulling the entire image contents.
 
 This document gives you a high-level overview of stargz snapshotter.
 
@@ -26,11 +28,11 @@ This document gives you a high-level overview of stargz snapshotter.
 
 Stargz snapshotter is implemented as a [proxy plugin](https://github.com/containerd/containerd/blob/04985039cede6aafbb7dfb3206c9c4d04e2f924d/PLUGINS.md#proxy-plugins) daemon (`containerd-stargz-grpc`) for containerd.
 When containerd starts a container, it queries the rootfs snapshots to stargz snapshotter daemon through an unix socket.
-This snapshotter remotely mounts queried stargz layers from registries to the node and provides these mount points as remote snapshots to containerd.
+This snapshotter remotely mounts queried eStargz layers from registries to the node and provides these mount points as remote snapshots to containerd.
 
 Containerd recognizes this plugin through an unix socket specified in the configuration file (e.g. `/etc/containerd/config.toml`).
 Stargz snapshotter can also be used through Kubernetes CRI by specifying the snapshotter name in the CRI plugin configuration.
-We assume that you are using containerd newer than at least [commit `d8506bf`](https://github.com/containerd/containerd/commit/d8506bfd7b407dcb346149bcec3ed3c19244e3f1)
+We assume that you are using containerd (> v1.4.2).
 
 ```toml
 version = 2
@@ -53,7 +55,7 @@ This repo contains [a Dockerfile as a KinD node image](/Dockerfile) which includ
 
 ## State directory
 
-Stargz snapshotter mounts stargz layers from registries to the node using FUSE.
+Stargz snapshotter mounts eStargz layers from registries to the node using FUSE.
 The all files metadata in the image are preserved on the filesystem and files contents are fetched from registries on demand.
 
 At the root of the filesystem, there is a *state directory* (`/.stargz-snapshotter`) for status monitoring for the filesystem.
