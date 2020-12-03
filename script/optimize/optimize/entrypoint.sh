@@ -21,6 +21,7 @@ DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 ORG_IMAGE_TAG="${REGISTRY_HOST}:5000/test:org$(date '+%M%S')"
 OPT_IMAGE_TAG="${REGISTRY_HOST}:5000/test:opt$(date '+%M%S')"
+NOOPT_IMAGE_TAG="${REGISTRY_HOST}:5000/test:noopt$(date '+%M%S')"
 TOC_JSON_DIGEST_ANNOTATION="containerd.io/snapshot/stargz/toc.digest"
 
 RETRYNUM=100
@@ -97,6 +98,46 @@ function validate_toc_json {
     return 0
 }
 
+function check_optimization {
+    local TARGET=${1}
+
+    LOCAL_WORKING_DIR="${WORKING_DIR}/$(date '+%H%M%S')"
+    mkdir "${LOCAL_WORKING_DIR}"
+    docker pull "${TARGET}" && docker save "${TARGET}" | tar xv -C "${LOCAL_WORKING_DIR}"
+    LAYERS="$(cat "${LOCAL_WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[]')"
+
+    echo "Checking layers..."
+    GOTNUM=0
+    for L in ${LAYERS}; do
+        tar --list -f "${LOCAL_WORKING_DIR}/${L}" | tee "${LOCAL_WORKING_DIR}/${GOTNUM}"
+        ((GOTNUM+=1))
+    done
+    WANTNUM=0
+    for W in "${@:2}"; do
+        cp "${W}" "${LOCAL_WORKING_DIR}/${WANTNUM}-want"
+        ((WANTNUM+=1))
+    done
+    if [ "${GOTNUM}" != "${WANTNUM}" ] ; then
+        echo "invalid numbers of layers ${GOTNUM}; want ${WANTNUM}"
+        return 1
+    fi
+    for ((I=0; I < WANTNUM; I++)) ; do
+        echo "Validating tarball contents of layer ${I}..."
+        diff "${LOCAL_WORKING_DIR}/${I}" "${LOCAL_WORKING_DIR}/${I}-want"
+    done
+    crane manifest "${TARGET}" | tee "${LOCAL_WORKING_DIR}/dist-manifest.json" && echo ""
+    INDEX=0
+    for L in ${LAYERS}; do
+        echo "Validating TOC JSON digest of layer ${INDEX}..."
+        validate_toc_json "${LOCAL_WORKING_DIR}/dist-manifest.json" \
+                          "${INDEX}" \
+                          "${LOCAL_WORKING_DIR}/${L}"
+        ((INDEX+=1))
+    done
+
+    return 0
+}
+
 echo "Connecting to the docker server..."
 retry ls /docker/client/cert.pem /docker/client/ca.pem
 mkdir -p /root/.docker/ && cp /docker/client/* /root/.docker/
@@ -116,20 +157,11 @@ tar zcv -C "${CONTEXT_DIR}" . \
     | docker build -t "${ORG_IMAGE_TAG}" - \
     && docker push "${ORG_IMAGE_TAG}"
 
-echo "Optimizing image..."
+echo "Checking optimized image..."
 WORKING_DIR=$(mktemp -d)
 PREFIX=/tmp/out/ make clean
 PREFIX=/tmp/out/ GO_BUILD_FLAGS="-race" make ctr-remote # Check data race
 /tmp/out/ctr-remote image optimize -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
-
-echo "Downloading optimized image..."
-docker pull "${OPT_IMAGE_TAG}" && docker save "${OPT_IMAGE_TAG}" | tar xv -C "${WORKING_DIR}"
-LAYER_0="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[0]')"
-LAYER_1="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[1]')"
-LAYER_2="${WORKING_DIR}/$(cat "${WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[2]')"
-tar --list -f "${LAYER_0}" | tee "${WORKING_DIR}/0-got" && \
-    tar --list -f "${LAYER_1}" | tee "${WORKING_DIR}/1-got" && \
-    tar --list -f "${LAYER_2}" | tee "${WORKING_DIR}/2-got"
 cat <<EOF > "${WORKING_DIR}/0-want"
 accessor
 a.txt
@@ -137,29 +169,52 @@ a.txt
 b.txt
 stargz.index.json
 EOF
+
 cat <<EOF > "${WORKING_DIR}/1-want"
 c.txt
 .prefetch.landmark
 d.txt
 stargz.index.json
 EOF
+
 cat <<EOF > "${WORKING_DIR}/2-want"
 .no.prefetch.landmark
 e.txt
 stargz.index.json
 EOF
-echo "Validating tarball contents of layer 0 (base layer)..."
-diff "${WORKING_DIR}/0-got" "${WORKING_DIR}/0-want"
-echo "Validating tarball contents of layer 1..."
-diff "${WORKING_DIR}/1-got" "${WORKING_DIR}/1-want"
-echo "Validating tarball contents of layer 2..."
-diff "${WORKING_DIR}/2-got" "${WORKING_DIR}/2-want"
 
-echo "Validating TOC JSON digest..."
-crane manifest "${OPT_IMAGE_TAG}" | tee "${WORKING_DIR}/dist-manifest.json" && echo ""
-validate_toc_json "${WORKING_DIR}/dist-manifest.json" "0" "${LAYER_0}"
-validate_toc_json "${WORKING_DIR}/dist-manifest.json" "1" "${LAYER_1}"
-validate_toc_json "${WORKING_DIR}/dist-manifest.json" "2" "${LAYER_2}"
+check_optimization "${OPT_IMAGE_TAG}" \
+                   "${WORKING_DIR}/0-want" \
+                   "${WORKING_DIR}/1-want" \
+                   "${WORKING_DIR}/2-want"
+
+echo "Checking non-optimized image..."
+/tmp/out/ctr-remote image optimize -no-optimize "${ORG_IMAGE_TAG}" "${NOOPT_IMAGE_TAG}"
+cat <<EOF > "${WORKING_DIR}/0-want"
+.no.prefetch.landmark
+a.txt
+accessor
+b.txt
+stargz.index.json
+EOF
+
+cat <<EOF > "${WORKING_DIR}/1-want"
+.no.prefetch.landmark
+c.txt
+d.txt
+stargz.index.json
+EOF
+
+cat <<EOF > "${WORKING_DIR}/2-want"
+.no.prefetch.landmark
+e.txt
+stargz.index.json
+EOF
+
+check_optimization "${NOOPT_IMAGE_TAG}" \
+                   "${WORKING_DIR}/0-want" \
+                   "${WORKING_DIR}/1-want" \
+                   "${WORKING_DIR}/2-want"
 
 # Test networking & mounting work
 

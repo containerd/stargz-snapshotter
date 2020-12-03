@@ -156,7 +156,7 @@ var OptimizeCommand = cli.Command{
 			Usage: "targeting all platform of the source image",
 		},
 		cli.BoolFlag{
-			Name:  "no-optimization",
+			Name:  "no-optimize",
 			Usage: "convert image without optimization",
 		},
 	},
