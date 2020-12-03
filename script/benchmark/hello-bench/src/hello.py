@@ -40,7 +40,7 @@ import os, sys, subprocess, select, random, urllib2, time, json, tempfile, shuti
 
 TMP_DIR = tempfile.mkdtemp()
 LEGACY_MODE = "legacy"
-STARGZ_MODE = "stargz"
+ESTARGZ_NOOPT_MODE = "estargz-noopt"
 ESTARGZ_MODE = "estargz"
 DEFAULT_OPTIMIZER = "ctr-remote image optimize"
 BENCHMARKOUT_MARK = "BENCHMARK_OUTPUT: "
@@ -137,7 +137,7 @@ class BenchRunner:
         self.optimizer = optimizer
 
     def lazypull(self):
-        if self.mode == STARGZ_MODE or self.mode == ESTARGZ_MODE:
+        if self.mode == ESTARGZ_NOOPT_MODE or self.mode == ESTARGZ_MODE:
             return True
         else:
             return False
@@ -169,14 +169,14 @@ class BenchRunner:
     def add_suffix(self, repo):
         if self.mode == ESTARGZ_MODE:
             return "%s-esgz" % repo
-        elif self.mode == STARGZ_MODE:
-            return "%s-sgz" % repo
+        elif self.mode == ESTARGZ_NOOPT_MODE:
+            return "%s-esgz-noopt" % repo
         else:
             return "%s-org" % repo
 
     def pull_subcmd(self):
         if self.lazypull():
-            return "rpull --skip-content-verify"
+            return "rpull"
         else:
             return "pull"
         
@@ -362,8 +362,8 @@ class BenchRunner:
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
-        self.mode = STARGZ_MODE
-        cmd = '%s --stargz-only %s %s/%s' % (self.optimizer, repo, self.repository, self.add_suffix(repo))
+        self.mode = ESTARGZ_NOOPT_MODE
+        cmd = '%s --no-optimize %s %s/%s' % (self.optimizer, repo, self.repository, self.add_suffix(repo))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -403,7 +403,7 @@ def main():
         print '--list-json'
         print '--experiments'
         print '--op=(prepare|run)'
-        print '--mode=(%s|%s|%s)' % (LEGACY_MODE, STARGZ_MODE, ESTARGZ_MODE)
+        print '--mode=(%s|%s|%s)' % (LEGACY_MODE, ESTARGZ_NOOPT_MODE, ESTARGZ_MODE)
         exit(1)
 
     benches = []
