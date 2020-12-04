@@ -211,4 +211,8 @@ diff --no-dereference -qr "${USR_NOMALSN_UNSTARGZ}/" "${USR_STARGZSN_UNSTARGZ}/"
 echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, stargzified rootfs)"
 diff --no-dereference -qr "${USR_NOMALSN_STARGZ}/" "${USR_STARGZSN_STARGZ}/"
 
+# Try to pull this image from different namespace.
+ctr-remote --namespace=dummy images rpull --user "${DUMMYUSER}:${DUMMYPASS}" \
+           "${REGISTRY_HOST}:5000/ubuntu:stargz"
+
 exit 0
