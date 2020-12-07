@@ -13,7 +13,7 @@ This optimization is done by baking the information about files that are likely 
 On runtime, Stargz Snapshotter prefetches these prioritized files before mounting the layer for making sure these files are locally accessible.
 This can avoid downloading chunks on every file read and mitigate the runtime performance drawbacks.
 
-For more details about eStargz and its optimization, refer also to the [doc about image formats](/docs/stargz-estargz.md).
+For more details about eStargz and its optimization, refer also to [eStargz: Standard-Compatible Extensions to Tar.gz Layers for Lazy Pulling Container Images](/docs/stargz-estargz.md).
 
 ## Requirements
 

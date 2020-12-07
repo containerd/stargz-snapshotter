@@ -13,12 +13,12 @@ However, an eStargz layer is **lazily** pulled from the registry in file (or chu
 So it's not possible to recalculate and verify the digest of the entire layer on mount.
 Assuming that the manifest referencing the eStargz layer has already been verified, we verify that eStargz layer as the following.
 
-When stargz snapshotter lazily pulls an eStargz (or stargz) layer, the following components will be fetched from the registry.
+When stargz snapshotter lazily pulls an eStargz layer, the following components will be fetched from the registry.
 
 - TOC (a set of metadata of all files contained in the layer)
 - chunks of regular file contents
 
-As mentioned in [stargz and eStargz documentation](/docs/stargz-estargz.md), eStargz (and stargz) contains an index file called _TOC_.
+As mentioned in [eStargz documentation](/docs/stargz-estargz.md), eStargz contains an index file called _TOC_.
 Not only offset information of file entries, it [contains metadata (name, type, mode, etc.) of all files contained in the layer blob](https://github.com/google/crfs/blob/71d77da419c90be7b05d12e59945ac7a8c94a543/stargz/stargz.go#L214-L218).
 On mount the layer, filesystem fetches the TOC from the registry.
 For making the TOC verifiable using the manifest, we define an [_annotation_](https://github.com/opencontainers/image-spec/blob/v1.0.1/descriptor.md#properties) `containerd.io/snapshot/stargz/toc.digest`.
@@ -32,14 +32,14 @@ For making each chunk verifiable using the manifest, eStargz extends the TOCEntr
 As mentioned in the above, the TOC is verifiable using the manifest with the special annotation.
 So using `chunkDigest` fields, filesystem can verify each chunk by recalculating the digest and compare it to the one written in the verified TOC.
 
-If the following conditions meet, an eStargz layer is verifiable.
+As the conclusion, the following conditions must meet for eStargz.
 
 - the digest of the TOC is contained in the annotation(`containerd.io/snapshot/stargz/toc.digest`) of descriptors that references this layer, and
 - `chunkDigest` fields of all chunks in the TOC is filled with the digests of their contents.
 
 `ctr-remote images optimize` command in this project creates the verifiable eStargz image by default.
 
-## Content verification in Stargz Snapshotter
+## Example usecase: Content verification in Stargz Snapshotter
 
 Stargz Snapshotter verifies eStargz layers leveraging the above extensions.
 However, as mentioned in the above, the verification of other image component including the manifests is out-of-scope of the snapshotter.
