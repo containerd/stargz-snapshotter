@@ -45,8 +45,8 @@ import (
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sampler"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
-	"github.com/google/crfs/stargz"
 	"github.com/google/go-containerregistry/pkg/authn"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -76,10 +76,6 @@ var OptimizeCommand = cli.Command{
 		cli.BoolFlag{
 			Name:  "plain-http",
 			Usage: "allow HTTP connections to the registry which has the prefix \"http://\"",
-		},
-		cli.BoolFlag{
-			Name:  "stargz-only",
-			Usage: "only stargzify and do not optimize layers",
 		},
 		cli.BoolFlag{
 			Name:  "reuse",
@@ -384,27 +380,7 @@ func convertImage(ctx gocontext.Context, clicontext *cli.Context, srcImg regpkg.
 		return nil, errors.Wrap(err, "failed to get image layers")
 	}
 	addendums := make([]mutate.Addendum, len(layers))
-	if clicontext.Bool("stargz-only") {
-		// TODO: enable to reuse layers
-		var eg errgroup.Group
-		var addendumsMu sync.Mutex
-		for i, l := range layers {
-			i, l := i, l
-			eg.Go(func() error {
-				newL, err := buildStargzLayer(l, tf)
-				if err != nil {
-					return err
-				}
-				addendumsMu.Lock()
-				addendums[i] = mutate.Addendum{Layer: newL}
-				addendumsMu.Unlock()
-				return nil
-			})
-		}
-		if err := eg.Wait(); err != nil {
-			return nil, errors.Wrapf(err, "failed to convert layer to stargz")
-		}
-	} else if clicontext.Bool("no-optimize") || !platforms.NewMatcher(platforms.DefaultSpec()).Match(*platform) {
+	if clicontext.Bool("no-optimize") || !platforms.NewMatcher(platforms.DefaultSpec()).Match(*platform) {
 		// Do not run the optimization container if the option requires it or
 		// the source image doesn't match to the platform where this command runs on.
 		log.G(ctx).Warn("Platform mismatch or optimization disabled; converting without optimization")
@@ -701,27 +677,6 @@ func converters(cs ...func() (mutate.Addendum, error)) func() (mutate.Addendum, 
 		}
 		return
 	}
-}
-
-func buildStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regpkg.Layer, error) {
-	r, err := uncompressed.Uncompressed()
-	if err != nil {
-		return nil, err
-	}
-	pr, pw := io.Pipe()
-	go func() {
-		w := stargz.NewWriter(pw)
-		if err := w.AppendTar(r); err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-		if err := w.Close(); err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-		pw.Close()
-	}()
-	return newStaticCompressedLayer(pr, tf)
 }
 
 func buildEStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regpkg.Layer, ocidigest.Digest, error) {

@@ -22,7 +22,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/google/crfs/stargz"
+	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 )

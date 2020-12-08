@@ -19,7 +19,6 @@ require (
 	github.com/docker/docker v17.12.0-ce-rc1.0.20200730172259-9f28837c1d93+incompatible
 	github.com/gogo/googleapis v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
-	github.com/google/crfs v0.0.0-20191108021818-71d77da419c9
 	github.com/google/go-containerregistry v0.1.2
 	github.com/hanwen/go-fuse/v2 v2.0.3
 	github.com/hashicorp/go-multierror v1.0.0

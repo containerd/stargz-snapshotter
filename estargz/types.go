@@ -19,7 +19,7 @@ package estargz
 import (
 	"io"
 
-	"github.com/google/crfs/stargz"
+	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 	digest "github.com/opencontainers/go-digest"
 )
 
@@ -38,17 +38,14 @@ const (
 )
 
 // jtoc is a TOC JSON schema which contains additional fields for chunk-level
-// content verification. This is still backward compatible to the official
-// definition:
-// https://github.com/google/crfs/blob/71d77da419c90be7b05d12e59945ac7a8c94a543/stargz/stargz.go
+// content verification.
 type jtoc struct {
 
 	// Version is a field to store the version information of TOC JSON.
 	Version int `json:"version"`
 
 	// Entries is a field to store TOCEntries in this archive. These TOCEntries
-	// are extended in this package for content verification, with keeping the
-	// backward-compatibility with stargz.
+	// are extended in this package for content verification.
 	Entries []*TOCEntry `json:"entries"`
 }
 
@@ -62,7 +59,7 @@ type TOCEntry struct {
 	ChunkDigest string `json:"chunkDigest,omitempty"`
 }
 
-// stargzBlob is a structured view of a stargz blob
+// stargzBlob is a structured view of a eStargz blob
 type stargzBlob struct {
 	// jtoc is a decoded TOC JSON struct
 	jtoc *jtoc
