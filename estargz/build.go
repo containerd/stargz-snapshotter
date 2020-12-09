@@ -27,9 +27,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 	"github.com/containerd/stargz-snapshotter/util/positionwatcher"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
-	"github.com/google/crfs/stargz"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"

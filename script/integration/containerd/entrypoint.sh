@@ -35,6 +35,8 @@ USR_NOMALSN_UNSTARGZ=$(mktemp -d)
 USR_NOMALSN_STARGZ=$(mktemp -d)
 USR_STARGZSN_UNSTARGZ=$(mktemp -d)
 USR_STARGZSN_STARGZ=$(mktemp -d)
+USR_NORMALSN_PLAIN_STARGZ=$(mktemp -d)
+USR_STARGZSN_PLAIN_STARGZ=$(mktemp -d)
 LOG_FILE=$(mktemp)
 function cleanup {
     ORG_EXIT_CODE="${1}"
@@ -45,6 +47,8 @@ function cleanup {
     rm -rf "${USR_NOMALSN_STARGZ}" || true
     rm -rf "${USR_STARGZSN_UNSTARGZ}" || true
     rm -rf "${USR_STARGZSN_STARGZ}" || true
+    rm -rf "${USR_NORMALSN_PLAIN_STARGZ}" || true
+    rm -rf "${USR_STARGZSN_PLAIN_STARGZ}" || true
     rm "${LOG_FILE}"
     exit "${ORG_EXIT_CODE}"
 }
@@ -80,6 +84,11 @@ CONTAINERD_ROOT=/var/lib/containerd/
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
 function reboot_containerd {
+    local CONFIG="${1:-}"
+    if [ "${CONFIG}" == "" ] ; then
+        CONFIG=/etc/containerd-stargz-grpc/config.toml
+    fi
+
     kill_all "containerd"
     kill_all "containerd-stargz-grpc"
     rm -rf "${CONTAINERD_ROOT}"*
@@ -93,7 +102,7 @@ function reboot_containerd {
     rm -rf "${REMOTE_SNAPSHOTTER_ROOT}"*
     containerd-stargz-grpc --log-level=debug \
                            --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
-                           --config=/etc/containerd-stargz-grpc/config.toml \
+                           --config="${CONFIG}" \
                            2>&1 | tee -a "${LOG_FILE}" & # Dump all log
     retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
     containerd --log-level debug --config=/etc/containerd/config.toml &
@@ -108,9 +117,10 @@ retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 echo "Preparing images..."
 crane copy ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
 crane copy alpine:3.10.2 "${REGISTRY_HOST}:5000/alpine:3.10.2"
-ctr-remote image optimize "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:stargz"
-ctr-remote image optimize "${REGISTRY_HOST}:5000/alpine:3.10.2" "${REGISTRY_HOST}:5000/alpine:stargz"
-ctr-remote image optimize --plain-http "${REGISTRY_HOST}:5000/alpine:3.10.2" "http://${REGISTRY_ALT_HOST}:5000/alpine:stargz"
+stargzify "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:sgz"
+ctr-remote image optimize "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:esgz"
+ctr-remote image optimize "${REGISTRY_HOST}:5000/alpine:3.10.2" "${REGISTRY_HOST}:5000/alpine:esgz"
+ctr-remote image optimize --plain-http "${REGISTRY_HOST}:5000/alpine:3.10.2" "http://${REGISTRY_ALT_HOST}:5000/alpine:esgz"
 
 ############
 # Tests for stargz snapshotter
@@ -132,12 +142,12 @@ echo "Testing refreshing and mirror..."
 
 reboot_containerd
 echo "Getting image with normal snapshotter..."
-ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/alpine:stargz"
-ctr-remote run --rm "${REGISTRY_HOST}:5000/alpine:stargz" test tar -c /usr | tar -xC "${USR_ORG}"
+ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/alpine:esgz"
+ctr-remote run --rm "${REGISTRY_HOST}:5000/alpine:esgz" test tar -c /usr | tar -xC "${USR_ORG}"
 
 echo "Getting image with stargz snapshotter..."
 echo -n "" > "${LOG_FILE}"
-ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/alpine:stargz"
+ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/alpine:esgz"
 check_remote_snapshots "${LOG_FILE}"
 
 REGISTRY_HOST_IP=$(getent hosts "${REGISTRY_HOST}" | awk '{ print $1 }')
@@ -146,21 +156,21 @@ REGISTRY_ALT_HOST_IP=$(getent hosts "${REGISTRY_ALT_HOST}" | awk '{ print $1 }')
 echo "Disabling source registry and check if mirroring is working for stargz snapshotter..."
 iptables -A OUTPUT -d "${REGISTRY_HOST_IP}" -j DROP
 iptables -L
-ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/alpine:stargz" test tar -c /usr \
+ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/alpine:esgz" test tar -c /usr \
     | tar -xC "${USR_MIRROR}"
 iptables -D OUTPUT -d "${REGISTRY_HOST_IP}" -j DROP
 
 echo "Disabling mirror registry and check if refreshing works for stargz snapshotter..."
 iptables -A OUTPUT -d "${REGISTRY_ALT_HOST_IP}" -j DROP
 iptables -L
-ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/alpine:stargz" test tar -c /usr \
+ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/alpine:esgz" test tar -c /usr \
     | tar -xC "${USR_REFRESH}"
 iptables -D OUTPUT -d "${REGISTRY_ALT_HOST_IP}" -j DROP
 
 echo "Disabling all registries and running container should fail"
 iptables -A OUTPUT -d "${REGISTRY_HOST_IP}","${REGISTRY_ALT_HOST_IP}" -j DROP
 iptables -L
-if ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/alpine:stargz" test tar -c /usr > /usr_dummy_fail.tar ; then
+if ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/alpine:esgz" test tar -c /usr > /usr_dummy_fail.tar ; then
     echo "All registries are disabled so this must be failed"
     exit 1
 else
@@ -191,28 +201,50 @@ ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/ubuntu:18.04" te
     | tar -xC "${USR_STARGZSN_UNSTARGZ}"
 
 reboot_containerd
-echo "Getting stargz image with normal snapshotter..."
-ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:stargz"
-ctr-remote run --rm "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr \
+echo "Getting eStargz image with normal snapshotter..."
+ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:esgz"
+ctr-remote run --rm "${REGISTRY_HOST}:5000/ubuntu:esgz" test tar -c /usr \
     | tar -xC "${USR_NOMALSN_STARGZ}"
 
 reboot_containerd
-echo "Getting stargz image with stargz snapshotter..."
+echo "Getting eStargz image with stargz snapshotter..."
 echo -n "" > "${LOG_FILE}"
-ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:stargz"
+ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:esgz"
 check_remote_snapshots "${LOG_FILE}"
-
-ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/ubuntu:stargz" test tar -c /usr \
+ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/ubuntu:esgz" test tar -c /usr \
     | tar -xC "${USR_STARGZSN_STARGZ}"
 
 echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, normal rootfs)"
 diff --no-dereference -qr "${USR_NOMALSN_UNSTARGZ}/" "${USR_STARGZSN_UNSTARGZ}/"
 
-echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, stargzified rootfs)"
+echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, eStargz rootfs)"
 diff --no-dereference -qr "${USR_NOMALSN_STARGZ}/" "${USR_STARGZSN_STARGZ}/"
 
+############
+# Checking compatibility with plain stargz
+
+reboot_containerd
+echo "Getting (legacy) stargz image with normal snapshotter..."
+ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:sgz"
+ctr-remote run --rm "${REGISTRY_HOST}:5000/ubuntu:sgz" test tar -c /usr \
+    | tar -xC "${USR_NORMALSN_PLAIN_STARGZ}"
+
+echo "Getting (legacy) stargz image with stargz snapshotter..."
+echo "disable_verification = true" > /tmp/config.noverify.toml
+cat /etc/containerd-stargz-grpc/config.toml >> /tmp/config.noverify.toml
+reboot_containerd /tmp/config.noverify.toml
+echo -n "" > "${LOG_FILE}"
+ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:sgz"
+check_remote_snapshots "${LOG_FILE}"
+ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}:5000/ubuntu:sgz" test tar -c /usr \
+    | tar -xC "${USR_STARGZSN_PLAIN_STARGZ}"
+
+echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, plain stargz rootfs)"
+diff --no-dereference -qr "${USR_NORMALSN_PLAIN_STARGZ}/" "${USR_STARGZSN_PLAIN_STARGZ}/"
+
+############
 # Try to pull this image from different namespace.
 ctr-remote --namespace=dummy images rpull --user "${DUMMYUSER}:${DUMMYPASS}" \
-           "${REGISTRY_HOST}:5000/ubuntu:stargz"
+           "${REGISTRY_HOST}:5000/ubuntu:esgz"
 
 exit 0

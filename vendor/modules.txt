@@ -210,8 +210,6 @@ github.com/golang/protobuf/ptypes
 github.com/golang/protobuf/ptypes/any
 github.com/golang/protobuf/ptypes/duration
 github.com/golang/protobuf/ptypes/timestamp
-# github.com/google/crfs v0.0.0-20191108021818-71d77da419c9
-github.com/google/crfs/stargz
 # github.com/google/go-cmp v0.4.1
 github.com/google/go-cmp/cmp
 github.com/google/go-cmp/cmp/internal/diff

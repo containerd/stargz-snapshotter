@@ -57,6 +57,7 @@ import (
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
@@ -64,7 +65,6 @@ import (
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/golang/groupcache/lru"
-	"github.com/google/crfs/stargz"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
@@ -1062,7 +1062,7 @@ func entryToAttr(e *stargz.TOCEntry, out *fuse.Attr) fusefs.StableAttr {
 	mtime := e.ModTime()
 	out.SetTimes(nil, &mtime, nil)
 	out.Mode = modeOfEntry(e)
-	out.Owner = fuse.Owner{Uid: uint32(e.Uid), Gid: uint32(e.Gid)}
+	out.Owner = fuse.Owner{Uid: uint32(e.UID), Gid: uint32(e.GID)}
 	out.Rdev = uint32(unix.Mkdev(uint32(e.DevMajor), uint32(e.DevMinor)))
 	out.Nlink = uint32(e.NumLink)
 	if out.Nlink == 0 {

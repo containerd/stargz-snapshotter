@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/crfs/stargz"
+	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 )
 
 // TestBuild tests the resulting stargz blob built by this pkg has the same
@@ -367,8 +367,8 @@ func equalEntry(a, b *stargz.TOCEntry) bool {
 		a.Stat().ModTime().Equal(b.Stat().ModTime()) && // modTime     time.Time
 		a.LinkName == b.LinkName &&
 		a.Mode == b.Mode &&
-		a.Uid == b.Uid &&
-		a.Gid == b.Gid &&
+		a.UID == b.UID &&
+		a.GID == b.GID &&
 		a.Uname == b.Uname &&
 		a.Gname == b.Gname &&
 		(a.Offset > 0) == (b.Offset > 0) &&
