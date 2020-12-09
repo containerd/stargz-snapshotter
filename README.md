@@ -69,7 +69,7 @@ $ kind create cluster --name stargz-demo --image stargz-kind-node
 ```
 
 Then you can create eStargz pods on the cluster.
-In this example, we create a stargz-converted Node.js pod (`ghcr.io/stargz-containers/node:13.13-esgz`) as a demo.
+In this example, we create a stargz-converted Node.js pod (`ghcr.io/stargz-containers/node:13.13.0-esgz`) as a demo.
 
 ```yaml
 apiVersion: v1
