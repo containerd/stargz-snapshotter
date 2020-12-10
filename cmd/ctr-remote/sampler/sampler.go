@@ -70,7 +70,7 @@ func Run(ctx context.Context, bundle string, config v1.Image, opts ...Option) er
 	}
 
 	// run the container
-	if err := runContainer(ctx, bundle); err != nil {
+	if err := runContainer(ctx, bundle, opt.waitOnSignal); err != nil {
 		return errors.Wrap(err, "failed to run containers")
 	}
 
@@ -334,7 +334,7 @@ func conf2spec(config v1.ImageConfig, rootfs string, opt options) (spec specs.Sp
 	return s, done, nil
 }
 
-func runContainer(ctx context.Context, bundle string) error {
+func runContainer(ctx context.Context, bundle string, ignoreCtxCancel bool) error {
 	runtime := &runc.Runc{
 		Log:          filepath.Join(bundle, "runc-log.json"),
 		LogFormat:    runc.JSON,
@@ -361,7 +361,6 @@ func runContainer(ctx context.Context, bundle string) error {
 	}()
 
 	// Wait until context is canceled or signal is detected
-	log.G(ctx).Debugf("waiting for the termination of container %q", id)
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
@@ -369,13 +368,24 @@ func runContainer(ctx context.Context, bundle string) error {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 	defer signal.Stop(sc)
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		log.G(ctx).Info("context canceled")
-	case <-sc:
-		log.G(ctx).Info("signal detected")
+	if ignoreCtxCancel {
+		log.G(ctx).Infof("press Ctrl+C to terminate the container %q", id)
+		select {
+		case <-done:
+			return nil
+		case <-sc:
+			log.G(ctx).Info("signal detected")
+		}
+	} else {
+		log.G(ctx).Debugf("waiting for the termination of container %q", id)
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			log.G(ctx).Info("context canceled")
+		case <-sc:
+			log.G(ctx).Info("signal detected")
+		}
 	}
 
 	// Kill the container
