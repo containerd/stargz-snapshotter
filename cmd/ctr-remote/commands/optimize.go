@@ -85,6 +85,10 @@ var OptimizeCommand = cli.Command{
 			Name:  "terminal,t",
 			Usage: "enable terminal for sample container",
 		},
+		cli.BoolFlag{
+			Name:  "wait-on-signal",
+			Usage: "ignore context cancel and keep the container running until it receives signal (Ctrl + C) sent manually",
+		},
 		cli.IntFlag{
 			Name:  "period",
 			Usage: "time period to monitor access log",
@@ -264,6 +268,9 @@ func parseArgs(clicontext *cli.Context) (opts []sampler.Option, err error) {
 	}
 	if clicontext.Bool("terminal") {
 		opts = append(opts, sampler.WithTerminal())
+	}
+	if clicontext.Bool("wait-on-signal") {
+		opts = append(opts, sampler.WithWaitOnSignal())
 	}
 	if nameservers := clicontext.String("dns-nameservers"); nameservers != "" {
 		fields, err := csv.NewReader(strings.NewReader(nameservers)).Read()

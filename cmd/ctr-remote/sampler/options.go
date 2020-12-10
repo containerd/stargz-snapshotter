@@ -25,6 +25,7 @@ type options struct {
 	user             string
 	workingDir       string
 	terminal         bool
+	waitOnSignal     bool
 	mounts           []string
 	dnsNameservers   []string
 	dnsSearchDomains []string
@@ -74,6 +75,12 @@ func WithWorkingDir(workingDir string) Option {
 func WithTerminal() Option {
 	return func(opts *options) {
 		opts.terminal = true
+	}
+}
+
+func WithWaitOnSignal() Option {
+	return func(opts *options) {
+		opts.waitOnSignal = true
 	}
 }
 
