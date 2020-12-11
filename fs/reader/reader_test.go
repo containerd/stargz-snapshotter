@@ -33,7 +33,6 @@ import (
 
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 	digest "github.com/opencontainers/go-digest"
 )
 
@@ -124,7 +123,7 @@ type testTOCEntryVerifier struct {
 	success bool
 }
 
-func (bev *testTOCEntryVerifier) Verifier(ce *stargz.TOCEntry) (digest.Verifier, error) {
+func (bev *testTOCEntryVerifier) Verifier(ce *estargz.TOCEntry) (digest.Verifier, error) {
 	return &testVerifier{bev.success}, nil
 }
 
@@ -306,7 +305,11 @@ func makeFile(t *testing.T, contents []byte, chunkSize int64) *file {
 		regfile(testName, string(contents)),
 	}, chunkSizeInfo(chunkSize))
 
-	ev, err := estargz.VerifyStargzTOC(sr, dgst)
+	sgz, err := estargz.Open(sr)
+	if err != nil {
+		t.Fatalf("failed to parse converted stargz: %v", err)
+	}
+	ev, err := sgz.VerifyTOC(dgst)
 	if err != nil {
 		t.Fatalf("failed to verify stargz: %v", err)
 	}
@@ -391,11 +394,12 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), dgst
 }
 
-func newReader(sr *io.SectionReader, cache cache.BlobCache, ev estargz.TOCEntryVerifier) (*reader, *stargz.TOCEntry, error) {
+func newReader(sr *io.SectionReader, cache cache.BlobCache, ev estargz.TOCEntryVerifier) (*reader, *estargz.TOCEntry, error) {
 	var r *reader
 	vr, root, err := NewReader(sr, cache)
 	if vr != nil {
-		r = vr(ev).(*reader)
+		r = vr.r
+		r.verifier = ev
 	}
 	return r, root, err
 }
