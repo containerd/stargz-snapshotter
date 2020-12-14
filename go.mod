@@ -12,6 +12,7 @@ require (
 	github.com/containerd/fifo v0.0.0-20201026212402-0724c46b320c // indirect
 	github.com/containerd/go-cni v1.0.1
 	github.com/containerd/go-runc v0.0.0-20200220073739-7016d3ce2328
+	github.com/containerd/stargz-snapshotter/estargz v0.0.0-00010101000000-000000000000
 	github.com/containerd/ttrpc v1.0.1 // indirect
 	github.com/containerd/typeurl v1.0.1 // indirect
 	github.com/containernetworking/plugins v0.8.7 // indirect
@@ -21,7 +22,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
 	github.com/google/go-containerregistry v0.1.2
 	github.com/hanwen/go-fuse/v2 v2.0.3
-	github.com/hashicorp/go-multierror v1.0.0
+	github.com/hashicorp/go-multierror v1.1.0
 	github.com/moby/sys/symlink v0.1.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
@@ -31,7 +32,7 @@ require (
 	github.com/rs/xid v1.2.1
 	github.com/sirupsen/logrus v1.6.0
 	github.com/urfave/cli v1.22.2
-	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
+	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
 	golang.org/x/sys v0.0.0-20200922070232-aee5d888a860
 	google.golang.org/grpc v1.29.1
 	gotest.tools/v3 v3.0.2 // indirect
@@ -40,6 +41,11 @@ require (
 	k8s.io/client-go v0.19.0
 )
 
-// NOTE: github.com/containerd/containerd v1.4.0 depends on github.com/urfave/cli v1.22.1
-//       because of https://github.com/urfave/cli/issues/1092
-replace github.com/urfave/cli => github.com/urfave/cli v1.22.1
+replace (
+	// Import local package for estargz.
+	github.com/containerd/stargz-snapshotter/estargz => ./estargz
+
+	// NOTE: github.com/containerd/containerd v1.4.0 depends on github.com/urfave/cli v1.22.1
+	//       because of https://github.com/urfave/cli/issues/1092
+	github.com/urfave/cli => github.com/urfave/cli v1.22.1
+)
