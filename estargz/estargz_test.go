@@ -14,11 +14,13 @@
    limitations under the License.
 */
 
-// Copyright 2019 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+   Copyright 2019 The Go Authors. All rights reserved.
+   Use of this source code is governed by a BSD-style
+   license that can be found in the LICENSE file.
+*/
 
-package stargz
+package estargz
 
 import (
 	"archive/tar"
@@ -45,7 +47,7 @@ func TestFooter(t *testing.T) {
 }
 
 func checkFooter(t *testing.T, off int64) {
-	footer := FooterBytes(off)
+	footer := footerBytes(off)
 	if len(footer) != FooterSize {
 		t.Fatalf("for offset %v, footer length was %d, not expected %d. got bytes: %q", off, len(footer), FooterSize, footer)
 	}
@@ -58,7 +60,7 @@ func checkFooter(t *testing.T, off int64) {
 		t.Fatalf("invalid footer size %d; want %d", size, FooterSize)
 	}
 	if got != off {
-		t.Fatalf("ParseFooter(FooterBytes(offset %d)) = %d; want %d", off, got, off)
+		t.Fatalf("ParseFooter(footerBytes(offset %d)) = %d; want %d", off, got, off)
 
 	}
 }
@@ -266,7 +268,7 @@ func TestWriteAndOpen(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr, cancel := buildTarGz(t, tt.in)
+			tr, cancel := buildTar(t, tt.in)
 			defer cancel()
 			var stargzBuf bytes.Buffer
 			w := NewWriter(&stargzBuf)
@@ -274,7 +276,7 @@ func TestWriteAndOpen(t *testing.T) {
 			if err := w.AppendTar(tr); err != nil {
 				t.Fatalf("Append: %v", err)
 			}
-			if err := w.Close(); err != nil {
+			if _, err := w.Close(); err != nil {
 				t.Fatalf("Writer.Close: %v", err)
 			}
 			b := stargzBuf.Bytes()
@@ -595,7 +597,7 @@ type tarEntryFunc func(*tar.Writer) error
 
 func (f tarEntryFunc) appendTar(tw *tar.Writer) error { return f(tw) }
 
-func buildTarGz(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
+func buildTar(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
 	pr, pw := io.Pipe()
 	go func() {
 		tw := tar.NewWriter(pw)
@@ -612,6 +614,21 @@ func buildTarGz(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
 		pw.Close()
 	}()
 	return pr, func() { go pr.Close(); go pw.Close() }
+}
+
+func buildTarStatic(t *testing.T, ents []tarEntry) *io.SectionReader {
+	buf := new(bytes.Buffer)
+	tw := tar.NewWriter(buf)
+	for _, ent := range ents {
+		if err := ent.appendTar(tw); err != nil {
+			t.Fatalf("building input tar: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Errorf("closing write of input tar: %v", err)
+	}
+	data := buf.Bytes()
+	return io.NewSectionReader(bytes.NewReader(data), 0, int64(len(data)))
 }
 
 func dir(name string, opts ...interface{}) tarEntry {

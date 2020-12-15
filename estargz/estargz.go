@@ -14,21 +14,13 @@
    limitations under the License.
 */
 
-// Copyright 2019 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+/*
+   Copyright 2019 The Go Authors. All rights reserved.
+   Use of this source code is governed by a BSD-style
+   license that can be found in the LICENSE file.
+*/
 
-// The stargz package reads & writes tar.gz ("tarball") files in a
-// seekable, indexed format call "stargz". A stargz file is still a
-// valid tarball, but it's slightly bigger with new gzip streams for
-// each new file & throughout large files, and has an index in a magic
-// file at the end.
-
-package stargz
-
-// Low-level components for building/parsing eStargz.
-// This is the modified version of stargz library (https://github.com/google/crfs)
-// following eStargz specification.
+package estargz
 
 import (
 	"archive/tar"
@@ -47,51 +39,19 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
+	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 )
 
-// TOCTarName is the name of the JSON file in the tar archive in the
-// table of contents gzip stream.
-const TOCTarName = "stargz.index.json"
-
-// FooterSize is the number of bytes in the footer
-//
-// The footer is an empty gzip stream with no compression and an Extra
-// header of the form "%016xSTARGZ", where the 64 bit hex-encoded
-// number is the offset to the gzip stream of JSON TOC.
-//
-// 51 comes from:
-//
-// 10 bytes  gzip header
-// 2  bytes  XLEN (length of Extra field) = 26 (4 bytes header + 16 hex digits + len("STARGZ"))
-// 2  bytes  Extra: SI1 = 'S', SI2 = 'G'
-// 2  bytes  Extra: LEN = 22 (16 hex digits + len("STARGZ"))
-// 22 bytes  Extra: subfield = fmt.Sprintf("%016xSTARGZ", offsetOfTOC)
-// 5  bytes  flate header
-// 8  bytes  gzip footer
-// (End of the eStargz blob)
-//
-// NOTE: For Extra fields, subfield IDs SI1='S' SI2='G' is used for eStargz.
-const FooterSize = 51
-
-// legacyFooterSize is the number of bytes in the legacy stargz footer.
-//
-// 47 comes from:
-//
-//   10 byte gzip header +
-//   2 byte (LE16) length of extra, encoding 22 (16 hex digits + len("STARGZ")) == "\x16\x00" +
-//   22 bytes of extra (fmt.Sprintf("%016xSTARGZ", tocGzipOffset))
-//   5 byte flate header
-//   8 byte gzip footer (two little endian uint32s: digest, size)
-const legacyFooterSize = 47
-
 // A Reader permits random access reads from a stargz file.
 type Reader struct {
-	sr  *io.SectionReader
-	toc *jtoc
+	sr        *io.SectionReader
+	toc       *jtoc
+	tocDigest digest.Digest
 
 	// m stores all non-chunk entries, keyed by name.
 	m map[string]*TOCEntry
@@ -125,11 +85,12 @@ func Open(sr *io.SectionReader) (*Reader, error) {
 	if h.Name != TOCTarName {
 		return nil, fmt.Errorf("TOC tar entry had name %q; expected %q", h.Name, TOCTarName)
 	}
+	dgstr := digest.Canonical.Digester()
 	toc := new(jtoc)
-	if err := json.NewDecoder(tr).Decode(&toc); err != nil {
+	if err := json.NewDecoder(io.TeeReader(tr, dgstr.Hash())).Decode(&toc); err != nil {
 		return nil, fmt.Errorf("error decoding TOC JSON: %v", err)
 	}
-	r := &Reader{sr: sr, toc: toc}
+	r := &Reader{sr: sr, toc: toc, tocDigest: dgstr.Digest()}
 	if err := r.initFields(); err != nil {
 		return nil, fmt.Errorf("failed to initialize fields of entries: %v", err)
 	}
@@ -148,165 +109,6 @@ func OpenFooter(sr *io.SectionReader) (tocOffset int64, footerSize int64, rErr e
 		return 0, 0, fmt.Errorf("error reading footer: %v", err)
 	}
 	return parseFooter(footer[:])
-}
-
-// TOCEntry is an entry in the stargz file's TOC (Table of Contents).
-type TOCEntry struct {
-	// Name is the tar entry's name. It is the complete path
-	// stored in the tar file, not just the base name.
-	Name string `json:"name"`
-
-	// Type is one of "dir", "reg", "symlink", "hardlink", "char",
-	// "block", "fifo", or "chunk".
-	// The "chunk" type is used for regular file data chunks past the first
-	// TOCEntry; the 2nd chunk and on have only Type ("chunk"), Offset,
-	// ChunkOffset, and ChunkSize populated.
-	Type string `json:"type"`
-
-	// Size, for regular files, is the logical size of the file.
-	Size int64 `json:"size,omitempty"`
-
-	// ModTime3339 is the modification time of the tar entry. Empty
-	// means zero or unknown. Otherwise it's in UTC RFC3339
-	// format. Use the ModTime method to access the time.Time value.
-	ModTime3339 string `json:"modtime,omitempty"`
-	modTime     time.Time
-
-	// LinkName, for symlinks and hardlinks, is the link target.
-	LinkName string `json:"linkName,omitempty"`
-
-	// Mode is the permission and mode bits.
-	Mode int64 `json:"mode,omitempty"`
-
-	// UID is the user ID of the owner.
-	UID int `json:"uid,omitempty"`
-
-	// GID is the group ID of the owner.
-	GID int `json:"gid,omitempty"`
-
-	// Uname is the username of the owner.
-	//
-	// In the serialized JSON, this field may only be present for
-	// the first entry with the same UID.
-	Uname string `json:"userName,omitempty"`
-
-	// Gname is the group name of the owner.
-	//
-	// In the serialized JSON, this field may only be present for
-	// the first entry with the same GID.
-	Gname string `json:"groupName,omitempty"`
-
-	// Offset, for regular files, provides the offset in the
-	// stargz file to the file's data bytes. See ChunkOffset and
-	// ChunkSize.
-	Offset int64 `json:"offset,omitempty"`
-
-	nextOffset int64 // the Offset of the next entry with a non-zero Offset
-
-	// DevMajor is the major device number for "char" and "block" types.
-	DevMajor int `json:"devMajor,omitempty"`
-
-	// DevMinor is the major device number for "char" and "block" types.
-	DevMinor int `json:"devMinor,omitempty"`
-
-	// NumLink is the number of entry names pointing to this entry.
-	// Zero means one name references this entry.
-	NumLink int
-
-	// Xattrs are the extended attribute for the entry.
-	Xattrs map[string][]byte `json:"xattrs,omitempty"`
-
-	// Digest stores the OCI checksum for regular files payload.
-	// It has the form "sha256:abcdef01234....".
-	Digest string `json:"digest,omitempty"`
-
-	// ChunkOffset is non-zero if this is a chunk of a large,
-	// regular file. If so, the Offset is where the gzip header of
-	// ChunkSize bytes at ChunkOffset in Name begin.
-	//
-	// In serialized form, a "chunkSize" JSON field of zero means
-	// that the chunk goes to the end of the file. After reading
-	// from the stargz TOC, though, the ChunkSize is initialized
-	// to a non-zero file for when Type is either "reg" or
-	// "chunk".
-	ChunkOffset int64 `json:"chunkOffset,omitempty"`
-	ChunkSize   int64 `json:"chunkSize,omitempty"`
-
-	children map[string]*TOCEntry
-}
-
-// ModTime returns the entry's modification time.
-func (e *TOCEntry) ModTime() time.Time { return e.modTime }
-
-// NextOffset returns the position (relative to the start of the
-// stargz file) of the next gzip boundary after e.Offset.
-func (e *TOCEntry) NextOffset() int64 { return e.nextOffset }
-
-func (e *TOCEntry) addChild(baseName string, child *TOCEntry) {
-	if e.children == nil {
-		e.children = make(map[string]*TOCEntry)
-	}
-	if child.Type == "dir" {
-		e.NumLink++ // Entry ".." in the subdirectory links to this directory
-	}
-	e.children[baseName] = child
-}
-
-// isDataType reports whether TOCEntry is a regular file or chunk (something that
-// contains regular file data).
-func (e *TOCEntry) isDataType() bool { return e.Type == "reg" || e.Type == "chunk" }
-
-// jtoc is the JSON-serialized table of contents index of the files in the stargz file.
-type jtoc struct {
-	Version int         `json:"version"`
-	Entries []*TOCEntry `json:"entries"`
-}
-
-// Stat returns a FileInfo value representing e.
-func (e *TOCEntry) Stat() os.FileInfo { return fileInfo{e} }
-
-// ForeachChild calls f for each child item. If f returns false, iteration ends.
-// If e is not a directory, f is not called.
-func (e *TOCEntry) ForeachChild(f func(baseName string, ent *TOCEntry) bool) {
-	for name, ent := range e.children {
-		if !f(name, ent) {
-			return
-		}
-	}
-}
-
-// LookupChild returns the directory e's child by its base name.
-func (e *TOCEntry) LookupChild(baseName string) (child *TOCEntry, ok bool) {
-	child, ok = e.children[baseName]
-	return
-}
-
-// fileInfo implements os.FileInfo using the wrapped *TOCEntry.
-type fileInfo struct{ e *TOCEntry }
-
-var _ os.FileInfo = fileInfo{}
-
-func (fi fileInfo) Name() string       { return path.Base(fi.e.Name) }
-func (fi fileInfo) IsDir() bool        { return fi.e.Type == "dir" }
-func (fi fileInfo) Size() int64        { return fi.e.Size }
-func (fi fileInfo) ModTime() time.Time { return fi.e.ModTime() }
-func (fi fileInfo) Sys() interface{}   { return fi.e }
-func (fi fileInfo) Mode() (m os.FileMode) {
-	m = os.FileMode(fi.e.Mode) & os.ModePerm
-	switch fi.e.Type {
-	case "dir":
-		m |= os.ModeDir
-	case "symlink":
-		m |= os.ModeSymlink
-	case "char":
-		m |= os.ModeDevice | os.ModeCharDevice
-	case "block":
-		m |= os.ModeDevice
-	case "fifo":
-		m |= os.ModeNamedPipe
-	}
-	// TODO: ModeSetuid, ModeSetgid, if/as needed.
-	return m
 }
 
 // initFields populates the Reader from r.toc after decoding it from
@@ -434,6 +236,63 @@ func (r *Reader) getOrCreateDir(d string) *TOCEntry {
 		}
 	}
 	return e
+}
+
+// VerifyTOC checks that the TOC JSON in the passed blob matches the
+// passed digests and that the TOC JSON contains digests for all chunks
+// contained in the blob. If the verification succceeds, this function
+// returns TOCEntryVerifier which holds all chunk digests in the stargz blob.
+func (r *Reader) VerifyTOC(tocDigest digest.Digest) (TOCEntryVerifier, error) {
+	// Verify the digest of TOC JSON
+	if r.tocDigest != tocDigest {
+		return nil, fmt.Errorf("invalid TOC JSON %q; want %q", r.tocDigest, tocDigest)
+	}
+	digestMap := make(map[int64]digest.Digest) // map from chunk offset to the digest
+	for _, e := range r.toc.Entries {
+		if e.Type == "reg" || e.Type == "chunk" {
+			if e.Type == "reg" && e.Size == 0 {
+				continue // ignores empty file
+			}
+
+			// offset must be unique in stargz blob
+			if _, ok := digestMap[e.Offset]; ok {
+				return nil, fmt.Errorf("offset %d found twice", e.Offset)
+			}
+
+			// all chunk entries must contain digest
+			if e.ChunkDigest == "" {
+				return nil, fmt.Errorf("ChunkDigest of %q(off=%d) not found in TOC JSON",
+					e.Name, e.Offset)
+			}
+
+			d, err := digest.Parse(e.ChunkDigest)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to parse digest %q", e.ChunkDigest)
+			}
+			digestMap[e.Offset] = d
+		}
+	}
+
+	return &verifier{digestMap: digestMap}, nil
+}
+
+// verifier is an implementation of TOCEntryVerifier which holds verifiers keyed by
+// offset of the chunk.
+type verifier struct {
+	digestMap   map[int64]digest.Digest
+	digestMapMu sync.Mutex
+}
+
+// Verifier returns a content verifier specified by TOCEntry.
+func (v *verifier) Verifier(ce *TOCEntry) (digest.Verifier, error) {
+	v.digestMapMu.Lock()
+	defer v.digestMapMu.Unlock()
+	d, ok := v.digestMap[ce.Offset]
+	if !ok {
+		return nil, fmt.Errorf("verifier for offset=%d,size=%d hasn't been registered",
+			ce.Offset, ce.ChunkSize)
+	}
+	return d.Verifier(), nil
 }
 
 // ChunkEntryForOffset returns the TOCEntry containing the byte of the
@@ -625,14 +484,14 @@ func NewWriter(w io.Writer) *Writer {
 
 // Close writes the stargz's table of contents and flushes all the
 // buffers, returning any error.
-func (w *Writer) Close() error {
+func (w *Writer) Close() (digest.Digest, error) {
 	if w.closed {
-		return nil
+		return "", nil
 	}
 	defer func() { w.closed = true }()
 
 	if err := w.closeGz(); err != nil {
-		return err
+		return "", err
 	}
 
 	// Write the TOC index.
@@ -641,36 +500,36 @@ func (w *Writer) Close() error {
 	tw := tar.NewWriter(currentGzipWriter{w})
 	tocJSON, err := json.MarshalIndent(w.toc, "", "\t")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := tw.WriteHeader(&tar.Header{
 		Typeflag: tar.TypeReg,
 		Name:     TOCTarName,
 		Size:     int64(len(tocJSON)),
 	}); err != nil {
-		return err
+		return "", err
 	}
 	if _, err := tw.Write(tocJSON); err != nil {
-		return err
+		return "", err
 	}
 
 	if err := tw.Close(); err != nil {
-		return err
+		return "", err
 	}
 	if err := w.closeGz(); err != nil {
-		return err
+		return "", err
 	}
 
 	// And a little footer with pointer to the TOC gzip stream.
-	if _, err := w.bw.Write(FooterBytes(tocOff)); err != nil {
-		return err
+	if _, err := w.bw.Write(footerBytes(tocOff)); err != nil {
+		return "", err
 	}
 
 	if err := w.bw.Flush(); err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return digest.FromBytes(tocJSON), nil
 }
 
 func (w *Writer) closeGz() error {
@@ -791,16 +650,16 @@ func (w *Writer) AppendTar(r io.Reader) error {
 		// We need to keep a reference to the TOC entry for regular files, so that we
 		// can fill the digest later.
 		var regFileEntry *TOCEntry
-		var payloadDigest hash.Hash
+		var payloadDigest digest.Digester
 		if h.Typeflag == tar.TypeReg {
 			regFileEntry = ent
-			payloadDigest = sha256.New()
+			payloadDigest = digest.Canonical.Digester()
 		}
 
 		if h.Typeflag == tar.TypeReg && ent.Size > 0 {
 			var written int64
 			totalSize := ent.Size // save it before we destroy ent
-			tee := io.TeeReader(tr, payloadDigest)
+			tee := io.TeeReader(tr, payloadDigest.Hash())
 			for written < totalSize {
 				if err := w.closeGz(); err != nil {
 					return err
@@ -815,12 +674,15 @@ func (w *Writer) AppendTar(r io.Reader) error {
 				}
 				ent.Offset = w.cw.n
 				ent.ChunkOffset = written
+				chunkDigest := digest.Canonical.Digester()
 
 				w.condOpenGz()
 
-				if _, err := io.CopyN(tw, tee, chunkSize); err != nil {
+				teeChunk := io.TeeReader(tee, chunkDigest.Hash())
+				if _, err := io.CopyN(tw, teeChunk, chunkSize); err != nil {
 					return fmt.Errorf("error copying %q: %v", h.Name, err)
 				}
+				ent.ChunkDigest = chunkDigest.Digest().String()
 				w.toc.Entries = append(w.toc.Entries, ent)
 				written += chunkSize
 				ent = &TOCEntry{
@@ -832,7 +694,7 @@ func (w *Writer) AppendTar(r io.Reader) error {
 			w.toc.Entries = append(w.toc.Entries, ent)
 		}
 		if payloadDigest != nil {
-			regFileEntry.Digest = fmt.Sprintf("sha256:%x", payloadDigest.Sum(nil))
+			regFileEntry.Digest = payloadDigest.Digest().String()
 		}
 		if err := tw.Flush(); err != nil {
 			return err
@@ -847,8 +709,8 @@ func (w *Writer) DiffID() string {
 	return fmt.Sprintf("sha256:%x", w.diffHash.Sum(nil))
 }
 
-// FooterBytes returns the 51 bytes footer.
-func FooterBytes(tocOff int64) []byte {
+// footerBytes returns the 51 bytes footer.
+func footerBytes(tocOff int64) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, FooterSize))
 	gz, _ := gzip.NewWriterLevel(buf, gzip.NoCompression)
 

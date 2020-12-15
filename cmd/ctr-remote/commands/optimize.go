@@ -45,7 +45,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sampler"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
 	"github.com/google/go-containerregistry/pkg/authn"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
@@ -639,10 +638,11 @@ func converterFromTar(ctx context.Context, sr *io.SectionReader, mon logger.Moni
 
 func converterFromEStargz(ctx gocontext.Context, tocdgst ocidigest.Digest, l regpkg.Layer, sr *io.SectionReader, mon logger.Monitor) (func() (mutate.Addendum, error), error) {
 	// If the layer is valid eStargz, use this layer without conversion
-	if _, err := stargz.Open(sr); err != nil {
+	r, err := estargz.Open(sr)
+	if err != nil {
 		return nil, err
 	}
-	if _, err := estargz.VerifyStargzTOC(sr, tocdgst); err != nil {
+	if _, err := r.VerifyTOC(tocdgst); err != nil {
 		return nil, err
 	}
 	dgst, err := l.Digest()

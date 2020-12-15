@@ -45,7 +45,6 @@ import (
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/estargz/stargz"
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
@@ -67,8 +66,12 @@ const (
 
 func TestCheck(t *testing.T) {
 	bb := &breakBlob{}
-	l := newLayer(ocispec.Descriptor{}, bb, nopVerifiableReader, nil, time.Second)
-	l.skipVerify()
+	l := &layer{
+		blob:            bb,
+		r:               nopreader{},
+		prefetchWaiter:  newWaiter(),
+		prefetchTimeout: time.Second,
+	}
 	fs := &filesystem{
 		layer: map[string]*layer{
 			"test": l,
@@ -88,15 +91,11 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-func nopVerifiableReader(ev estargz.TOCEntryVerifier) reader.Reader {
-	return nopreader{}
-}
-
 type nopreader struct{}
 
-func (r nopreader) OpenFile(name string) (io.ReaderAt, error)   { return nil, nil }
-func (r nopreader) Lookup(name string) (*stargz.TOCEntry, bool) { return nil, false }
-func (r nopreader) Cache(opts ...reader.CacheOption) error      { return nil }
+func (r nopreader) OpenFile(name string) (io.ReaderAt, error)    { return nil, nil }
+func (r nopreader) Lookup(name string) (*estargz.TOCEntry, bool) { return nil, false }
+func (r nopreader) Cache(opts ...reader.CacheOption) error       { return nil }
 
 type breakBlob struct {
 	success bool
@@ -200,7 +199,7 @@ func TestNodeRead(t *testing.T) {
 func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 	testName := "test"
 	sgz, _ := buildStargz(t, []tarent{regfile(testName, string(contents))}, chunkSizeInfo(chunkSize))
-	r, err := stargz.Open(sgz)
+	r, err := estargz.Open(sgz)
 	if err != nil {
 		t.Fatal("failed to make stargz")
 	}
@@ -349,7 +348,7 @@ func TestExistence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sgz, _ := buildStargz(t, tt.in)
-			r, err := stargz.Open(sgz)
+			r, err := estargz.Open(sgz)
 			if err != nil {
 				t.Fatalf("stargz.Open: %v", err)
 			}
@@ -363,7 +362,7 @@ func TestExistence(t *testing.T) {
 
 var testStateLayerDigest = digest.FromString("dummy")
 
-func getRootNode(t *testing.T, r *stargz.Reader) *node {
+func getRootNode(t *testing.T, r *estargz.Reader) *node {
 	root, ok := r.Lookup("")
 	if !ok {
 		t.Fatalf("failed to find root in stargz")
@@ -378,7 +377,7 @@ func getRootNode(t *testing.T, r *stargz.Reader) *node {
 }
 
 type testLayer struct {
-	r *stargz.Reader
+	r *estargz.Reader
 }
 
 func (tl *testLayer) OpenFile(name string) (io.ReaderAt, error) {
@@ -434,14 +433,14 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 
 	if stargzOnly {
 		stargzBuf := new(bytes.Buffer)
-		w := stargz.NewWriter(stargzBuf)
+		w := estargz.NewWriter(stargzBuf)
 		if chunkSize > 0 {
 			w.ChunkSize = int(chunkSize)
 		}
 		if err := w.AppendTar(bytes.NewReader(tarData)); err != nil {
 			t.Fatalf("failed to append tar file to stargz: %q", err)
 		}
-		if err := w.Close(); err != nil {
+		if _, err := w.Close(); err != nil {
 			t.Fatalf("failed to close stargz writer: %q", err)
 		}
 		stargzData := stargzBuf.Bytes()

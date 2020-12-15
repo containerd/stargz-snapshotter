@@ -39,6 +39,7 @@ ctr-remote: FORCE
 check:
 	@echo "$@"
 	@GO111MODULE=$(GO111MODULE_VALUE) golangci-lint run
+	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) golangci-lint run
 
 install-check-tools:
 	@curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.19.1
@@ -59,6 +60,7 @@ clean:
 test:
 	@echo "$@"
 	@GO111MODULE=$(GO111MODULE_VALUE) go test -race ./...
+	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) go test -race ./...
 
 test-root:
 	@echo "$@"
