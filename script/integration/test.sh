@@ -66,11 +66,11 @@ RUN apt-get update -y && \
               \${GOPATH}/src/github.com/google/go-containerregistry && \
     cd \${GOPATH}/src/github.com/google/go-containerregistry && \
     git checkout eb7c14b719c60883de5747caa25463b44f8bf896 && \
-    GO111MODULE=on go install github.com/google/go-containerregistry/cmd/crane && \
+    GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane && \
     git clone https://github.com/google/crfs \${GOPATH}/src/github.com/google/crfs && \
     cd \${GOPATH}/src/github.com/google/crfs && \
     git checkout 71d77da419c90be7b05d12e59945ac7a8c94a543 && \
-    GO111MODULE=on go install github.com/google/crfs/stargz/stargzify
+    GO111MODULE=on go get github.com/google/crfs/stargz/stargzify
 
 COPY ./containerd/config.containerd.toml /etc/containerd/config.toml
 COPY ./containerd/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
