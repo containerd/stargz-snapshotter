@@ -110,79 +110,83 @@ func TestBuild(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		for _, cl := range compressionLevels {
+			cl := cl
+			t.Run(tt.name+"-"+fmt.Sprintf("compression-%v", cl), func(t *testing.T) {
 
-			tarBlob := buildTarStatic(t, tt.in)
-			// Test divideEntries()
-			entries, err := sortEntries(tarBlob, nil) // identical order
-			if err != nil {
-				t.Fatalf("faield to parse tar: %v", err)
-			}
-			var merged []*entry
-			for _, part := range divideEntries(entries, 4) {
-				merged = append(merged, part...)
-			}
-			if !reflect.DeepEqual(entries, merged) {
-				for _, e := range entries {
-					t.Logf("Original: %v", e.header)
+				tarBlob := buildTarStatic(t, tt.in)
+				// Test divideEntries()
+				entries, err := sortEntries(tarBlob, nil) // identical order
+				if err != nil {
+					t.Fatalf("faield to parse tar: %v", err)
 				}
-				for _, e := range merged {
-					t.Logf("Merged: %v", e.header)
+				var merged []*entry
+				for _, part := range divideEntries(entries, 4) {
+					merged = append(merged, part...)
 				}
-				t.Errorf("divided entries couldn't be merged")
-				return
-			}
+				if !reflect.DeepEqual(entries, merged) {
+					for _, e := range entries {
+						t.Logf("Original: %v", e.header)
+					}
+					for _, e := range merged {
+						t.Logf("Merged: %v", e.header)
+					}
+					t.Errorf("divided entries couldn't be merged")
+					return
+				}
 
-			// Prepare sample data
-			wantBuf := new(bytes.Buffer)
-			sw := NewWriter(wantBuf)
-			sw.ChunkSize = tt.chunkSize
-			if err := sw.AppendTar(tarBlob); err != nil {
-				t.Fatalf("faield to append tar to want stargz: %v", err)
-			}
-			if _, err := sw.Close(); err != nil {
-				t.Fatalf("faield to prepare want stargz: %v", err)
-			}
-			wantData := wantBuf.Bytes()
-			want, err := Open(io.NewSectionReader(
-				bytes.NewReader(wantData), 0, int64(len(wantData))))
-			if err != nil {
-				t.Fatalf("failed to parse the want stargz: %v", err)
-			}
+				// Prepare sample data
+				wantBuf := new(bytes.Buffer)
+				sw := NewWriterLevel(wantBuf, cl)
+				sw.ChunkSize = tt.chunkSize
+				if err := sw.AppendTar(tarBlob); err != nil {
+					t.Fatalf("faield to append tar to want stargz: %v", err)
+				}
+				if _, err := sw.Close(); err != nil {
+					t.Fatalf("faield to prepare want stargz: %v", err)
+				}
+				wantData := wantBuf.Bytes()
+				want, err := Open(io.NewSectionReader(
+					bytes.NewReader(wantData), 0, int64(len(wantData))))
+				if err != nil {
+					t.Fatalf("failed to parse the want stargz: %v", err)
+				}
 
-			// Prepare testing data
-			rc, _, err := Build(tarBlob, nil, WithChunkSize(tt.chunkSize))
-			if err != nil {
-				t.Fatalf("faield to build stargz: %v", err)
-			}
-			defer rc.Close()
-			gotBuf := new(bytes.Buffer)
-			if _, err := io.Copy(gotBuf, rc); err != nil {
-				t.Fatalf("failed to copy built stargz blob: %v", err)
-			}
-			gotData := gotBuf.Bytes()
-			got, err := Open(io.NewSectionReader(
-				bytes.NewReader(gotBuf.Bytes()), 0, int64(len(gotData))))
-			if err != nil {
-				t.Fatalf("failed to parse the got stargz: %v", err)
-			}
+				// Prepare testing data
+				rc, _, err := Build(tarBlob, nil,
+					WithChunkSize(tt.chunkSize), WithCompressionLevel(cl))
+				if err != nil {
+					t.Fatalf("faield to build stargz: %v", err)
+				}
+				defer rc.Close()
+				gotBuf := new(bytes.Buffer)
+				if _, err := io.Copy(gotBuf, rc); err != nil {
+					t.Fatalf("failed to copy built stargz blob: %v", err)
+				}
+				gotData := gotBuf.Bytes()
+				got, err := Open(io.NewSectionReader(
+					bytes.NewReader(gotBuf.Bytes()), 0, int64(len(gotData))))
+				if err != nil {
+					t.Fatalf("failed to parse the got stargz: %v", err)
+				}
 
-			// Compare as stargz
-			if !isSameVersion(t, wantData, gotData) {
-				t.Errorf("built stargz hasn't same json")
-				return
-			}
-			if !isSameEntries(t, want, got) {
-				t.Errorf("built stargz isn't same as the original")
-				return
-			}
+				// Compare as stargz
+				if !isSameVersion(t, wantData, gotData) {
+					t.Errorf("built stargz hasn't same json")
+					return
+				}
+				if !isSameEntries(t, want, got) {
+					t.Errorf("built stargz isn't same as the original")
+					return
+				}
 
-			// Compare as tar.gz
-			if !isSameTarGz(t, wantData, gotData) {
-				t.Errorf("built stargz isn't same tar.gz")
-				return
-			}
-		})
+				// Compare as tar.gz
+				if !isSameTarGz(t, wantData, gotData) {
+					t.Errorf("built stargz isn't same tar.gz")
+					return
+				}
+			})
+		}
 	}
 }
 
@@ -341,8 +345,8 @@ func contains(t *testing.T, a, b stargzEntry) bool {
 			if !aok && !bok {
 				break
 			} else if !(aok && bok) || anext != bnext {
-				t.Logf("%q != %q: chunk existence a=%v vs b=%v, anext=%v vs bnext=%v",
-					ae.Name, be.Name, aok, bok, anext, bnext)
+				t.Logf("%q != %q (offset=%d): chunk existence a=%v vs b=%v, anext=%v vs bnext=%v",
+					ae.Name, be.Name, nr, aok, bok, anext, bnext)
 				return false
 			}
 			nr = anext
@@ -757,7 +761,7 @@ func next(t *testing.T, a *tar.Reader, b *tar.Reader) (ah *tar.Header, bh *tar.H
 
 const chunkSize = 3
 
-type check func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest)
+type check func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest, compressionLevel int)
 
 // TestDigestAndVerify runs specified checks against sample stargz blobs.
 func TestDigestAndVerify(t *testing.T) {
@@ -859,35 +863,39 @@ func TestDigestAndVerify(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Get original tar file and chunk digests
-			dgstMap := make(map[string]digest.Digest)
-			tarBlob := buildTarStatic(t, tt.tarInit(t, dgstMap))
+		for _, cl := range compressionLevels {
+			cl := cl
+			t.Run(tt.name+"-"+fmt.Sprintf("compression-%v", cl), func(t *testing.T) {
+				// Get original tar file and chunk digests
+				dgstMap := make(map[string]digest.Digest)
+				tarBlob := buildTarStatic(t, tt.tarInit(t, dgstMap))
 
-			rc, tocDigest, err := Build(tarBlob, nil, WithChunkSize(chunkSize))
-			if err != nil {
-				t.Fatalf("failed to convert stargz: %v", err)
-			}
-			defer rc.Close()
-			buf := new(bytes.Buffer)
-			if _, err := io.Copy(buf, rc); err != nil {
-				t.Fatalf("failed to copy built stargz blob: %v", err)
-			}
-			newStargz := buf.Bytes()
-			// NoPrefetchLandmark is added during `Bulid`, which is expected behaviour.
-			dgstMap[chunkID(NoPrefetchLandmark, 0, int64(len([]byte{landmarkContents})))] = digest.FromBytes([]byte{landmarkContents})
+				rc, tocDigest, err := Build(tarBlob, nil,
+					WithChunkSize(chunkSize), WithCompressionLevel(cl))
+				if err != nil {
+					t.Fatalf("failed to convert stargz: %v", err)
+				}
+				defer rc.Close()
+				buf := new(bytes.Buffer)
+				if _, err := io.Copy(buf, rc); err != nil {
+					t.Fatalf("failed to copy built stargz blob: %v", err)
+				}
+				newStargz := buf.Bytes()
+				// NoPrefetchLandmark is added during `Bulid`, which is expected behaviour.
+				dgstMap[chunkID(NoPrefetchLandmark, 0, int64(len([]byte{landmarkContents})))] = digest.FromBytes([]byte{landmarkContents})
 
-			for _, check := range tt.checks {
-				check(t, newStargz, tocDigest, dgstMap)
-			}
-		})
+				for _, check := range tt.checks {
+					check(t, newStargz, tocDigest, dgstMap, cl)
+				}
+			})
+		}
 	}
 }
 
 // checkStargzTOC checks the TOC JSON of the passed stargz has the expected
 // digest and contains valid chunks. It walks all entries in the stargz and
 // checks all chunk digests stored to the TOC JSON match the actual contents.
-func checkStargzTOC(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest) {
+func checkStargzTOC(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest, compressionLevel int) {
 	sgz, err := Open(io.NewSectionReader(bytes.NewReader(sgzData), 0, int64(len(sgzData))))
 	if err != nil {
 		t.Errorf("failed to parse converted stargz: %v", err)
@@ -993,7 +1001,7 @@ func checkStargzTOC(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstM
 // checkVerifyTOC checks the verification works for the TOC JSON of the passed
 // stargz. It walks all entries in the stargz and checks the verifications for
 // all chunks work.
-func checkVerifyTOC(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest) {
+func checkVerifyTOC(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest, compressionLevel int) {
 	sgz, err := Open(io.NewSectionReader(bytes.NewReader(sgzData), 0, int64(len(sgzData))))
 	if err != nil {
 		t.Errorf("failed to parse converted stargz: %v", err)
@@ -1071,7 +1079,7 @@ func checkVerifyTOC(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstM
 // checkVerifyInvalidTOCEntryFail checks if misconfigured TOC JSON can be
 // detected during the verification and the verification returns an error.
 func checkVerifyInvalidTOCEntryFail(filename string) check {
-	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest) {
+	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest, compressionLevel int) {
 		funcs := map[string]rewriteFunc{
 			"lost digest in a entry": func(t *testing.T, toc *jtoc, sgz *io.SectionReader) {
 				for _, e := range toc.Entries {
@@ -1112,7 +1120,7 @@ func checkVerifyInvalidTOCEntryFail(filename string) check {
 
 		for name, rFunc := range funcs {
 			t.Run(name, func(t *testing.T) {
-				newSgz, newTocDigest := rewriteTOCJSON(t, io.NewSectionReader(bytes.NewReader(sgzData), 0, int64(len(sgzData))), rFunc)
+				newSgz, newTocDigest := rewriteTOCJSON(t, io.NewSectionReader(bytes.NewReader(sgzData), 0, int64(len(sgzData))), rFunc, compressionLevel)
 				buf := new(bytes.Buffer)
 				if _, err := io.Copy(buf, newSgz); err != nil {
 					t.Fatalf("failed to get converted stargz")
@@ -1137,8 +1145,8 @@ func checkVerifyInvalidTOCEntryFail(filename string) check {
 // checkVerifyInvalidStargzFail checks if the verification detects that the
 // given stargz file doesn't match to the expected digest and returns error.
 func checkVerifyInvalidStargzFail(invalid *io.SectionReader) check {
-	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest) {
-		rc, _, err := Build(invalid, nil, WithChunkSize(chunkSize))
+	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest, compressionLevel int) {
+		rc, _, err := Build(invalid, nil, WithChunkSize(chunkSize), WithCompressionLevel(compressionLevel))
 		if err != nil {
 			t.Fatalf("failed to convert stargz: %v", err)
 		}
@@ -1165,7 +1173,7 @@ func checkVerifyInvalidStargzFail(invalid *io.SectionReader) check {
 // checkVerifyBrokenContentFail checks if the verifier detects broken contents
 // that doesn't match to the expected digest and returns error.
 func checkVerifyBrokenContentFail(filename string) check {
-	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest) {
+	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest, compressionLevel int) {
 		// Parse stargz file
 		sgz, err := Open(io.NewSectionReader(bytes.NewReader(sgzData), 0, int64(len(sgzData))))
 		if err != nil {
@@ -1221,7 +1229,7 @@ func chunkID(name string, offset, size int64) string {
 
 type rewriteFunc func(t *testing.T, toc *jtoc, sgz *io.SectionReader)
 
-func rewriteTOCJSON(t *testing.T, sgz *io.SectionReader, rewrite rewriteFunc) (newSgz io.Reader, tocDigest digest.Digest) {
+func rewriteTOCJSON(t *testing.T, sgz *io.SectionReader, rewrite rewriteFunc, compressionLevel int) (newSgz io.Reader, tocDigest digest.Digest) {
 	decodedJTOC, jtocOffset, err := parseStargz(sgz)
 	if err != nil {
 		t.Fatalf("failed to extract TOC JSON: %v", err)
@@ -1239,7 +1247,7 @@ func rewriteTOCJSON(t *testing.T, sgz *io.SectionReader, rewrite rewriteFunc) (n
 	}
 	pr, pw := io.Pipe()
 	go func() {
-		zw, err := gzip.NewWriterLevel(pw, gzip.BestCompression)
+		zw, err := gzip.NewWriterLevel(pw, compressionLevel)
 		if err != nil {
 			pw.CloseWithError(err)
 			return
