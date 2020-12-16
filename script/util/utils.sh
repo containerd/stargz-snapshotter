@@ -23,6 +23,7 @@ function prepare_creds {
     local PASS="${4}"
     mkdir "${OUTPUT}/auth" "${OUTPUT}/certs"
     openssl req -subj "/C=JP/ST=Remote/L=Snapshotter/O=TestEnv/OU=Integration/CN=${REGISTRY_HOST}" \
+            -addext "subjectAltName = DNS:${REGISTRY_HOST}" \
             -newkey rsa:2048 -nodes -keyout "${OUTPUT}/certs/domain.key" \
             -x509 -days 365 -out "${OUTPUT}/certs/domain.crt"
     htpasswd -Bbn "${USER}" "${PASS}" > "${OUTPUT}/auth/htpasswd"
