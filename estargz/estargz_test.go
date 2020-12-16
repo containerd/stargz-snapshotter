@@ -38,6 +38,14 @@ import (
 	"testing"
 )
 
+var compressionLevels = [5]int{
+	gzip.NoCompression,
+	gzip.BestSpeed,
+	gzip.BestCompression,
+	gzip.DefaultCompression,
+	gzip.HuffmanOnly,
+}
+
 // Tests footer encoding, size, and parsing.
 func TestFooter(t *testing.T) {
 	for off := int64(0); off <= 200000; off += 1023 {
@@ -267,40 +275,43 @@ func TestWriteAndOpen(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tr, cancel := buildTar(t, tt.in)
-			defer cancel()
-			var stargzBuf bytes.Buffer
-			w := NewWriter(&stargzBuf)
-			w.ChunkSize = tt.chunkSize
-			if err := w.AppendTar(tr); err != nil {
-				t.Fatalf("Append: %v", err)
-			}
-			if _, err := w.Close(); err != nil {
-				t.Fatalf("Writer.Close: %v", err)
-			}
-			b := stargzBuf.Bytes()
+		for _, cl := range compressionLevels {
+			cl := cl
+			t.Run(tt.name+"-"+fmt.Sprintf("compression-%v", cl), func(t *testing.T) {
+				tr, cancel := buildTar(t, tt.in)
+				defer cancel()
+				var stargzBuf bytes.Buffer
+				w := NewWriterLevel(&stargzBuf, cl)
+				w.ChunkSize = tt.chunkSize
+				if err := w.AppendTar(tr); err != nil {
+					t.Fatalf("Append: %v", err)
+				}
+				if _, err := w.Close(); err != nil {
+					t.Fatalf("Writer.Close: %v", err)
+				}
+				b := stargzBuf.Bytes()
 
-			diffID := w.DiffID()
-			wantDiffID := diffIDOfGz(t, b)
-			if diffID != wantDiffID {
-				t.Errorf("DiffID = %q; want %q", diffID, wantDiffID)
-			}
+				diffID := w.DiffID()
+				wantDiffID := diffIDOfGz(t, b)
+				if diffID != wantDiffID {
+					t.Errorf("DiffID = %q; want %q", diffID, wantDiffID)
+				}
 
-			got := countGzStreams(t, b)
-			if got != tt.wantNumGz {
-				t.Errorf("number of gzip streams = %d; want %d", got, tt.wantNumGz)
-			}
+				got := countGzStreams(t, b)
+				if got != tt.wantNumGz {
+					t.Errorf("number of gzip streams = %d; want %d", got, tt.wantNumGz)
+				}
 
-			r, err := Open(io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b))))
-			if err != nil {
-				t.Fatalf("stargz.Open: %v", err)
-			}
-			for _, want := range tt.want {
-				want.check(t, r)
-			}
+				r, err := Open(io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b))))
+				if err != nil {
+					t.Fatalf("stargz.Open: %v", err)
+				}
+				for _, want := range tt.want {
+					want.check(t, r)
+				}
 
-		})
+			})
+		}
 	}
 }
 
