@@ -14,7 +14,7 @@ require (
 	github.com/docker/docker v17.12.0-ce-rc1.0.20200730172259-9f28837c1d93+incompatible
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
 	github.com/google/go-containerregistry v0.1.2
-	github.com/hanwen/go-fuse/v2 v2.0.3
+	github.com/hanwen/go-fuse/v2 v2.0.4-0.20201208195215-4a458845028b
 	github.com/hashicorp/go-multierror v1.1.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
