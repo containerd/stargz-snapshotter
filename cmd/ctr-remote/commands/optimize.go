@@ -33,9 +33,10 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/stargz-snapshotter/optimizer"
-	"github.com/containerd/stargz-snapshotter/optimizer/imageio"
-	"github.com/containerd/stargz-snapshotter/optimizer/sampler"
+	"github.com/containerd/stargz-snapshotter/converter"
+	"github.com/containerd/stargz-snapshotter/converter/optimizer"
+	"github.com/containerd/stargz-snapshotter/converter/optimizer/imageio"
+	"github.com/containerd/stargz-snapshotter/converter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -208,13 +209,13 @@ var OptimizeCommand = cli.Command{
 				return err
 			}
 			p := platforms.DefaultSpec()
-			dstImage, err := optimizer.ConvertImage(ctx, optimizerOpts, srcImage, &p, tf, opts...)
+			dstImage, err := converter.ConvertImage(ctx, optimizerOpts, srcImage, &p, tf, opts...)
 			if err != nil {
 				return err
 			}
 			return dstIO.WriteImage(dstImage)
 		}
-		dstIndex, err := optimizer.ConvertIndex(ctx, optimizerOpts, srcIndex, platform, tf, opts...)
+		dstIndex, err := converter.ConvertIndex(ctx, optimizerOpts, srcIndex, platform, tf, opts...)
 		if err != nil {
 			return err
 		}

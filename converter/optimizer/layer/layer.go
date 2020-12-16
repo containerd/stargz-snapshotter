@@ -29,7 +29,7 @@ import (
 	"io"
 	"io/ioutil"
 
-	"github.com/containerd/stargz-snapshotter/optimizer/util"
+	"github.com/containerd/stargz-snapshotter/converter/optimizer/util"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
 	regpkg "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/types"
