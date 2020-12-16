@@ -51,9 +51,8 @@ import (
 )
 
 type Opts struct {
-	NoOptimize bool
-	Reuse      bool
-	Period     time.Duration
+	Reuse  bool
+	Period time.Duration
 }
 
 func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfiles.TempFiles, samplerOpts ...sampler.Option) ([]mutate.Addendum, error) {

@@ -46,7 +46,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func ConvertIndex(ctx gocontext.Context, opts *optimizer.Opts, srcIndex regpkg.ImageIndex, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (regpkg.ImageIndex, error) {
+func ConvertIndex(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, srcIndex regpkg.ImageIndex, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (regpkg.ImageIndex, error) {
 	var addendums []mutate.IndexAddendum
 	manifest, err := srcIndex.IndexManifest()
 	if err != nil {
@@ -67,7 +67,7 @@ func ConvertIndex(ctx gocontext.Context, opts *optimizer.Opts, srcIndex regpkg.I
 			return nil, err
 		}
 		cctx := log.WithLogger(ctx, log.G(ctx).WithField("platform", platforms.Format(p)))
-		dstImg, err := ConvertImage(cctx, opts, srcImg, &p, tf, runopts...)
+		dstImg, err := ConvertImage(cctx, noOptimize, opts, srcImg, &p, tf, runopts...)
 		if err != nil {
 			return nil, err
 		}
@@ -89,14 +89,14 @@ func ConvertIndex(ctx gocontext.Context, opts *optimizer.Opts, srcIndex regpkg.I
 	return mutate.AppendManifests(empty.Index, addendums...), nil
 }
 
-func ConvertImage(ctx gocontext.Context, opts *optimizer.Opts, srcImg regpkg.Image, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (dstImg regpkg.Image, _ error) {
+func ConvertImage(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, srcImg regpkg.Image, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (dstImg regpkg.Image, _ error) {
 	// The order of the list is base layer first, top layer last.
 	layers, err := srcImg.Layers()
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get image layers")
 	}
 	addendums := make([]mutate.Addendum, len(layers))
-	if opts.NoOptimize || !platforms.NewMatcher(platforms.DefaultSpec()).Match(*platform) {
+	if noOptimize || !platforms.NewMatcher(platforms.DefaultSpec()).Match(*platform) {
 		// Do not run the optimization container if the option requires it or
 		// the source image doesn't match to the platform where this command runs on.
 		log.G(ctx).Warn("Platform mismatch or optimization disabled; converting without optimization")
