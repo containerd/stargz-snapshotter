@@ -22,4 +22,4 @@ RUN apt-get update -y && \
     add-apt-repository \
       "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
     apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli runc && \
-    GO111MODULE=on go install github.com/google/go-containerregistry/cmd/crane
+    GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane
