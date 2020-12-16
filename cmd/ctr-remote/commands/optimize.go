@@ -43,18 +43,16 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/optimizer/imageio"
 	"github.com/containerd/stargz-snapshotter/optimizer/logger"
 	"github.com/containerd/stargz-snapshotter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
-	"github.com/google/go-containerregistry/pkg/authn"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/google/go-containerregistry/pkg/name"
 	regpkg "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
-	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/partial"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 	"github.com/hashicorp/go-multierror"
 	ocidigest "github.com/opencontainers/go-digest"
@@ -213,11 +211,11 @@ var OptimizeCommand = cli.Command{
 		}()
 
 		// Convert and push the image
-		srcIndex, err := srcIO.readIndex()
+		srcIndex, err := srcIO.ReadIndex()
 		if err != nil {
 			// No index found. Try to deal it as a thin image.
 			log.G(ctx).Warn("index not found; treating as a thin image with ignoring the platform option")
-			srcImage, err := srcIO.readImage()
+			srcImage, err := srcIO.ReadImage()
 			if err != nil {
 				return err
 			}
@@ -226,13 +224,13 @@ var OptimizeCommand = cli.Command{
 			if err != nil {
 				return err
 			}
-			return dstIO.writeImage(dstImage)
+			return dstIO.WriteImage(dstImage)
 		}
 		dstIndex, err := convertIndex(ctx, context, srcIndex, platform, tf, opts...)
 		if err != nil {
 			return err
 		}
-		return dstIO.writeIndex(dstIndex)
+		return dstIO.WriteIndex(dstIndex)
 	},
 }
 
@@ -312,13 +310,13 @@ func parseArgs(clicontext *cli.Context) (opts []sampler.Option, err error) {
 	return
 }
 
-func parseReference(ref string, clicontext *cli.Context) (imageIO, error) {
+func parseReference(ref string, clicontext *cli.Context) (imageio.ImageIO, error) {
 	if strings.HasPrefix(ref, "local://") {
 		abspath, err := filepath.Abs(strings.TrimPrefix(ref, "local://"))
 		if err != nil {
 			return nil, err
 		}
-		return localImage{abspath}, nil
+		return &imageio.LocalImage{LocalPath: abspath}, nil
 	}
 	var opts []name.Option
 	if strings.HasPrefix(ref, "http://") {
@@ -333,7 +331,7 @@ func parseReference(ref string, clicontext *cli.Context) (imageIO, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse reference %q", ref)
 	}
-	return remoteImage{remoteRef}, nil
+	return &imageio.RemoteImage{RemoteRef: remoteRef}, nil
 }
 
 func convertIndex(ctx gocontext.Context, clicontext *cli.Context, srcIndex regpkg.ImageIndex, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (regpkg.ImageIndex, error) {
@@ -783,79 +781,6 @@ func (l staticCompressedLayer) Compressed() (io.ReadCloser, error) {
 
 func (l staticCompressedLayer) Uncompressed() (io.ReadCloser, error) {
 	return nil, errors.New("unsupported")
-}
-
-// imageIO is an interface for helpers of reading/writing images to/from somewhere.
-type imageIO interface {
-	readIndex() (regpkg.ImageIndex, error)
-	writeIndex(index regpkg.ImageIndex) error
-	readImage() (regpkg.Image, error)
-	writeImage(image regpkg.Image) error
-}
-
-// remoteImage is a helper for reading/writing images stored in the remote registry.
-type remoteImage struct {
-	remoteRef name.Reference
-}
-
-func (ri remoteImage) readIndex() (regpkg.ImageIndex, error) {
-	return remote.Index(ri.remoteRef, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-}
-
-func (ri remoteImage) writeIndex(index regpkg.ImageIndex) error {
-	return remote.WriteIndex(ri.remoteRef, index, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-}
-
-func (ri remoteImage) readImage() (regpkg.Image, error) {
-	desc, err := remote.Get(ri.remoteRef, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-	if err != nil {
-		return nil, err
-	}
-	return desc.Image()
-}
-
-func (ri remoteImage) writeImage(image regpkg.Image) error {
-	return remote.Write(ri.remoteRef, image, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-}
-
-// localImage is a helper for reading/writing images stored in the OCI Image Layout directory.
-type localImage struct {
-	localPath string
-}
-
-func (li localImage) readIndex() (regpkg.ImageIndex, error) {
-	lp, err := layout.FromPath(li.localPath)
-	if err != nil {
-		return nil, err
-	}
-	return lp.ImageIndex()
-}
-
-func (li localImage) writeIndex(index regpkg.ImageIndex) error {
-	_, err := layout.Write(li.localPath, index)
-	return err
-}
-
-func (li localImage) readImage() (regpkg.Image, error) {
-	// OCI Image Layout doesn't have representation of thin image
-	return nil, fmt.Errorf("thin image cannot be read from local")
-}
-
-func (li localImage) writeImage(image regpkg.Image) error {
-	// OCI layout requires index so create it.
-	// TODO: Should we add platform information here?
-	desc, err := partial.Descriptor(image)
-	if err != nil {
-		return err
-	}
-	_, err = layout.Write(li.localPath, mutate.AppendManifests(
-		empty.Index,
-		mutate.IndexAddendum{
-			Add:        image,
-			Descriptor: *desc,
-		},
-	))
-	return err
 }
 
 func getTOCDigest(manifest *regpkg.Manifest, dgst regpkg.Hash) (ocidigest.Digest, bool) {
