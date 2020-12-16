@@ -38,8 +38,8 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/optimizer/converter"
 	"github.com/containerd/stargz-snapshotter/optimizer/layer"
+	"github.com/containerd/stargz-snapshotter/optimizer/layerconverter"
 	"github.com/containerd/stargz-snapshotter/optimizer/logger"
 	"github.com/containerd/stargz-snapshotter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/optimizer/util"
@@ -254,7 +254,7 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 				if err != nil {
 					return err
 				}
-				f, err := converter.FromEStargz(ctx, tocdgst, in[i], compressedLayer, mon)
+				f, err := layerconverter.FromEStargz(ctx, tocdgst, in[i], compressedLayer, mon)
 				if err == nil {
 					// TODO: remotely mount it instead of downloading the layer.
 					cvts = append(cvts, f)
@@ -264,8 +264,8 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 			if err != nil {
 				return err
 			}
-			convertLayer[i] = converter.Converters(
-				append(cvts, converter.FromTar(ctx, decompressedLayer, mon, tf))...)
+			convertLayer[i] = layerconverter.Compose(
+				append(cvts, layerconverter.FromTar(ctx, decompressedLayer, mon, tf))...)
 			log.G(ctx).Infof("unpacked")
 			return nil
 		})

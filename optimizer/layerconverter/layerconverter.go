@@ -20,7 +20,7 @@
    license that can be found in the NOTICE.md file.
 */
 
-package converter
+package layerconverter
 
 import (
 	"context"
@@ -38,9 +38,9 @@ import (
 	ocidigest "github.com/opencontainers/go-digest"
 )
 
-type Converter = func() (mutate.Addendum, error)
+type LayerConverter = func() (mutate.Addendum, error)
 
-func FromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *tempfiles.TempFiles) Converter {
+func FromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *tempfiles.TempFiles) LayerConverter {
 	return func() (mutate.Addendum, error) {
 		log.G(ctx).Debugf("converting...")
 		defer log.G(ctx).Infof("converted")
@@ -64,7 +64,7 @@ func FromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *
 	}
 }
 
-func FromEStargz(ctx context.Context, tocdgst ocidigest.Digest, l regpkg.Layer, sr *io.SectionReader, mon logger.Monitor) (Converter, error) {
+func FromEStargz(ctx context.Context, tocdgst ocidigest.Digest, l regpkg.Layer, sr *io.SectionReader, mon logger.Monitor) (LayerConverter, error) {
 	// If the layer is valid eStargz, use this layer without conversion
 	r, err := estargz.Open(sr)
 	if err != nil {
@@ -101,7 +101,7 @@ func FromEStargz(ctx context.Context, tocdgst ocidigest.Digest, l regpkg.Layer, 
 	}, nil
 }
 
-func Converters(cs ...Converter) Converter {
+func Compose(cs ...LayerConverter) LayerConverter {
 	return func() (add mutate.Addendum, allErr error) {
 		for _, f := range cs {
 			a, err := f()
