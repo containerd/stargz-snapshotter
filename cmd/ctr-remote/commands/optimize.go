@@ -193,10 +193,10 @@ var OptimizeCommand = cli.Command{
 			}
 		}()
 
+		noOptimize := context.Bool("no-optimize")
 		optimizerOpts := &optimizer.Opts{
-			NoOptimize: context.Bool("no-optimize"),
-			Reuse:      context.Bool("reuse"),
-			Period:     time.Duration(context.Int("period")) * time.Second,
+			Reuse:  context.Bool("reuse"),
+			Period: time.Duration(context.Int("period")) * time.Second,
 		}
 
 		// Convert and push the image
@@ -209,13 +209,13 @@ var OptimizeCommand = cli.Command{
 				return err
 			}
 			p := platforms.DefaultSpec()
-			dstImage, err := converter.ConvertImage(ctx, optimizerOpts, srcImage, &p, tf, opts...)
+			dstImage, err := converter.ConvertImage(ctx, noOptimize, optimizerOpts, srcImage, &p, tf, opts...)
 			if err != nil {
 				return err
 			}
 			return dstIO.WriteImage(dstImage)
 		}
-		dstIndex, err := converter.ConvertIndex(ctx, optimizerOpts, srcIndex, platform, tf, opts...)
+		dstIndex, err := converter.ConvertIndex(ctx, noOptimize, optimizerOpts, srcIndex, platform, tf, opts...)
 		if err != nil {
 			return err
 		}
