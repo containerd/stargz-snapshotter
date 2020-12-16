@@ -12,8 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-ARG CONTAINERD_VERSION=v1.4.2
+ARG CONTAINERD_VERSION=v1.4.3
 ARG RUNC_VERSION=v1.0.0-rc92
+ARG CNI_PLUGINS_VERSION=v0.9.0
 
 FROM golang:1.13-buster AS golang-base
 
@@ -78,13 +79,15 @@ ENTRYPOINT [ "/entrypoint.sh" ]
 
 # Image which can be used for interactive demo environment
 FROM containerd-base AS demo
+ARG CNI_PLUGINS_VERSION
+ARG TARGETARCH
 RUN apt-get update && apt-get install -y iptables && \
     # Make CNI plugins manipulate iptables instead of nftables
     # as this test runs in a Docker container that network is configured with iptables.
     # c.f. https://github.com/moby/moby/issues/26824
     update-alternatives --set iptables /usr/sbin/iptables-legacy && \
     mkdir -p /opt/cni/bin && \
-    curl -Ls https://github.com/containernetworking/plugins/releases/download/v0.8.6/cni-plugins-linux-amd64-v0.8.6.tgz | tar xzv -C /opt/cni/bin
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
 
 # Image which can be used as containerized `ctr-remote images optimize` command
 FROM ubuntu:20.04 AS oind
@@ -98,7 +101,7 @@ COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
 ENTRYPOINT [ "/usr/local/bin/ctr-remote", "images", "optimize" ]
 
 # Image which can be used as a node image for KinD
-FROM kindest/node:v1.19.0
+FROM kindest/node:v1.20.0
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /
