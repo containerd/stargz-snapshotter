@@ -24,11 +24,8 @@ package commands
 
 import (
 	"compress/gzip"
-	"context"
 	gocontext "context"
-	"crypto/sha256"
 	"encoding/csv"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,9 +40,12 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/optimizer/converter"
 	"github.com/containerd/stargz-snapshotter/optimizer/imageio"
+	"github.com/containerd/stargz-snapshotter/optimizer/layer"
 	"github.com/containerd/stargz-snapshotter/optimizer/logger"
 	"github.com/containerd/stargz-snapshotter/optimizer/sampler"
+	"github.com/containerd/stargz-snapshotter/optimizer/util"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -53,8 +53,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/partial"
-	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/hashicorp/go-multierror"
 	ocidigest "github.com/opencontainers/go-digest"
 	spec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -524,22 +522,22 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, srcImg regpkg.Imag
 				// If this layer is a valid eStargz, try to reuse this layer.
 				// If no access occur to this layer during the specified workload,
 				// this layer will be reused without conversion.
-				compressedLayer, err := fileSectionReader(compressedFile)
+				compressedLayer, err := util.FileSectionReader(compressedFile)
 				if err != nil {
 					return err
 				}
-				f, err := converterFromEStargz(ctx, tocdgst, in[i], compressedLayer, mon)
+				f, err := converter.FromEStargz(ctx, tocdgst, in[i], compressedLayer, mon)
 				if err == nil {
 					// TODO: remotely mount it instead of downloading the layer.
 					cvts = append(cvts, f)
 				}
 			}
-			decompressedLayer, err := fileSectionReader(decompressedFile)
+			decompressedLayer, err := util.FileSectionReader(decompressedFile)
 			if err != nil {
 				return err
 			}
-			convertLayer[i] = converters(
-				append(cvts, converterFromTar(ctx, decompressedLayer, mon, tf))...)
+			convertLayer[i] = converter.Converters(
+				append(cvts, converter.FromTar(ctx, decompressedLayer, mon, tf))...)
 			log.G(ctx).Infof("unpacked")
 			return nil
 		})
@@ -610,80 +608,6 @@ func optimize(ctx gocontext.Context, clicontext *cli.Context, srcImg regpkg.Imag
 	return adds, nil
 }
 
-func converterFromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *tempfiles.TempFiles) func() (mutate.Addendum, error) {
-	return func() (mutate.Addendum, error) {
-		log.G(ctx).Debugf("converting...")
-		defer log.G(ctx).Infof("converted")
-
-		rc, jtocDigest, err := estargz.Build(sr, mon.DumpLog())
-		if err != nil {
-			return mutate.Addendum{}, err
-		}
-		defer rc.Close()
-		log.G(ctx).WithField("TOC JSON digest", jtocDigest).Debugf("calculated digest")
-		l, err := newStaticCompressedLayer(rc, tf)
-		if err != nil {
-			return mutate.Addendum{}, err
-		}
-		return mutate.Addendum{
-			Layer: l,
-			Annotations: map[string]string{
-				estargz.TOCJSONDigestAnnotation: jtocDigest.String(),
-			},
-		}, nil
-	}
-}
-
-func converterFromEStargz(ctx gocontext.Context, tocdgst ocidigest.Digest, l regpkg.Layer, sr *io.SectionReader, mon logger.Monitor) (func() (mutate.Addendum, error), error) {
-	// If the layer is valid eStargz, use this layer without conversion
-	r, err := estargz.Open(sr)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := r.VerifyTOC(tocdgst); err != nil {
-		return nil, err
-	}
-	dgst, err := l.Digest()
-	if err != nil {
-		return nil, err
-	}
-	diff, err := l.DiffID()
-	if err != nil {
-		return nil, err
-	}
-	return func() (mutate.Addendum, error) {
-		if len(mon.DumpLog()) != 0 {
-			// There have been some accesses to this layer. we don't reuse this.
-			return mutate.Addendum{}, fmt.Errorf("unable to reuse accessed layer")
-		}
-		log.G(ctx).Infof("no access occur; copying without conversion")
-		return mutate.Addendum{
-			Layer: staticCompressedLayer{
-				r:    sr,
-				diff: diff,
-				hash: dgst,
-				size: sr.Size(),
-			},
-			Annotations: map[string]string{
-				estargz.TOCJSONDigestAnnotation: tocdgst.String(),
-			},
-		}, nil
-	}, nil
-}
-
-func converters(cs ...func() (mutate.Addendum, error)) func() (mutate.Addendum, error) {
-	return func() (add mutate.Addendum, allErr error) {
-		for _, f := range cs {
-			a, err := f()
-			if err == nil {
-				return a, nil
-			}
-			allErr = multierror.Append(allErr, err)
-		}
-		return
-	}
-}
-
 func buildEStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regpkg.Layer, ocidigest.Digest, error) {
 	tftmp := tempfiles.NewTempFiles() // Shorter lifetime than tempfiles passed by argument
 	defer tftmp.CleanupAll()
@@ -698,7 +622,7 @@ func buildEStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regp
 	if _, err := io.Copy(file, r); err != nil {
 		return nil, "", err
 	}
-	sr, err := fileSectionReader(file)
+	sr, err := util.FileSectionReader(file)
 	if err != nil {
 		return nil, "", err
 	}
@@ -707,80 +631,11 @@ func buildEStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regp
 		return nil, "", err
 	}
 	defer rc.Close()
-	l, err := newStaticCompressedLayer(rc, tf)
+	l, err := layer.NewStaticCompressedLayer(rc, tf)
 	if err != nil {
 		return nil, "", err
 	}
 	return l, jtocDigest, err
-}
-
-func newStaticCompressedLayer(compressed io.Reader, tf *tempfiles.TempFiles) (regpkg.Layer, error) {
-	file, err := tf.TempFile("", "layerdata")
-	if err != nil {
-		return nil, err
-	}
-	var (
-		diff = sha256.New()
-		h    = sha256.New()
-	)
-	zr, err := gzip.NewReader(io.TeeReader(compressed, io.MultiWriter(file, h)))
-	if err != nil {
-		return nil, err
-	}
-	defer zr.Close()
-	if _, err := io.Copy(diff, zr); err != nil {
-		return nil, err
-	}
-	sr, err := fileSectionReader(file)
-	if err != nil {
-		return nil, err
-	}
-	return staticCompressedLayer{
-		r: sr,
-		diff: regpkg.Hash{
-			Algorithm: "sha256",
-			Hex:       hex.EncodeToString(diff.Sum(nil)),
-		},
-		hash: regpkg.Hash{
-			Algorithm: "sha256",
-			Hex:       hex.EncodeToString(h.Sum(nil)),
-		},
-		size: sr.Size(),
-	}, nil
-}
-
-type staticCompressedLayer struct {
-	r    io.Reader
-	diff regpkg.Hash
-	hash regpkg.Hash
-	size int64
-}
-
-func (l staticCompressedLayer) Digest() (regpkg.Hash, error) {
-	return l.hash, nil
-}
-
-func (l staticCompressedLayer) Size() (int64, error) {
-	return l.size, nil
-}
-
-func (l staticCompressedLayer) DiffID() (regpkg.Hash, error) {
-	return l.diff, nil
-}
-
-func (l staticCompressedLayer) MediaType() (types.MediaType, error) {
-	return types.DockerLayer, nil
-}
-
-func (l staticCompressedLayer) Compressed() (io.ReadCloser, error) {
-	// TODO: We should pass l.closerFunc to ggcr as Close() of io.ReadCloser
-	//       but ggcr currently doesn't call Close() so we close it manually on EOF.
-	//       See also: https://github.com/google/go-containerregistry/pull/768
-	return ioutil.NopCloser(l.r), nil
-}
-
-func (l staticCompressedLayer) Uncompressed() (io.ReadCloser, error) {
-	return nil, errors.New("unsupported")
 }
 
 func getTOCDigest(manifest *regpkg.Manifest, dgst regpkg.Hash) (ocidigest.Digest, bool) {
@@ -798,14 +653,6 @@ func getTOCDigest(manifest *regpkg.Manifest, dgst regpkg.Hash) (ocidigest.Digest
 		}
 	}
 	return "", false
-}
-
-func fileSectionReader(file *os.File) (*io.SectionReader, error) {
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	return io.NewSectionReader(file, 0, info.Size()), nil
 }
 
 // specPlatform converts ggcr's platform struct to OCI's struct
