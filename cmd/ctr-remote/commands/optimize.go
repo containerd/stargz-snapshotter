@@ -42,9 +42,9 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/logger"
-	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/sampler"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/optimizer/logger"
+	"github.com/containerd/stargz-snapshotter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
 	"github.com/google/go-containerregistry/pkg/authn"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
