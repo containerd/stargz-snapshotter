@@ -181,7 +181,7 @@ The footer MUST be the following 51 bytes (1 byte = 8 bits in gzip).
 - 2  bytes  Extra: SI1 = 'S', SI2 = 'G'
 - 2  bytes  Extra: LEN = 22 (16 hex digits + len("STARGZ"))
 - 22 bytes  Extra: subfield = fmt.Sprintf("%016xSTARGZ", offsetOfTOC)
-- 5  bytes  flate header
+- 5  bytes  flate header: BFINAL = 1(last block), BTYPE = 0(non-compressed block), LEN = 0
 - 8  bytes  gzip footer
 (End of eStargz)
 ```
