@@ -448,7 +448,7 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 	}
 	rc, dgst, err := estargz.Build(
 		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
-		[]string(prioritizedFiles),
+		estargz.WithPrioritizedFiles([]string(prioritizedFiles)),
 		estargz.WithChunkSize(int(chunkSize)),
 	)
 	if err != nil {

@@ -162,7 +162,7 @@ func buildEStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regp
 	if err != nil {
 		return nil, "", err
 	}
-	rc, jtocDigest, err := estargz.Build(sr, nil) // no optimization
+	rc, jtocDigest, err := estargz.Build(sr) // no optimization
 	if err != nil {
 		return nil, "", err
 	}

@@ -153,8 +153,7 @@ func TestBuild(t *testing.T) {
 				}
 
 				// Prepare testing data
-				rc, _, err := Build(tarBlob, nil,
-					WithChunkSize(tt.chunkSize), WithCompressionLevel(cl))
+				rc, _, err := Build(tarBlob, WithChunkSize(tt.chunkSize), WithCompressionLevel(cl))
 				if err != nil {
 					t.Fatalf("faield to build stargz: %v", err)
 				}
@@ -434,7 +433,7 @@ func TestSort(t *testing.T) {
 	tests := []struct {
 		name string
 		in   []tarEntry
-		log  []string
+		log  []string // MUST NOT include "./" prefix here
 		want []tarEntry
 	}{
 		{
@@ -677,55 +676,70 @@ func TestSort(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Sort tar file
-			entries, err := sortEntries(buildTarStatic(t, tt.in), tt.log)
-			if err != nil {
-				t.Fatalf("failed to sort: %q", err)
-			}
-			gotTar := tar.NewReader(readerFromEntries(entries...))
-
-			// Compare all
-			wantTar := tar.NewReader(buildTarStatic(t, tt.want))
-			for {
-				// Fetch and parse next header.
-				gotH, wantH, err := next(t, gotTar, wantTar)
+		for _, prefix := range [2]string{"", "./"} {
+			prefix := prefix
+			t.Run(tt.name, func(t *testing.T) {
+				// Sort tar file
+				var pfiles []string
+				for _, f := range tt.log {
+					pfiles = append(pfiles, prefix+f)
+				}
+				// entries, err := sortEntries(buildTarStatic(t, tt.in), pfiles)
+				// if err != nil {
+				// 	t.Fatalf("failed to sort: %q", err)
+				// }
+				rc, _, err := Build(buildTarStatic(t, tt.in), WithPrioritizedFiles(pfiles))
 				if err != nil {
-					if err == io.EOF {
-						break
-					} else {
-						t.Fatalf("Failed to parse tar file: %v", err)
+					t.Fatalf("failed to build stargz: %v", err)
+				}
+				zr, err := gzip.NewReader(rc)
+				if err != nil {
+					t.Fatalf("failed to create gzip reader: %v", err)
+				}
+				gotTar := tar.NewReader(zr)
+
+				// Compare all
+				wantTar := tar.NewReader(buildTarStatic(t, tt.want))
+				for {
+					// Fetch and parse next header.
+					gotH, wantH, err := next(t, gotTar, wantTar)
+					if err != nil {
+						if err == io.EOF {
+							break
+						} else {
+							t.Fatalf("Failed to parse tar file: %v", err)
+						}
+					}
+
+					if !reflect.DeepEqual(gotH, wantH) {
+						t.Errorf("different header (got = name:%q,type:%d,size:%d; want = name:%q,type:%d,size:%d)",
+							gotH.Name, gotH.Typeflag, gotH.Size, wantH.Name, wantH.Typeflag, wantH.Size)
+						return
+
+					}
+
+					got, err := ioutil.ReadAll(gotTar)
+					if err != nil {
+						t.Fatal("failed to read got tar payload")
+					}
+					want, err := ioutil.ReadAll(wantTar)
+					if err != nil {
+						t.Fatal("failed to read want tar payload")
+					}
+					if !bytes.Equal(got, want) {
+						t.Errorf("different payload (got = %q; want = %q)", string(got), string(want))
+						return
 					}
 				}
-
-				if !reflect.DeepEqual(gotH, wantH) {
-					t.Errorf("different header (got = name:%q,type:%d,size:%d; want = name:%q,type:%d,size:%d)",
-						gotH.Name, gotH.Typeflag, gotH.Size, wantH.Name, wantH.Typeflag, wantH.Size)
-					return
-
-				}
-
-				got, err := ioutil.ReadAll(gotTar)
-				if err != nil {
-					t.Fatal("failed to read got tar payload")
-				}
-				want, err := ioutil.ReadAll(wantTar)
-				if err != nil {
-					t.Fatal("failed to read want tar payload")
-				}
-				if !bytes.Equal(got, want) {
-					t.Errorf("different payload (got = %q; want = %q)", string(got), string(want))
-					return
-				}
-			}
-		})
+			})
+		}
 	}
 }
 
 func next(t *testing.T, a *tar.Reader, b *tar.Reader) (ah *tar.Header, bh *tar.Header, err error) {
 	eofA, eofB := false, false
 
-	ah, err = a.Next()
+	ah, err = nextWithSkipTOC(a)
 	if err != nil {
 		if err == io.EOF {
 			eofA = true
@@ -734,7 +748,7 @@ func next(t *testing.T, a *tar.Reader, b *tar.Reader) (ah *tar.Header, bh *tar.H
 		}
 	}
 
-	bh, err = b.Next()
+	bh, err = nextWithSkipTOC(b)
 	if err != nil {
 		if err == io.EOF {
 			eofB = true
@@ -756,6 +770,16 @@ func next(t *testing.T, a *tar.Reader, b *tar.Reader) (ah *tar.Header, bh *tar.H
 		err = io.EOF
 	}
 
+	return
+}
+
+func nextWithSkipTOC(a *tar.Reader) (h *tar.Header, err error) {
+	if h, err = a.Next(); err != nil {
+		return
+	}
+	if h.Name == TOCTarName {
+		return nextWithSkipTOC(a)
+	}
 	return
 }
 
@@ -870,8 +894,7 @@ func TestDigestAndVerify(t *testing.T) {
 				dgstMap := make(map[string]digest.Digest)
 				tarBlob := buildTarStatic(t, tt.tarInit(t, dgstMap))
 
-				rc, tocDigest, err := Build(tarBlob, nil,
-					WithChunkSize(chunkSize), WithCompressionLevel(cl))
+				rc, tocDigest, err := Build(tarBlob, WithChunkSize(chunkSize), WithCompressionLevel(cl))
 				if err != nil {
 					t.Fatalf("failed to convert stargz: %v", err)
 				}
@@ -1146,7 +1169,7 @@ func checkVerifyInvalidTOCEntryFail(filename string) check {
 // given stargz file doesn't match to the expected digest and returns error.
 func checkVerifyInvalidStargzFail(invalid *io.SectionReader) check {
 	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest, compressionLevel int) {
-		rc, _, err := Build(invalid, nil, WithChunkSize(chunkSize), WithCompressionLevel(compressionLevel))
+		rc, _, err := Build(invalid, WithChunkSize(chunkSize), WithCompressionLevel(compressionLevel))
 		if err != nil {
 			t.Fatalf("failed to convert stargz: %v", err)
 		}
