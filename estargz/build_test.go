@@ -153,7 +153,7 @@ func TestBuild(t *testing.T) {
 				}
 
 				// Prepare testing data
-				rc, _, err := Build(tarBlob, WithChunkSize(tt.chunkSize), WithCompressionLevel(cl))
+				rc, err := Build(tarBlob, WithChunkSize(tt.chunkSize), WithCompressionLevel(cl))
 				if err != nil {
 					t.Fatalf("faield to build stargz: %v", err)
 				}
@@ -167,6 +167,14 @@ func TestBuild(t *testing.T) {
 					bytes.NewReader(gotBuf.Bytes()), 0, int64(len(gotData))))
 				if err != nil {
 					t.Fatalf("failed to parse the got stargz: %v", err)
+				}
+
+				// Check DiffID is properly calculated
+				rc.Close()
+				diffID := rc.DiffID()
+				wantDiffID := diffIDOfGz(t, gotData)
+				if diffID.String() != wantDiffID {
+					t.Errorf("DiffID = %q; want %q", diffID, wantDiffID)
 				}
 
 				// Compare as stargz
@@ -688,7 +696,7 @@ func TestSort(t *testing.T) {
 				// if err != nil {
 				// 	t.Fatalf("failed to sort: %q", err)
 				// }
-				rc, _, err := Build(buildTarStatic(t, tt.in), WithPrioritizedFiles(pfiles))
+				rc, err := Build(buildTarStatic(t, tt.in), WithPrioritizedFiles(pfiles))
 				if err != nil {
 					t.Fatalf("failed to build stargz: %v", err)
 				}
@@ -894,10 +902,11 @@ func TestDigestAndVerify(t *testing.T) {
 				dgstMap := make(map[string]digest.Digest)
 				tarBlob := buildTarStatic(t, tt.tarInit(t, dgstMap))
 
-				rc, tocDigest, err := Build(tarBlob, WithChunkSize(chunkSize), WithCompressionLevel(cl))
+				rc, err := Build(tarBlob, WithChunkSize(chunkSize), WithCompressionLevel(cl))
 				if err != nil {
 					t.Fatalf("failed to convert stargz: %v", err)
 				}
+				tocDigest := rc.TOCDigest()
 				defer rc.Close()
 				buf := new(bytes.Buffer)
 				if _, err := io.Copy(buf, rc); err != nil {
@@ -1169,7 +1178,7 @@ func checkVerifyInvalidTOCEntryFail(filename string) check {
 // given stargz file doesn't match to the expected digest and returns error.
 func checkVerifyInvalidStargzFail(invalid *io.SectionReader) check {
 	return func(t *testing.T, sgzData []byte, tocDigest digest.Digest, dgstMap map[string]digest.Digest, compressionLevel int) {
-		rc, _, err := Build(invalid, WithChunkSize(chunkSize), WithCompressionLevel(compressionLevel))
+		rc, err := Build(invalid, WithChunkSize(chunkSize), WithCompressionLevel(compressionLevel))
 		if err != nil {
 			t.Fatalf("failed to convert stargz: %v", err)
 		}

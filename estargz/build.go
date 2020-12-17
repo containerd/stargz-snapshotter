@@ -75,12 +75,30 @@ func WithPrioritizedFiles(files []string) Option {
 	}
 }
 
+// Blob is an eStargz blob.
+type Blob struct {
+	io.ReadCloser
+	diffID    digest.Digester
+	tocDigest digest.Digest
+}
+
+// DiffID returns the digest of uncompressed blob.
+// It is only valid to call DiffID after Close.
+func (b *Blob) DiffID() digest.Digest {
+	return b.diffID.Digest()
+}
+
+// TOCDigest returns the digest of uncompressed TOC JSON.
+func (b *Blob) TOCDigest() digest.Digest {
+	return b.tocDigest
+}
+
 // Build builds an eStargz blob which is an extended version of stargz, from tar blob passed
 // through the argument. If there are some prioritized files are listed in the option, these
 // files are grouped as "prioritized" and can be used for runtime optimization (e.g. prefetch).
 // This function builds a blob in parallel, with dividing that blob into several (at least the
 // number of runtime.GOMAXPROCS(0)) sub-blobs.
-func Build(tarBlob *io.SectionReader, opt ...Option) (_ io.ReadCloser, _ digest.Digest, rErr error) {
+func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 	var opts options
 	opts.compressionLevel = gzip.BestCompression // BestCompression by default
 	for _, o := range opt {
@@ -96,7 +114,7 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ io.ReadCloser, _ digest.
 	}()
 	entries, err := sortEntries(tarBlob, opts.prioritizedFiles)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	tarParts := divideEntries(entries, runtime.GOMAXPROCS(0))
 	writers := make([]*Writer, len(tarParts))
@@ -125,25 +143,43 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ io.ReadCloser, _ digest.
 	}
 	if err := eg.Wait(); err != nil {
 		rErr = err
-		return nil, "", err
+		return nil, err
 	}
 	tocAndFooter, tocDgst, err := closeWithCombine(opts.compressionLevel, writers...)
 	if err != nil {
 		rErr = err
-		return nil, "", err
+		return nil, err
 	}
 	var rs []io.Reader
 	for _, p := range payloads {
 		fs, err := fileSectionReader(p)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		rs = append(rs, fs)
 	}
-	return readCloser{
-		Reader:    io.MultiReader(append(rs, tocAndFooter)...),
-		closeFunc: layerFiles.CleanupAll,
-	}, tocDgst, nil
+	diffID := digest.Canonical.Digester()
+	pr, pw := io.Pipe()
+	go func() {
+		r, err := gzip.NewReader(io.TeeReader(io.MultiReader(append(rs, tocAndFooter)...), pw))
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		if _, err := io.Copy(diffID.Hash(), r); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return &Blob{
+		ReadCloser: readCloser{
+			Reader:    pr,
+			closeFunc: layerFiles.CleanupAll,
+		},
+		tocDigest: tocDgst,
+		diffID:    diffID,
+	}, nil
 }
 
 // closeWithCombine takes unclosed Writers and close them. This also returns the

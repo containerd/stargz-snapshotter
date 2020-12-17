@@ -377,7 +377,7 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 
 	tarData := tarBuf.Bytes()
 
-	rc, dgst, err := estargz.Build(
+	rc, err := estargz.Build(
 		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
 		estargz.WithChunkSize(int(chunkSize)),
 	)
@@ -390,7 +390,7 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 	}
 	vsbb := vsb.Bytes()
 
-	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), dgst
+	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), rc.TOCDigest()
 }
 
 func newReader(sr *io.SectionReader, cache cache.BlobCache, ev estargz.TOCEntryVerifier) (*reader, *estargz.TOCEntry, error) {

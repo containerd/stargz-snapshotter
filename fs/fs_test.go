@@ -446,7 +446,7 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 		stargzData := stargzBuf.Bytes()
 		return io.NewSectionReader(bytes.NewReader(stargzData), 0, int64(len(stargzData))), ""
 	}
-	rc, dgst, err := estargz.Build(
+	rc, err := estargz.Build(
 		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
 		estargz.WithPrioritizedFiles([]string(prioritizedFiles)),
 		estargz.WithChunkSize(int(chunkSize)),
@@ -461,7 +461,7 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 	}
 	vsbb := vsb.Bytes()
 
-	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), dgst
+	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), rc.TOCDigest()
 }
 
 type tarent struct {
