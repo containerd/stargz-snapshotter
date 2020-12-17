@@ -124,7 +124,7 @@ func (r *Reader) initFields() error {
 	gname := map[int]string{}
 	var lastRegEnt *TOCEntry
 	for _, ent := range r.toc.Entries {
-		ent.Name = strings.TrimPrefix(ent.Name, "./")
+		ent.Name = trimNamePrefix(ent.Name)
 		if ent.Type == "reg" {
 			lastRegEnt = ent
 		}
@@ -191,7 +191,7 @@ func (r *Reader) initFields() error {
 		pdir := r.getOrCreateDir(parentDir(name))
 		ent.NumLink++ // at least one name(ent.Name) references this entry.
 		if ent.Type == "hardlink" {
-			if org, ok := r.m[ent.LinkName]; ok {
+			if org, ok := r.m[trimNamePrefix(ent.LinkName)]; ok {
 				org.NumLink++ // original entry is referenced by this ent.Name.
 				ent = org
 			} else {
@@ -802,6 +802,11 @@ func formatModtime(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Round(time.Second).Format(time.RFC3339)
+}
+
+func trimNamePrefix(name string) string {
+	// We don't use filepath.Clean here to preserve "/" suffix for directory entry.
+	return strings.TrimPrefix(name, "./")
 }
 
 // countWriter counts how many bytes have been written to its wrapped

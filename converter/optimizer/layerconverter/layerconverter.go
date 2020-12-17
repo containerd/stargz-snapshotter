@@ -45,7 +45,7 @@ func FromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *
 		log.G(ctx).Debugf("converting...")
 		defer log.G(ctx).Infof("converted")
 
-		rc, jtocDigest, err := estargz.Build(sr, mon.DumpLog())
+		rc, jtocDigest, err := estargz.Build(sr, estargz.WithPrioritizedFiles(mon.DumpLog()))
 		if err != nil {
 			return mutate.Addendum{}, err
 		}

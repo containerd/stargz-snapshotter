@@ -45,6 +45,7 @@ import (
 type options struct {
 	chunkSize        int
 	compressionLevel int
+	prioritizedFiles []string
 }
 
 type Option func(o *options)
@@ -65,12 +66,21 @@ func WithCompressionLevel(level int) Option {
 	}
 }
 
+// WithPrioritizedFiles option specifies the list of prioritized files.
+// These files must be a complete path relative to "/" (e.g. "foo/bar",
+// "./foo/bar")
+func WithPrioritizedFiles(files []string) Option {
+	return func(o *options) {
+		o.prioritizedFiles = files
+	}
+}
+
 // Build builds an eStargz blob which is an extended version of stargz, from tar blob passed
-// through the argument. If there are some prioritized files are listed in the argument, these
+// through the argument. If there are some prioritized files are listed in the option, these
 // files are grouped as "prioritized" and can be used for runtime optimization (e.g. prefetch).
 // This function builds a blob in parallel, with dividing that blob into several (at least the
 // number of runtime.GOMAXPROCS(0)) sub-blobs.
-func Build(tarBlob *io.SectionReader, prioritized []string, opt ...Option) (_ io.ReadCloser, _ digest.Digest, rErr error) {
+func Build(tarBlob *io.SectionReader, opt ...Option) (_ io.ReadCloser, _ digest.Digest, rErr error) {
 	var opts options
 	opts.compressionLevel = gzip.BestCompression // BestCompression by default
 	for _, o := range opt {
@@ -84,7 +94,7 @@ func Build(tarBlob *io.SectionReader, prioritized []string, opt ...Option) (_ io
 			}
 		}
 	}()
-	entries, err := sortEntries(tarBlob, prioritized)
+	entries, err := sortEntries(tarBlob, opts.prioritizedFiles)
 	if err != nil {
 		return nil, "", err
 	}
@@ -317,7 +327,8 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 				return nil, errors.Wrap(err, "failed to parse tar file")
 			}
 		}
-		if h.Name == PrefetchLandmark || h.Name == NoPrefetchLandmark {
+		switch trimNamePrefix(h.Name) {
+		case PrefetchLandmark, NoPrefetchLandmark:
 			// Ignore existing landmark
 			continue
 		}
@@ -364,17 +375,18 @@ func (f *tarFile) add(e *entry) {
 	if f.index == nil {
 		f.index = make(map[string]*entry)
 	}
-	f.index[e.header.Name] = e
+	f.index[trimNamePrefix(e.header.Name)] = e
 	f.stream = append(f.stream, e)
 }
 
 func (f *tarFile) remove(name string) {
+	name = trimNamePrefix(name)
 	if f.index != nil {
 		delete(f.index, name)
 	}
 	var filtered []*entry
 	for _, e := range f.stream {
-		if e.header.Name == name {
+		if trimNamePrefix(e.header.Name) == name {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -386,7 +398,7 @@ func (f *tarFile) get(name string) (e *entry, ok bool) {
 	if f.index == nil {
 		return nil, false
 	}
-	e, ok = f.index[name]
+	e, ok = f.index[trimNamePrefix(name)]
 	return
 }
 
