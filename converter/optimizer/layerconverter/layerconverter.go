@@ -45,11 +45,12 @@ func FromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *
 		log.G(ctx).Debugf("converting...")
 		defer log.G(ctx).Infof("converted")
 
-		rc, jtocDigest, err := estargz.Build(sr, estargz.WithPrioritizedFiles(mon.DumpLog()))
+		rc, err := estargz.Build(sr, estargz.WithPrioritizedFiles(mon.DumpLog()))
 		if err != nil {
 			return mutate.Addendum{}, err
 		}
 		defer rc.Close()
+		jtocDigest := rc.TOCDigest().String()
 		log.G(ctx).WithField("TOC JSON digest", jtocDigest).Debugf("calculated digest")
 		l, err := layer.NewStaticCompressedLayer(rc, tf)
 		if err != nil {
@@ -58,7 +59,7 @@ func FromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *
 		return mutate.Addendum{
 			Layer: l,
 			Annotations: map[string]string{
-				estargz.TOCJSONDigestAnnotation: jtocDigest.String(),
+				estargz.TOCJSONDigestAnnotation: jtocDigest,
 			},
 		}, nil
 	}

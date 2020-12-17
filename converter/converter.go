@@ -162,7 +162,7 @@ func buildEStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regp
 	if err != nil {
 		return nil, "", err
 	}
-	rc, jtocDigest, err := estargz.Build(sr) // no optimization
+	rc, err := estargz.Build(sr) // no optimization
 	if err != nil {
 		return nil, "", err
 	}
@@ -171,7 +171,7 @@ func buildEStargzLayer(uncompressed regpkg.Layer, tf *tempfiles.TempFiles) (regp
 	if err != nil {
 		return nil, "", err
 	}
-	return l, jtocDigest, err
+	return l, rc.TOCDigest(), err
 }
 
 // specPlatform converts ggcr's platform struct to OCI's struct
