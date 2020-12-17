@@ -42,7 +42,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/go-multierror"
+	"github.com/containerd/stargz-snapshotter/estargz/errorutil"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 )
@@ -739,11 +739,13 @@ func footerBytes(tocOff int64) []byte {
 }
 
 func parseFooter(p []byte) (tocOffset int64, footerSize int64, rErr error) {
+	var allErr []error
+
 	tocOffset, err := parseEStargzFooter(p)
 	if err == nil {
 		return tocOffset, FooterSize, nil
 	}
-	rErr = multierror.Append(rErr, err)
+	allErr = append(allErr, err)
 
 	pad := len(p) - legacyFooterSize
 	if pad < 0 {
@@ -753,8 +755,7 @@ func parseFooter(p []byte) (tocOffset int64, footerSize int64, rErr error) {
 	if err == nil {
 		return tocOffset, legacyFooterSize, nil
 	}
-	rErr = multierror.Append(rErr, err)
-	return
+	return 0, 0, errorutil.Aggregate(append(allErr, err))
 }
 
 func parseEStargzFooter(p []byte) (tocOffset int64, err error) {

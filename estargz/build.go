@@ -36,7 +36,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hashicorp/go-multierror"
+	"github.com/containerd/stargz-snapshotter/estargz/errorutil"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -431,19 +431,20 @@ func (tf *tempFiles) TempFile(dir, pattern string) (*os.File, error) {
 	return f, nil
 }
 
-func (tf *tempFiles) CleanupAll() (allErr error) {
+func (tf *tempFiles) CleanupAll() error {
 	tf.filesMu.Lock()
 	defer tf.filesMu.Unlock()
+	var allErr []error
 	for _, f := range tf.files {
 		if err := f.Close(); err != nil {
-			allErr = multierror.Append(allErr, err)
+			allErr = append(allErr, err)
 		}
 		if err := os.Remove(f.Name()); err != nil {
-			allErr = multierror.Append(allErr, err)
+			allErr = append(allErr, err)
 		}
 	}
 	tf.files = nil
-	return nil
+	return errorutil.Aggregate(allErr)
 }
 
 func newCountReader(r io.ReaderAt) (*countReader, error) {
