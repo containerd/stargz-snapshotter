@@ -37,6 +37,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/containerd/containerd/pkg/testutil"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"golang.org/x/sys/unix"
@@ -285,6 +286,7 @@ func getNode(t *testing.T, root *node, path string) (n *fusefs.Inode, err error)
 }
 
 func TestOpenRead(t *testing.T) {
+	testutil.RequiresRoot(t)
 	tests := []struct {
 		name string
 		in   []tarent
