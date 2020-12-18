@@ -43,9 +43,10 @@ As the conclusion, the following conditions must meet for eStargz.
 
 Stargz Snapshotter verifies eStargz layers leveraging the above extensions.
 However, as mentioned in the above, the verification of other image component including the manifests is out-of-scope of the snapshotter.
-So when this snapshotter mounts an eStargz layer, the manifest that references this layer must be verified in the containerd in advance and the TOC's digest written in the manifest (as an annotation `containerd.io/snapshot/stargz/toc.digest`) must be passed down to this snapshotter.
+So when this snapshotter mounts an eStargz layer, the manifest that references this layer must be verified in the containerd in advance and the TOC's digest written in the manifest (as a layer annotation `containerd.io/snapshot/stargz/toc.digest`) must be passed down to this snapshotter.
+This annotation is valid only when it is specified in `.[]layers.annotations` of [an image manifest](https://github.com/opencontainers/image-spec/blob/v1.0.1/manifest.md#image-manifest-property-descriptions).
 
-If the manifest doesn't contain `containerd.io/snapshot/stargz/toc.digest` annotation, verification can't be done for that layer so stargz snapshotter reports an error and doesn't mount it.
+If the layer doesn't contain `containerd.io/snapshot/stargz/toc.digest` annotation, verification can't be done for that layer so stargz snapshotter reports an error and doesn't mount it.
 You can bypass this check only if both of the following conditions meet.
 
 - `allow_no_verification = true` is specified in `config.toml` of stargz snapshotter, and
