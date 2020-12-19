@@ -62,7 +62,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
-	snbase "github.com/containerd/stargz-snapshotter/snapshot"
+	"github.com/containerd/stargz-snapshotter/snapshot/types"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/golang/groupcache/lru"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
@@ -101,7 +101,7 @@ func WithGetSources(s source.GetSources) Option {
 	}
 }
 
-func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.FileSystem, err error) {
+func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ types.FileSystem, err error) {
 	var fsOpts options
 	for _, o := range opts {
 		o(&fsOpts)

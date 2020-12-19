@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/containerd/snapshots/testsuite"
+	"github.com/containerd/stargz-snapshotter/snapshot/types"
 )
 
 const (
@@ -374,7 +375,7 @@ func TestFailureDetection(t *testing.T) {
 	}
 }
 
-func bindFileSystem(t *testing.T) FileSystem {
+func bindFileSystem(t *testing.T) types.FileSystem {
 	root, err := ioutil.TempDir("", "remote")
 	if err != nil {
 		t.Fatalf("failed to prepare working-space for bind filesystem: %q", err)
@@ -419,7 +420,7 @@ func (fs *bindFs) Unmount(ctx context.Context, mountpoint string) error {
 	return syscall.Unmount(mountpoint, 0)
 }
 
-func dummyFileSystem() FileSystem { return &dummyFs{} }
+func dummyFileSystem() types.FileSystem { return &dummyFs{} }
 
 type dummyFs struct{}
 

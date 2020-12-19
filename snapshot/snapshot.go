@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
 	"github.com/moby/sys/mountinfo"
+	"github.com/containerd/stargz-snapshotter/snapshot/types"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
@@ -52,21 +53,6 @@ const (
 	prepareSucceeded     = "true"
 	prepareFailed        = "false"
 )
-
-// FileSystem is a backing filesystem abstraction.
-//
-// Mount() tries to mount a remote snapshot to the specified mount point
-// directory. If succeed, the mountpoint directory will be treated as a layer
-// snapshot. If Mount() fails, the mountpoint directory MUST be cleaned up.
-// Check() is called to check the connectibity of the existing layer snapshot
-// every time the layer is used by containerd.
-// Unmount() is called to unmount a remote snapshot from the specified mount point
-// directory.
-type FileSystem interface {
-	Mount(ctx context.Context, mountpoint string, labels map[string]string) error
-	Check(ctx context.Context, mountpoint string, labels map[string]string) error
-	Unmount(ctx context.Context, mountpoint string) error
-}
 
 // SnapshotterConfig is used to configure the remote snapshotter instance
 type SnapshotterConfig struct {
@@ -91,14 +77,14 @@ type snapshotter struct {
 	asyncRemove bool
 
 	// fs is a filesystem that this snapshotter recognizes.
-	fs FileSystem
+	fs types.FileSystem
 }
 
 // NewSnapshotter returns a Snapshotter which can use unpacked remote layers
 // as snapshots. This is implemented based on the overlayfs snapshotter, so
 // diffs are stored under the provided root and a metadata file is stored under
 // the root as same as overlayfs snapshotter.
-func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
+func NewSnapshotter(ctx context.Context, root string, targetFs types.FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
 	if targetFs == nil {
 		return nil, fmt.Errorf("Specify filesystem to use")
 	}
