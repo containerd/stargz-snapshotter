@@ -439,10 +439,11 @@ func TestSort(t *testing.T) {
 	longname2 := longstring(150)
 
 	tests := []struct {
-		name string
-		in   []tarEntry
-		log  []string // MUST NOT include "./" prefix here
-		want []tarEntry
+		name     string
+		in       []tarEntry
+		log      []string // MUST NOT include "./" prefix here
+		want     []tarEntry
+		wantFail bool
 	}{
 		{
 			name: "nolog",
@@ -668,6 +669,7 @@ func TestSort(t *testing.T) {
 				file("foo.txt", "foo"),
 				file("baz.txt", "baz"),
 			),
+			wantFail: true,
 		},
 		{
 			name: "hardlink",
@@ -692,11 +694,14 @@ func TestSort(t *testing.T) {
 				for _, f := range tt.log {
 					pfiles = append(pfiles, prefix+f)
 				}
-				// entries, err := sortEntries(buildTarStatic(t, tt.in), pfiles)
-				// if err != nil {
-				// 	t.Fatalf("failed to sort: %q", err)
-				// }
 				rc, err := Build(buildTarStatic(t, tt.in), WithPrioritizedFiles(pfiles))
+				if tt.wantFail {
+					if err != nil {
+						return
+					}
+					t.Errorf("This test must fail but succeeded")
+					return
+				}
 				if err != nil {
 					t.Fatalf("failed to build stargz: %v", err)
 				}

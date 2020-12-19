@@ -296,7 +296,9 @@ func sortEntries(in io.ReaderAt, prioritized []string) ([]*entry, error) {
 	// Sort the tar file respecting to the prioritized files list.
 	sorted := &tarFile{}
 	for _, l := range prioritized {
-		moveRec(l, intar, sorted)
+		if err := moveRec(l, intar, sorted); err != nil {
+			return nil, errors.Wrap(err, "failed to sort tar entries")
+		}
 	}
 	if len(prioritized) == 0 {
 		sorted.add(&entry{
@@ -382,19 +384,29 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 	return tf, nil
 }
 
-func moveRec(name string, in *tarFile, out *tarFile) {
+func moveRec(name string, in *tarFile, out *tarFile) error {
 	if name == "" {
-		return
+		return nil // nop for root directory
 	}
+
+	_, okIn := in.get(name)
+	_, okOut := out.get(name)
+	if !okIn && !okOut {
+		return fmt.Errorf("file %q not found", name)
+	}
+
 	parent, _ := path.Split(strings.TrimSuffix(name, "/"))
 	moveRec(parent, in, out)
 	if e, ok := in.get(name); ok && e.header.Typeflag == tar.TypeLink {
-		moveRec(e.header.Linkname, in, out)
+		if err := moveRec(e.header.Linkname, in, out); err != nil {
+			return err
+		}
 	}
 	if e, ok := in.get(name); ok {
 		out.add(e)
 		in.remove(name)
 	}
+	return nil
 }
 
 type entry struct {
