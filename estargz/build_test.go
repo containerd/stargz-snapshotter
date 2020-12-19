@@ -434,6 +434,8 @@ func dumpTOCJSON(t *testing.T, tocJSON *jtoc) string {
 	return buf.String()
 }
 
+var acceptablePrioritizedPrefix = [3]string{"", "./", "/"}
+
 func TestSort(t *testing.T) {
 	longname1 := longstring(120)
 	longname2 := longstring(150)
@@ -684,11 +686,50 @@ func TestSort(t *testing.T) {
 				prefetchLandmark(),
 			),
 		},
+		{
+			name: "root_relative_file",
+			in: tarOf(
+				dir("./"),
+				file("./foo.txt", "foo"),
+				file("./baz.txt", "baz"),
+				file("./baa.txt", "baa"),
+				link("./bazlink", "./baz.txt"),
+			),
+			log: []string{"baa.txt", "bazlink"},
+			want: tarOf(
+				dir("./"),
+				file("./baa.txt", "baa"),
+				file("./baz.txt", "baz"),
+				link("./bazlink", "./baz.txt"),
+				prefetchLandmark(),
+				file("./foo.txt", "foo"),
+			),
+		},
+		{
+			// GNU tar accepts tar containing absolute path
+			name: "root_absolute_file",
+			in: tarOf(
+				dir("/"),
+				file("/foo.txt", "foo"),
+				file("/baz.txt", "baz"),
+				file("/baa.txt", "baa"),
+				link("/bazlink", "/baz.txt"),
+			),
+			log: []string{"baa.txt", "bazlink"},
+			want: tarOf(
+				dir("/"),
+				file("/baa.txt", "baa"),
+				file("/baz.txt", "baz"),
+				link("/bazlink", "/baz.txt"),
+				prefetchLandmark(),
+				file("/foo.txt", "foo"),
+			),
+		},
 	}
 	for _, tt := range tests {
-		for _, prefix := range [2]string{"", "./"} {
+		for _, prefix := range acceptablePrioritizedPrefix {
 			prefix := prefix
-			t.Run(tt.name, func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s-%q", tt.name, prefix), func(t *testing.T) {
 				// Sort tar file
 				var pfiles []string
 				for _, f := range tt.log {
