@@ -42,14 +42,15 @@ import (
 )
 
 const (
-	defaultAddress  = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
-	defaultLogLevel = logrus.InfoLevel
-	defaultRootDir  = "/var/lib/containerd-stargz-grpc"
+	defaultAddress    = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+	defaultConfigPath = "/etc/containerd-stargz-grpc/config.toml"
+	defaultLogLevel   = logrus.InfoLevel
+	defaultRootDir    = "/var/lib/containerd-stargz-grpc"
 )
 
 var (
 	address    = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
-	configPath = flag.String("config", "", "path to the configuration file")
+	configPath = flag.String("config", defaultConfigPath, "path to the configuration file")
 	logLevel   = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
 	rootDir    = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
 )
