@@ -42,6 +42,7 @@ TMP_DIR = tempfile.mkdtemp()
 LEGACY_MODE = "legacy"
 ESTARGZ_NOOPT_MODE = "estargz-noopt"
 ESTARGZ_MODE = "estargz"
+ZSTDCHUNKED_MODE = "zstdchunked"
 DEFAULT_OPTIMIZER = "ctr-remote image optimize --oci"
 DEFAULT_PULLER = "nerdctl image pull"
 DEFAULT_PUSHER = "nerdctl image push"
@@ -76,6 +77,8 @@ def format_repo(mode, repository, name):
         return "%s/%s-esgz" % (repository, name)
     elif mode == ESTARGZ_NOOPT_MODE:
         return "%s/%s-esgz-noopt" % (repository, name)
+    elif mode == ZSTDCHUNKED_MODE:
+        return "%s/%s-zstdchunked" % (repository, name)
     else:
         return "%s/%s-org" % (repository, name)
 
@@ -153,7 +156,7 @@ class BenchRunner:
 
     def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER, runtime="containerd"):
         if runtime == "containerd":
-            self.controller = ContainerdController(mode == ESTARGZ_NOOPT_MODE or mode == ESTARGZ_MODE)
+            self.controller = ContainerdController(mode == ESTARGZ_NOOPT_MODE or mode == ESTARGZ_MODE or mode == ZSTDCHUNKED_MODE)
         elif runtime == "podman":
             self.controller = PodmanController()
         else:
@@ -273,44 +276,44 @@ class BenchRunner:
 
         return pulltime, createtime, runtime
 
-    def convert_echo_hello(self, src, dest):
+    def convert_echo_hello(self, src, dest, option):
         period=10
-        cmd = ('%s -cni -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s %s' %
-               (self.optimizer, period, src, dest))
+        cmd = ('%s %s -cni -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s %s' %
+               (self.optimizer, option, period, src, dest))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
 
-    def convert_cmd_arg(self, src, dest, runargs):
+    def convert_cmd_arg(self, src, dest, runargs, option):
         period = 30
         assert(len(runargs.mount) == 0)
         entry = ""
         if runargs.arg != "": # FIXME: this is naive...
             entry = '-entrypoint \'["/bin/sh", "-c"]\''
-        cmd = ('%s -cni -period %s %s %s %s %s' %
-               (self.optimizer, period, entry, genargs_for_optimization(runargs.arg), src, dest))
+        cmd = ('%s %s -cni -period %s %s %s %s %s' %
+               (self.optimizer, option, period, entry, genargs_for_optimization(runargs.arg), src, dest))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
 
-    def convert_cmd_arg_wait(self, src, dest, runargs):
+    def convert_cmd_arg_wait(self, src, dest, runargs, option):
         period = 90
         env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s -cni -period %s %s %s %s %s' %
-               (self.optimizer, period, env, genargs_for_optimization(runargs.arg), src, dest))
+        cmd = ('%s %s -cni -period %s %s %s %s %s' %
+               (self.optimizer, option, period, env, genargs_for_optimization(runargs.arg), src, dest))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
 
-    def convert_cmd_stdin(self, src, dest, runargs):
+    def convert_cmd_stdin(self, src, dest, runargs, option):
         mounts = ''
         for a,b in runargs.mount:
             a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
             a = tmp_copy(a)
             mounts += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
         period = 60
-        cmd = ('%s -i -cni -period %s %s -entrypoint \'["/bin/sh", "-c"]\' %s %s %s' %
-               (self.optimizer, period, mounts, genargs_for_optimization(runargs.stdin_sh), src, dest))
+        cmd = ('%s %s -i -cni -period %s %s -entrypoint \'["/bin/sh", "-c"]\' %s %s %s' %
+               (self.optimizer, option, period, mounts, genargs_for_optimization(runargs.stdin_sh), src, dest))
         print cmd
         p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         print runargs.stdin
@@ -345,16 +348,16 @@ class BenchRunner:
         assert(rc == 0)
         self.push_img(dest)
 
-    def optimize_img(self, name, src, dest):
+    def optimize_img(self, name, src, dest, option):
         self.pull_img(src)
         if name in BenchRunner.ECHO_HELLO:
-            self.convert_echo_hello(src=src, dest=dest)
+            self.convert_echo_hello(src=src, dest=dest, option=option)
         elif name in BenchRunner.CMD_ARG:
-            self.convert_cmd_arg(src=src, dest=dest, runargs=BenchRunner.CMD_ARG[name])
+            self.convert_cmd_arg(src=src, dest=dest, runargs=BenchRunner.CMD_ARG[name], option=option)
         elif name in BenchRunner.CMD_ARG_WAIT:
-            self.convert_cmd_arg_wait(src=src, dest=dest, runargs=BenchRunner.CMD_ARG_WAIT[name])
+            self.convert_cmd_arg_wait(src=src, dest=dest, runargs=BenchRunner.CMD_ARG_WAIT[name], option=option)
         elif name in BenchRunner.CMD_STDIN:
-            self.convert_cmd_stdin(src=src, dest=dest, runargs=BenchRunner.CMD_STDIN[name])
+            self.convert_cmd_stdin(src=src, dest=dest, runargs=BenchRunner.CMD_STDIN[name], option=option)
         else:
             print 'Unknown bench: '+name
             exit(1)
@@ -365,7 +368,8 @@ class BenchRunner:
         src = '%s/%s' % (self.srcrepository, name)
         self.copy_img(src=src, dest=format_repo(LEGACY_MODE, self.repository, name))
         self.convert_and_push_img(src=src, dest=format_repo(ESTARGZ_NOOPT_MODE, self.repository, name))
-        self.optimize_img(name=name, src=src, dest=format_repo(ESTARGZ_MODE, self.repository, name))
+        self.optimize_img(name=name, src=src, dest=format_repo(ESTARGZ_MODE, self.repository, name, ""))
+        self.optimize_img(name=name, src=src, dest=format_repo(ZSTDCHUNKED_MODE, self.repository, name, "--zstdchunked"))
 
     def operation(self, op, bench, cid):
         if op == 'run':
@@ -538,7 +542,7 @@ def main():
         print '--experiments'
         print '--runtime'
         print '--op=(prepare|run)'
-        print '--mode=(%s|%s|%s)' % (LEGACY_MODE, ESTARGZ_NOOPT_MODE, ESTARGZ_MODE)
+        print '--mode=(%s|%s|%s)' % (LEGACY_MODE, ESTARGZ_NOOPT_MODE, ESTARGZ_MODE, ZSTDCHUNKED_MODE)
         exit(1)
 
     benches = []

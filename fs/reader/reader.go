@@ -36,6 +36,7 @@ import (
 
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
@@ -95,8 +96,8 @@ func (nv nopVerifier) Verified() bool {
 // NewReader creates a Reader based on the given stargz blob and cache implementation.
 // It returns VerifiableReader so the caller must provide a estargz.TOCEntryVerifier
 // to use for verifying file or chunk contained in this stargz blob.
-func NewReader(sr *io.SectionReader, cache cache.BlobCache, layerSha digest.Digest, telemetry *estargz.Telemetry) (*VerifiableReader, error) {
-	r, err := estargz.OpenWithTelemetry(sr, telemetry)
+func NewReader(sr *io.SectionReader, cache cache.BlobCache, layerSha digest.Digest, telemetry *estargz.Telemetry, esgzOpts ...estargz.OpenOption) (*VerifiableReader, error) {
+	r, err := estargz.Open(sr, append(esgzOpts, estargz.WithTelemetry(telemetry), estargz.WithDecompressors(new(zstdchunked.Decompressor)))...)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse stargz")
 	}
@@ -186,7 +187,11 @@ func (gr *reader) Cache(opts ...CacheOption) (err error) {
 
 	r := gr.r
 	if cacheOpts.reader != nil {
-		if r, err = estargz.OpenWithTelemetry(cacheOpts.reader, gr.telemetry); err != nil {
+		if r, err = estargz.Open(cacheOpts.reader,
+			// TODO: apply other options used in NewReader when needed.
+			estargz.WithTelemetry(gr.telemetry),
+			estargz.WithDecompressors(new(zstdchunked.Decompressor)),
+		); err != nil {
 			return errors.Wrap(err, "failed to parse stargz")
 		}
 	}

@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package estargz
+package zstdchunked
 
 import (
 	"context"
@@ -29,32 +29,43 @@ import (
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/labels"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/util/ioutils"
+	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
-// LayerConvertWithLayerAndCommonOptsFunc converts legacy tar.gz layers into eStargz tar.gz
-// layers. Media type is unchanged. Should be used in conjunction with WithDockerToOCI(). See
-// LayerConvertFunc for more details. The difference between this function and
+type zstdCompression struct {
+	*zstdchunked.Decompressor
+	*zstdchunked.Compressor
+}
+
+// LayerConvertWithLayerOptsFunc converts legacy tar.gz layers into zstd:chunked layers.
+//
+// This changes Docker MediaType to OCI MediaType so this should be used in
+// conjunction with WithDockerToOCI().
+// See LayerConvertFunc for more details. The difference between this function and
 // LayerConvertFunc is that this allows to specify additional eStargz options per layer.
-func LayerConvertWithLayerAndCommonOptsFunc(opts map[digest.Digest][]estargz.Option, commonOpts ...estargz.Option) converter.ConvertFunc {
+func LayerConvertWithLayerOptsFunc(opts map[digest.Digest][]estargz.Option) converter.ConvertFunc {
 	if opts == nil {
-		return LayerConvertFunc(commonOpts...)
+		return LayerConvertFunc()
 	}
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
 		// TODO: enable to speciy option per layer "index" because it's possible that there are
 		//       two layers having same digest in an image (but this should be rare case)
-		return LayerConvertFunc(append(commonOpts, opts[desc.Digest]...)...)(ctx, cs, desc)
+		return LayerConvertFunc(opts[desc.Digest]...)(ctx, cs, desc)
 	}
 }
 
-// LayerConvertFunc converts legacy tar.gz layers into eStargz tar.gz layers.
-// Media type is unchanged.
+// LayerConvertFunc converts legacy tar.gz layers into zstd:chunked layers.
 //
-// Should be used in conjunction with WithDockerToOCI().
+// This changes Docker MediaType to OCI MediaType so this should be used in
+// conjunction with WithDockerToOCI().
 //
-// Otherwise "containerd.io/snapshot/stargz/toc.digest" annotation will be lost,
+// Otherwise "io.containers.zstd-chunked.manifest-checksum" annotation will be lost,
 // because the Docker media type does not support layer annotations.
 func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
@@ -62,6 +73,25 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			// No conversion. No need to return an error here.
 			return nil, nil
 		}
+		uncompressedDesc := &desc
+		// We need to uncompress the archive first
+		if !uncompress.IsUncompressedType(desc.MediaType) {
+			var err error
+			uncompressedDesc, err = uncompress.LayerConvertFunc(ctx, cs, desc)
+			if err != nil {
+				return nil, err
+			}
+			if uncompressedDesc == nil {
+				return nil, errors.Errorf("unexpectedly got the same blob after compression (%s, %q)", desc.Digest, desc.MediaType)
+			}
+			defer func() {
+				if err := cs.Delete(ctx, uncompressedDesc.Digest); err != nil {
+					logrus.WithError(err).WithField("uncompressedDesc", uncompressedDesc).Warn("failed to remove tmp uncompressed layer")
+				}
+			}()
+			logrus.Debugf("zstdchunked: uncompressed %s into %s", desc.Digest, uncompressedDesc.Digest)
+		}
+
 		info, err := cs.Info(ctx, desc.Digest)
 		if err != nil {
 			return nil, err
@@ -71,19 +101,27 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			labelz = make(map[string]string)
 		}
 
-		ra, err := cs.ReaderAt(ctx, desc)
+		uncompressedReaderAt, err := cs.ReaderAt(ctx, *uncompressedDesc)
 		if err != nil {
 			return nil, err
 		}
-		defer ra.Close()
-		sr := io.NewSectionReader(ra, 0, desc.Size)
-		blob, err := estargz.Build(sr, opts...)
+		defer uncompressedReaderAt.Close()
+		uncompressedSR := io.NewSectionReader(uncompressedReaderAt, 0, uncompressedDesc.Size)
+		metadata := make(map[string]string)
+		opts = append(opts, estargz.WithCompression(&zstdCompression{
+			new(zstdchunked.Decompressor),
+			&zstdchunked.Compressor{
+				CompressionLevel: zstd.SpeedDefault,
+				Metadata:         metadata,
+			},
+		}))
+		blob, err := estargz.Build(uncompressedSR, opts...)
 		if err != nil {
 			return nil, err
 		}
 		defer blob.Close()
-		ref := fmt.Sprintf("convert-estargz-from-%s", desc.Digest)
-		w, err := content.OpenWriter(ctx, cs, content.WithRef(ref))
+		ref := fmt.Sprintf("convert-zstdchunked-from-%s", desc.Digest)
+		w, err := cs.Writer(ctx, content.WithRef(ref))
 		if err != nil {
 			return nil, err
 		}
@@ -121,11 +159,6 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 		if err := blob.Close(); err != nil {
 			return nil, err
 		}
-		if err := pw.Close(); err != nil {
-			return nil, err
-		}
-		<-doneCount
-
 		// update diffID label
 		labelz[labels.LabelUncompressed] = blob.DiffID().String()
 		if err = w.Commit(ctx, n, "", content.WithLabels(labelz)); err != nil && !errdefs.IsAlreadyExists(err) {
@@ -135,20 +168,37 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			return nil, err
 		}
 		newDesc := desc
-		if uncompress.IsUncompressedType(newDesc.MediaType) {
-			if images.IsDockerType(newDesc.MediaType) {
-				newDesc.MediaType += ".gzip"
-			} else {
-				newDesc.MediaType += "+gzip"
-			}
+		newDesc.MediaType, err = convertMediaTypeToZstd(newDesc.MediaType)
+		if err != nil {
+			return nil, err
 		}
 		newDesc.Digest = w.Digest()
 		newDesc.Size = n
 		if newDesc.Annotations == nil {
 			newDesc.Annotations = make(map[string]string, 1)
 		}
-		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = blob.TOCDigest().String()
+		tocDgst := blob.TOCDigest().String()
+		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = tocDgst
 		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", c.Size())
+		if p, ok := metadata[zstdchunked.ZstdChunkedManifestChecksumAnnotation]; ok {
+			newDesc.Annotations[zstdchunked.ZstdChunkedManifestChecksumAnnotation] = p
+		}
+		if p, ok := metadata[zstdchunked.ZstdChunkedManifestPositionAnnotation]; ok {
+			newDesc.Annotations[zstdchunked.ZstdChunkedManifestPositionAnnotation] = p
+		}
 		return &newDesc, nil
+	}
+}
+
+// NOTE: this converts docker mediatype to OCI mediatype
+func convertMediaTypeToZstd(mt string) (string, error) {
+	ociMediaType := converter.ConvertDockerMediaTypeToOCI(mt)
+	switch ociMediaType {
+	case ocispec.MediaTypeImageLayer, ocispec.MediaTypeImageLayerGzip, ocispec.MediaTypeImageLayerZstd:
+		return ocispec.MediaTypeImageLayerZstd, nil
+	case ocispec.MediaTypeImageLayerNonDistributable, ocispec.MediaTypeImageLayerNonDistributableGzip, ocispec.MediaTypeImageLayerNonDistributableZstd:
+		return ocispec.MediaTypeImageLayerNonDistributableZstd, nil
+	default:
+		return "", fmt.Errorf("unknown mediatype %q", mt)
 	}
 }

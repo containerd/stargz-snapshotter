@@ -14,21 +14,24 @@
    limitations under the License.
 */
 
-package estargz
+package zstdchunked
 
 import (
 	"context"
 	"testing"
 
+	"runtime/debug"
+
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/nativeconverter"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// TestLayerConvertFunc tests eStargz conversion.
+// TestLayerConvertFunc tests zstd:chunked conversion.
 // TestLayerConvertFunc is a pure unit test that does not need the daemon to be running.
 func TestLayerConvertFunc(t *testing.T) {
 	ctx := context.Background()
@@ -44,14 +47,19 @@ func TestLayerConvertFunc(t *testing.T) {
 
 	newDesc, err := cf(ctx, cs, *desc)
 	if err != nil {
+		t.Log(string(debug.Stack()))
 		t.Fatal(err)
 	}
 
-	var tocDigests []string
+	metadata := make(map[string]string)
+	mt := make(map[string]struct{})
 	handler := func(hCtx context.Context, hDesc ocispec.Descriptor) ([]ocispec.Descriptor, error) {
-		if hDesc.Annotations != nil {
-			if x, ok := hDesc.Annotations[estargz.TOCJSONDigestAnnotation]; ok && len(x) > 0 {
-				tocDigests = append(tocDigests, x)
+		mt[hDesc.MediaType] = struct{}{}
+		for k, v := range hDesc.Annotations {
+			if k == estargz.TOCJSONDigestAnnotation ||
+				k == zstdchunked.ZstdChunkedManifestChecksumAnnotation ||
+				k == zstdchunked.ZstdChunkedManifestPositionAnnotation {
+				metadata[k] = v
 			}
 		}
 		return nil, nil
@@ -64,7 +72,16 @@ func TestLayerConvertFunc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(tocDigests) == 0 {
-		t.Fatal("no eStargz layer was created")
+	if _, ok := mt[ocispec.MediaTypeImageLayerZstd]; !ok {
+		t.Errorf("mediatype %q is not created", ocispec.MediaTypeImageLayerZstd)
+	}
+	if _, ok := metadata[estargz.TOCJSONDigestAnnotation]; !ok {
+		t.Errorf("%q is not set", estargz.TOCJSONDigestAnnotation)
+	}
+	if _, ok := metadata[zstdchunked.ZstdChunkedManifestChecksumAnnotation]; !ok {
+		t.Errorf("%q is not set", zstdchunked.ZstdChunkedManifestChecksumAnnotation)
+	}
+	if _, ok := metadata[zstdchunked.ZstdChunkedManifestPositionAnnotation]; !ok {
+		t.Errorf("%q is not set", zstdchunked.ZstdChunkedManifestPositionAnnotation)
 	}
 }
