@@ -32,6 +32,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -67,8 +68,9 @@ func WithCompressionLevel(level int) Option {
 }
 
 // WithPrioritizedFiles option specifies the list of prioritized files.
-// These files must be a complete path relative to "/" (e.g. "foo/bar",
-// "./foo/bar")
+// These files must be complete paths that are absolute or relative to "/"
+// For example, all of "foo/bar", "/foo/bar", "./foo/bar" and "../foo/bar"
+// are treated as "/foo/bar".
 func WithPrioritizedFiles(files []string) Option {
 	return func(o *options) {
 		o.prioritizedFiles = files
@@ -365,7 +367,7 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 				return nil, errors.Wrap(err, "failed to parse tar file")
 			}
 		}
-		switch trimNamePrefix(h.Name) {
+		switch strings.TrimPrefix(cleanRootRelative(h.Name), "/") {
 		case PrefetchLandmark, NoPrefetchLandmark:
 			// Ignore existing landmark
 			continue
@@ -385,8 +387,15 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 }
 
 func moveRec(name string, in *tarFile, out *tarFile) error {
-	if name == "" {
-		return nil // nop for root directory
+	name = cleanRootRelative(name)
+	if name == "/" { // root directory. stop recursion.
+		if e, ok := in.get(name); ok {
+			// entry of the root directory exists. we should move it as well.
+			// this case will occur if tar entries are prefixed with "./", "/", etc.
+			out.add(e)
+			in.remove(name)
+		}
+		return nil
 	}
 
 	_, okIn := in.get(name)
@@ -423,18 +432,18 @@ func (f *tarFile) add(e *entry) {
 	if f.index == nil {
 		f.index = make(map[string]*entry)
 	}
-	f.index[trimNamePrefix(e.header.Name)] = e
+	f.index[cleanRootRelative(e.header.Name)] = e
 	f.stream = append(f.stream, e)
 }
 
 func (f *tarFile) remove(name string) {
-	name = trimNamePrefix(name)
+	name = cleanRootRelative(name)
 	if f.index != nil {
 		delete(f.index, name)
 	}
 	var filtered []*entry
 	for _, e := range f.stream {
-		if trimNamePrefix(e.header.Name) == name {
+		if cleanRootRelative(e.header.Name) == name {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -446,7 +455,7 @@ func (f *tarFile) get(name string) (e *entry, ok bool) {
 	if f.index == nil {
 		return nil, false
 	}
-	e, ok = f.index[trimNamePrefix(name)]
+	e, ok = f.index[cleanRootRelative(name)]
 	return
 }
 
@@ -556,4 +565,9 @@ func (cr *countReader) currentPos() int64 {
 	defer cr.mu.Unlock()
 
 	return *cr.cPos
+}
+
+// cleanRootRelative cleans a path with regarding the input as relative to root (or absolute path).
+func cleanRootRelative(name string) string {
+	return filepath.Clean("/" + name)
 }
