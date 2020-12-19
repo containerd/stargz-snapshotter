@@ -108,7 +108,7 @@ fi
 # Mirror and optimize all images used in tests
 echo "${REGISTRY_HOST}:5000" > "${MIRROR_TMP}/host"
 cp "${IMAGE_LIST}" "${MIRROR_TMP}/list"
-cp "${REPO}/script/cri/mirror.sh" "${MIRROR_TMP}/mirror.sh"
+cp "${REPO}/script/cri-containerd/mirror.sh" "${MIRROR_TMP}/mirror.sh"
 docker exec "${PREPARE_NODE_NAME}" /bin/bash /tools/mirror.sh
 
 # Configure mirror registries for containerd and snapshotter

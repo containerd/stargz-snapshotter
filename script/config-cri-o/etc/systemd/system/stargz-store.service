@@ -1,0 +1,15 @@
+[Unit]
+Description=stargz store
+After=network.target
+Before=crio.service
+
+[Service]
+Type=notify
+Environment=HOME=/root
+ExecStart=/usr/local/bin/stargz-store --log-level=debug --config=/etc/stargz-store/config.toml /var/lib/stargz-store/store
+ExecStopPost=umount /var/lib/stargz-store/store
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

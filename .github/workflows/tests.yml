@@ -89,9 +89,9 @@ jobs:
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
       run: make test-pullsecrets
 
-  test-cri:
+  test-cri-containerd:
     runs-on: ubuntu-20.04
-    name: CRIValidation
+    name: CRIValidationContainerd
     strategy:
       fail-fast: false
       matrix:
@@ -102,11 +102,19 @@ jobs:
           builtin: "true"
     steps:
     - uses: actions/checkout@v2
-    - name: Varidate the runtime through CRI
+    - name: Validate containerd through CRI
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
-      run: make test-cri
+      run: make test-cri-containerd
+
+  test-cri-cri-o:
+    runs-on: ubuntu-20.04
+    name: CRIValidationCRIO
+    steps:
+    - uses: actions/checkout@v2
+    - name: Validate CRI-O through CRI
+      run: make test-cri-o
 
   #
   # Project checks

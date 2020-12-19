@@ -26,7 +26,8 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
 	github.com/rs/xid v1.2.1
-	github.com/sirupsen/logrus v1.7.0
+	github.com/sirupsen/logrus v1.8.1
+	github.com/stretchr/testify v1.7.0 // indirect
 	github.com/urfave/cli v1.22.2
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
 	golang.org/x/sys v0.0.0-20210324051608-47abb6519492

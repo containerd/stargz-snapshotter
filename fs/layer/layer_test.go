@@ -23,7 +23,6 @@
 package layer
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"io/ioutil"
@@ -62,9 +61,6 @@ func TestPrefetch(t *testing.T) {
 		}
 		return defaultPrefetchSize
 	}
-	defaultPrefetchPosition := func(t *testing.T, l *layer) int64 {
-		return l.Info().Size
-	}
 	tests := []struct {
 		name             string
 		in               []testutil.TarEntry
@@ -72,19 +68,7 @@ func TestPrefetch(t *testing.T) {
 		wants            []string // filenames to compare
 		prefetchSize     func(*testing.T, *layer) int64
 		prioritizedFiles []string
-		stargz           bool
 	}{
-		{
-			name: "default_prefetch",
-			in: []testutil.TarEntry{
-				testutil.File("foo.txt", sampleData1),
-			},
-			wantNum:          chunkNum(sampleData1),
-			wants:            []string{"foo.txt"},
-			prefetchSize:     defaultPrefetchPosition,
-			prioritizedFiles: nil,
-			stargz:           true,
-		},
 		{
 			name: "no_prefetch",
 			in: []testutil.TarEntry{
@@ -121,13 +105,17 @@ func TestPrefetch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sr, dgst := buildStargz(t, tt.in,
-				chunkSizeInfo(sampleChunkSize),
-				prioritizedFilesInfo(tt.prioritizedFiles),
-				stargzOnlyInfo(tt.stargz))
+			sr, dgst, err := testutil.BuildEStargz(tt.in,
+				testutil.WithEStargzOptions(
+					estargz.WithChunkSize(sampleChunkSize),
+					estargz.WithPrioritizedFiles(tt.prioritizedFiles),
+				))
+			if err != nil {
+				t.Fatalf("failed to build eStargz: %v", err)
+			}
 			blob := newBlob(sr)
 			mcache := cache.NewMemoryCache()
-			vr, _, err := reader.NewReader(sr, mcache)
+			vr, err := reader.NewReader(sr, mcache)
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
@@ -138,11 +126,8 @@ func TestPrefetch(t *testing.T) {
 				ocispec.Descriptor{Digest: testStateLayerDigest},
 				&blobRef{blob, func() {}},
 				vr,
-				nil,
 			)
-			if tt.stargz {
-				l.SkipVerify()
-			} else if err := l.Verify(dgst); err != nil {
+			if err := l.Verify(dgst); err != nil {
 				t.Errorf("failed to verify reader: %v", err)
 				return
 			}
@@ -253,63 +238,4 @@ func TestWaiter(t *testing.T) {
 	if doneTime.Sub(startTime) < waitTime {
 		t.Errorf("wait time is too short: %v; want %v", doneTime.Sub(startTime), waitTime)
 	}
-}
-
-type chunkSizeInfo int
-type prioritizedFilesInfo []string
-type stargzOnlyInfo bool
-
-func buildStargz(t *testing.T, ents []testutil.TarEntry, opts ...interface{}) (*io.SectionReader, digest.Digest) {
-	var chunkSize chunkSizeInfo
-	var prioritizedFiles prioritizedFilesInfo
-	var stargzOnly bool
-	for _, opt := range opts {
-		if v, ok := opt.(chunkSizeInfo); ok {
-			chunkSize = v
-		} else if v, ok := opt.(prioritizedFilesInfo); ok {
-			prioritizedFiles = v
-		} else if v, ok := opt.(stargzOnlyInfo); ok {
-			stargzOnly = bool(v)
-		} else {
-			t.Fatalf("unsupported opt")
-		}
-	}
-
-	tarBuf := new(bytes.Buffer)
-	if _, err := io.Copy(tarBuf, testutil.BuildTar(ents)); err != nil {
-		t.Fatalf("failed to build tar: %v", err)
-	}
-	tarData := tarBuf.Bytes()
-
-	if stargzOnly {
-		stargzBuf := new(bytes.Buffer)
-		w := estargz.NewWriter(stargzBuf)
-		if chunkSize > 0 {
-			w.ChunkSize = int(chunkSize)
-		}
-		if err := w.AppendTar(bytes.NewReader(tarData)); err != nil {
-			t.Fatalf("failed to append tar file to stargz: %q", err)
-		}
-		if _, err := w.Close(); err != nil {
-			t.Fatalf("failed to close stargz writer: %q", err)
-		}
-		stargzData := stargzBuf.Bytes()
-		return io.NewSectionReader(bytes.NewReader(stargzData), 0, int64(len(stargzData))), ""
-	}
-	rc, err := estargz.Build(
-		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
-		estargz.WithPrioritizedFiles([]string(prioritizedFiles)),
-		estargz.WithChunkSize(int(chunkSize)),
-	)
-	if err != nil {
-		t.Fatalf("failed to build verifiable stargz: %v", err)
-	}
-	defer rc.Close()
-	vsb := new(bytes.Buffer)
-	if _, err := io.Copy(vsb, rc); err != nil {
-		t.Fatalf("failed to copy built stargz blob: %v", err)
-	}
-	vsbb := vsb.Bytes()
-
-	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), rc.TOCDigest()
 }

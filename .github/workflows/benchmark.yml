@@ -17,6 +17,11 @@ jobs:
       BENCHMARK_SAMPLES_NUM: 5
       BENCHMARK_PERCENTILE: 95
       BENCHMARK_PERCENTILES_GRANULARITY: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        runtime: ["podman", "containerd"]
     steps:
     - name: Install tools
       run: |
@@ -31,9 +36,11 @@ jobs:
           jq '{ location : .compute.location, vmSize : .compute.vmSize }' | \
           tee ${{ env.BENCHMARK_RESULT_DIR }}/instance.json
     - name: Run benchmark
+      env:
+        BENCHMARK_RUNTIME_MODE: ${{ matrix.runtime }}
       run: make benchmark
     - uses: actions/upload-artifact@v1
       if: ${{ always() }}
       with:
-        name: benchmarking-result
+        name: benchmarking-result-${{ matrix.runtime }}
         path: ${{ env.BENCHMARK_RESULT_DIR }}

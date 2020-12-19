@@ -1,0 +1,25 @@
+{
+  "cniVersion": "0.4.0",
+  "name": "crio",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "cni0",
+      "isGateway": true,
+      "ipMasq": true,
+      "promiscMode": true,
+      "ipam": {
+        "type": "host-local",
+        "routes": [{ "dst": "0.0.0.0/0" }],
+        "ranges": [
+            [{ "subnet": "10.85.0.0/16" }]
+        ]
+      }
+    },
+    {
+      "type": "portmap",
+      "capabilities": {
+        "portMappings": true
+      }
+    }]
+}

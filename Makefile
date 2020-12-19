@@ -23,7 +23,7 @@ VERSION=$(shell git describe --match 'v[0-9]*' --dirty='.m' --always --tags)
 REVISION=$(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi)
 GO_LD_FLAGS=-ldflags '-s -w -X $(PKG)/version.Version=$(VERSION) -X $(PKG)/version.Revision=$(REVISION) $(GO_EXTRA_LDFLAGS)'
 
-CMD=containerd-stargz-grpc ctr-remote
+CMD=containerd-stargz-grpc ctr-remote stargz-store
 
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
 
@@ -40,6 +40,9 @@ containerd-stargz-grpc: FORCE
 
 ctr-remote: FORCE
 	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/ctr-remote
+
+stargz-store: FORCE
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/stargz-store
 
 check:
 	@echo "$@"
@@ -85,5 +88,8 @@ benchmark:
 test-pullsecrets:
 	@./script/pullsecrets/test.sh
 
-test-cri:
-	@./script/cri/test.sh
+test-cri-containerd:
+	@./script/cri-containerd/test.sh
+
+test-cri-o:
+	@./script/cri-o/test.sh

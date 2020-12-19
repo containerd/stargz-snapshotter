@@ -24,10 +24,23 @@ BENCHMARKING_NODE_IMAGE_NAME="benchmark-image-test"
 BENCHMARKING_NODE=hello-bench
 BENCHMARKING_CONTAINER=hello-bench-container
 
+BENCHMARKING_TARGET_BASE_IMAGE=
+BENCHMARKING_TARGET_CONFIG_DIR=
+if [ "${BENCHMARK_RUNTIME_MODE}" == "containerd" ] ; then
+    BENCHMARKING_TARGET_BASE_IMAGE=snapshotter-base
+    BENCHMARKING_TARGET_CONFIG_DIR="${CONTEXT}/config-containerd"
+elif [ "${BENCHMARK_RUNTIME_MODE}" == "podman" ] ; then
+    BENCHMARKING_TARGET_BASE_IMAGE=podman-base
+    BENCHMARKING_TARGET_CONFIG_DIR="${CONTEXT}/config-podman"
+else
+    echo "Unknown runtime: ${BENCHMARK_RUNTIME_MODE}"
+    exit 1
+fi
+
 if [ "${BENCHMARKING_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
     docker build ${DOCKER_BUILD_ARGS:-} -t "${BENCHMARKING_BASE_IMAGE_NAME}" \
-           --target snapshotter-base "${REPO}"
+           --target "${BENCHMARKING_TARGET_BASE_IMAGE}" "${REPO}"
 fi
 
 DOCKER_COMPOSE_YAML=$(mktemp)
@@ -40,7 +53,7 @@ function cleanup {
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
-cp -R "${CONTEXT}/config" "${TMP_CONTEXT}"
+cp -R "${BENCHMARKING_TARGET_CONFIG_DIR}" "${TMP_CONTEXT}/config"
 
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${BENCHMARKING_BASE_IMAGE_NAME}
@@ -53,8 +66,7 @@ RUN apt-get update -y && \
     git checkout 4b1985e5ea2104672636879e1694808f735fd214 && \
     GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane
 
-COPY ./config/config.containerd.toml /etc/containerd/config.toml
-COPY ./config/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
+COPY ./config /
 
 ENV CONTAINERD_SNAPSHOTTER=""
 
@@ -85,9 +97,13 @@ services:
     - "/dev/fuse:/dev/fuse"
     - "containerd-data:/var/lib/containerd:delegated"
     - "containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc:delegated"
+    - "containers-data:/var/lib/containers:delegated"
+    - "additional-store-data:/var/lib/stargz-store:delegated"
 volumes:
   containerd-data:
   containerd-stargz-grpc-data:
+  containers-data:
+  additional-store-data:
 EOF
 
 echo "Preparing for benchmark..."
@@ -110,7 +126,8 @@ if ! ( cd "${CONTEXT}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} \
                           "${BENCHMARKING_NODE}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
-           docker exec -e BENCHMARK_SAMPLES_NUM -i "${BENCHMARKING_CONTAINER}" \
+           docker exec -e BENCHMARK_RUNTIME_MODE -e BENCHMARK_SAMPLES_NUM \
+                  -i "${BENCHMARKING_CONTAINER}" \
                   script/benchmark/hello-bench/run.sh \
                   "${BENCHMARK_REGISTRY:-docker.io}/${BENCHMARK_USER}" \
                   ${BENCHMARK_TARGETS} &> "${LOG_FILE}" ) ; then

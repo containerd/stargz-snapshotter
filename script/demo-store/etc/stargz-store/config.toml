@@ -1,0 +1,5 @@
+metrics_address = "127.0.0.1:8234"
+disable_verification = true
+[[resolver.host."registry2-store:5000".mirrors]]
+host = "registry2-store:5000"
+insecure = true

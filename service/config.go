@@ -16,7 +16,10 @@
 
 package service
 
-import "github.com/containerd/stargz-snapshotter/fs/config"
+import (
+	"github.com/containerd/stargz-snapshotter/fs/config"
+	"github.com/containerd/stargz-snapshotter/service/resolver"
+)
 
 type Config struct {
 	config.Config
@@ -33,24 +36,4 @@ type KubeconfigKeychainConfig struct {
 	KubeconfigPath string `toml:"kubeconfig_path"`
 }
 
-type ResolverConfig struct {
-	Host map[string]HostConfig `toml:"host"`
-}
-
-type HostConfig struct {
-	Mirrors []MirrorConfig `toml:"mirrors"`
-}
-
-type MirrorConfig struct {
-
-	// Host is the hostname of the host.
-	Host string `toml:"host"`
-
-	// Insecure is true means use http scheme instead of https.
-	Insecure bool `toml:"insecure"`
-
-	// RequestTimeoutSec is timeout seconds of each request to the registry.
-	// RequestTimeoutSec == 0 indicates the default timeout (defaultRequestTimeoutSec).
-	// RequestTimeoutSec < 0 indicates no timeout.
-	RequestTimeoutSec int `toml:"request_timeout_sec"`
-}
+type ResolverConfig resolver.Config

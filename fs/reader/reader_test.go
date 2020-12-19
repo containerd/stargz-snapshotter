@@ -45,9 +45,12 @@ const (
 // Tests Reader for failure cases.
 func TestFailReader(t *testing.T) {
 	testFileName := "test"
-	stargzFile, _ := buildStargz(t, []testutil.TarEntry{
+	stargzFile, _, err := testutil.BuildEStargz([]testutil.TarEntry{
 		testutil.File(testFileName, sampleData1),
-	}, chunkSizeInfo(sampleChunkSize))
+	}, testutil.WithEStargzOptions(estargz.WithChunkSize(sampleChunkSize)))
+	if err != nil {
+		t.Fatalf("failed to build sample estargz")
+	}
 	br := &breakReaderAt{
 		ReaderAt: stargzFile,
 		success:  true,
@@ -288,11 +291,14 @@ func (er *exceptSectionReader) ReadAt(p []byte, offset int64) (int, error) {
 	return er.ra.ReadAt(p, offset)
 }
 
-func makeFile(t *testing.T, contents []byte, chunkSize int64) *file {
+func makeFile(t *testing.T, contents []byte, chunkSize int) *file {
 	testName := "test"
-	sr, dgst := buildStargz(t, []testutil.TarEntry{
+	sr, dgst, err := testutil.BuildEStargz([]testutil.TarEntry{
 		testutil.File(testName, string(contents)),
-	}, chunkSizeInfo(chunkSize))
+	}, testutil.WithEStargzOptions(estargz.WithChunkSize(chunkSize)))
+	if err != nil {
+		t.Fatalf("failed to build sample estargz")
+	}
 
 	sgz, err := estargz.Open(sr)
 	if err != nil {
@@ -318,46 +324,16 @@ func makeFile(t *testing.T, contents []byte, chunkSize int64) *file {
 	return f
 }
 
-type chunkSizeInfo int
-
-func buildStargz(t *testing.T, ents []testutil.TarEntry, opts ...interface{}) (*io.SectionReader, digest.Digest) {
-	var chunkSize chunkSizeInfo
-	for _, opt := range opts {
-		if v, ok := opt.(chunkSizeInfo); ok {
-			chunkSize = v
-		} else {
-			t.Fatalf("unsupported opt")
-		}
-	}
-
-	tarBuf := new(bytes.Buffer)
-	if _, err := io.Copy(tarBuf, testutil.BuildTar(ents)); err != nil {
-		t.Fatalf("failed to build tar: %v", err)
-	}
-	tarData := tarBuf.Bytes()
-	rc, err := estargz.Build(
-		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
-		estargz.WithChunkSize(int(chunkSize)),
-	)
-	if err != nil {
-		t.Fatalf("failed to build verifiable stargz: %v", err)
-	}
-	defer rc.Close()
-	vsb := new(bytes.Buffer)
-	if _, err := io.Copy(vsb, rc); err != nil {
-		t.Fatalf("failed to copy built stargz blob: %v", err)
-	}
-	vsbb := vsb.Bytes()
-
-	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), rc.TOCDigest()
-}
-
 func newReader(sr *io.SectionReader, cache cache.BlobCache, ev estargz.TOCEntryVerifier) (*reader, *estargz.TOCEntry, error) {
 	var r *reader
-	vr, root, err := NewReader(sr, cache)
+	vr, err := NewReader(sr, cache)
 	if vr != nil {
 		r = vr.r
 		r.verifier = ev
+	}
+	root, ok := r.Lookup("")
+	if !ok {
+		return nil, nil, fmt.Errorf("failed to get root")
 	}
 	return r, root, err
 }

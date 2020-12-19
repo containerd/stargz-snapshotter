@@ -1,0 +1,2 @@
+# the value of noprefetch will be replaced during benchmarking
+noprefetch = true
