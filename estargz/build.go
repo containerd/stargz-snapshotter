@@ -44,17 +44,19 @@ import (
 )
 
 type options struct {
-	chunkSize        int
-	compressionLevel int
-	prioritizedFiles []string
+	chunkSize              int
+	compressionLevel       int
+	prioritizedFiles       []string
+	missedPrioritizedFiles *[]string
 }
 
-type Option func(o *options)
+type Option func(o *options) error
 
 // WithChunkSize option specifies the chunk size of eStargz blob to build.
 func WithChunkSize(chunkSize int) Option {
-	return func(o *options) {
+	return func(o *options) error {
 		o.chunkSize = chunkSize
+		return nil
 	}
 }
 
@@ -62,8 +64,9 @@ func WithChunkSize(chunkSize int) Option {
 // The default is gzip.BestCompression.
 // See also: https://godoc.org/compress/gzip#pkg-constants
 func WithCompressionLevel(level int) Option {
-	return func(o *options) {
+	return func(o *options) error {
 		o.compressionLevel = level
+		return nil
 	}
 }
 
@@ -72,8 +75,23 @@ func WithCompressionLevel(level int) Option {
 // For example, all of "foo/bar", "/foo/bar", "./foo/bar" and "../foo/bar"
 // are treated as "/foo/bar".
 func WithPrioritizedFiles(files []string) Option {
-	return func(o *options) {
+	return func(o *options) error {
 		o.prioritizedFiles = files
+		return nil
+	}
+}
+
+// WithAllowPrioritizeNotFound makes Build continue the execution even if some
+// of prioritized files specified by WithPrioritizedFiles option aren't found
+// in the input tar. Instead, this records all missed file names to the passed
+// slice.
+func WithAllowPrioritizeNotFound(missedFiles *[]string) Option {
+	return func(o *options) error {
+		if missedFiles == nil {
+			return fmt.Errorf("WithAllowPrioritizeNotFound: slice must be passed")
+		}
+		o.missedPrioritizedFiles = missedFiles
+		return nil
 	}
 }
 
@@ -104,7 +122,9 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 	var opts options
 	opts.compressionLevel = gzip.BestCompression // BestCompression by default
 	for _, o := range opt {
-		o(&opts)
+		if err := o(&opts); err != nil {
+			return nil, err
+		}
 	}
 	layerFiles := newTempFiles()
 	defer func() {
@@ -114,7 +134,7 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 			}
 		}
 	}()
-	entries, err := sortEntries(tarBlob, opts.prioritizedFiles)
+	entries, err := sortEntries(tarBlob, opts.prioritizedFiles, opts.missedPrioritizedFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -284,10 +304,12 @@ func divideEntries(entries []*entry, minPartsNum int) (set [][]*entry) {
 	return
 }
 
+var errNotFound = errors.New("not found")
+
 // sortEntries reads the specified tar blob and returns a list of tar entries.
 // If some of prioritized files are specified, the list starts from these
 // files with keeping the order specified by the argument.
-func sortEntries(in io.ReaderAt, prioritized []string) ([]*entry, error) {
+func sortEntries(in io.ReaderAt, prioritized []string, missedPrioritized *[]string) ([]*entry, error) {
 
 	// Import tar file.
 	intar, err := importTar(in)
@@ -299,6 +321,10 @@ func sortEntries(in io.ReaderAt, prioritized []string) ([]*entry, error) {
 	sorted := &tarFile{}
 	for _, l := range prioritized {
 		if err := moveRec(l, intar, sorted); err != nil {
+			if errors.Is(err, errNotFound) && missedPrioritized != nil {
+				*missedPrioritized = append(*missedPrioritized, l)
+				continue // allow not found
+			}
 			return nil, errors.Wrap(err, "failed to sort tar entries")
 		}
 	}
@@ -401,11 +427,13 @@ func moveRec(name string, in *tarFile, out *tarFile) error {
 	_, okIn := in.get(name)
 	_, okOut := out.get(name)
 	if !okIn && !okOut {
-		return fmt.Errorf("file %q not found", name)
+		return errors.Wrapf(errNotFound, "file: %q", name)
 	}
 
 	parent, _ := path.Split(strings.TrimSuffix(name, "/"))
-	moveRec(parent, in, out)
+	if err := moveRec(parent, in, out); err != nil {
+		return err
+	}
 	if e, ok := in.get(name); ok && e.header.Typeflag == tar.TypeLink {
 		if err := moveRec(e.header.Linkname, in, out); err != nil {
 			return err

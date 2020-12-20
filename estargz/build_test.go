@@ -116,7 +116,7 @@ func TestBuild(t *testing.T) {
 
 				tarBlob := buildTarStatic(t, tt.in)
 				// Test divideEntries()
-				entries, err := sortEntries(tarBlob, nil) // identical order
+				entries, err := sortEntries(tarBlob, nil, nil) // identical order
 				if err != nil {
 					t.Fatalf("faield to parse tar: %v", err)
 				}
@@ -441,11 +441,12 @@ func TestSort(t *testing.T) {
 	longname2 := longstring(150)
 
 	tests := []struct {
-		name     string
-		in       []tarEntry
-		log      []string // MUST NOT include "./" prefix here
-		want     []tarEntry
-		wantFail bool
+		name             string
+		in               []tarEntry
+		log              []string // MUST NOT include "./" prefix here
+		want             []tarEntry
+		wantFail         bool
+		allowMissedFiles []string
 	}{
 		{
 			name: "nolog",
@@ -663,7 +664,19 @@ func TestSort(t *testing.T) {
 				file("bar.txt", "bar"),
 				file("baa.txt", "baa"),
 			),
-			log: []string{"baa.txt", "bar.txt", "dummy"},
+			log:      []string{"baa.txt", "bar.txt", "dummy"},
+			want:     tarOf(),
+			wantFail: true,
+		},
+		{
+			name: "not_existing_file_allow_fail",
+			in: tarOf(
+				file("foo.txt", "foo"),
+				file("baz.txt", "baz"),
+				file("bar.txt", "bar"),
+				file("baa.txt", "baa"),
+			),
+			log: []string{"baa.txt", "dummy1", "bar.txt", "dummy2"},
 			want: tarOf(
 				file("baa.txt", "baa"),
 				file("bar.txt", "bar"),
@@ -671,7 +684,7 @@ func TestSort(t *testing.T) {
 				file("foo.txt", "foo"),
 				file("baz.txt", "baz"),
 			),
-			wantFail: true,
+			allowMissedFiles: []string{"dummy1", "dummy2"},
 		},
 		{
 			name: "hardlink",
@@ -735,7 +748,13 @@ func TestSort(t *testing.T) {
 				for _, f := range tt.log {
 					pfiles = append(pfiles, prefix+f)
 				}
-				rc, err := Build(buildTarStatic(t, tt.in), WithPrioritizedFiles(pfiles))
+				var opts []Option
+				var missedFiles []string
+				if tt.allowMissedFiles != nil {
+					opts = append(opts, WithAllowPrioritizeNotFound(&missedFiles))
+				}
+				rc, err := Build(buildTarStatic(t, tt.in),
+					append(opts, WithPrioritizedFiles(pfiles))...)
 				if tt.wantFail {
 					if err != nil {
 						return
@@ -744,11 +763,27 @@ func TestSort(t *testing.T) {
 					return
 				}
 				if err != nil {
-					t.Fatalf("failed to build stargz: %v", err)
+					t.Errorf("failed to build stargz: %v", err)
+					return
 				}
 				zr, err := gzip.NewReader(rc)
 				if err != nil {
 					t.Fatalf("failed to create gzip reader: %v", err)
+				}
+				if tt.allowMissedFiles != nil {
+					want := map[string]struct{}{}
+					for _, f := range tt.allowMissedFiles {
+						want[prefix+f] = struct{}{}
+					}
+					got := map[string]struct{}{}
+					for _, f := range missedFiles {
+						got[f] = struct{}{}
+					}
+					if !reflect.DeepEqual(got, want) {
+						t.Errorf("unexpected missed files: want %v, got: %v",
+							want, got)
+						return
+					}
 				}
 				gotTar := tar.NewReader(zr)
 
