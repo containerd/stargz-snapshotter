@@ -674,6 +674,23 @@ func TestSort(t *testing.T) {
 			wantFail: true,
 		},
 		{
+			name: "duplicated_entry",
+			in: tarOf(
+				file("foo.txt", "foo"),
+				dir("bar/"),
+				file("bar/baz.txt", "baz"),
+				dir("bar/"),
+				file("bar/baz.txt", "baz2"),
+			),
+			log: []string{"bar/baz.txt"},
+			want: tarOf(
+				dir("bar/"),
+				file("bar/baz.txt", "baz2"),
+				prefetchLandmark(),
+				file("foo.txt", "foo"),
+			),
+		},
+		{
 			name: "hardlink",
 			in: tarOf(
 				file("baz.txt", "aaaaa"),

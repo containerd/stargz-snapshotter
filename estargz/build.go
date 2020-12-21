@@ -373,9 +373,9 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 			continue
 		}
 
-		// Add entry if not exist.
+		// Add entry. If it already exists, replace it.
 		if _, ok := tf.get(h.Name); ok {
-			return nil, fmt.Errorf("Duplicated entry(%q) is not supported", h.Name)
+			tf.remove(h.Name)
 		}
 		tf.add(&entry{
 			header:  h,
