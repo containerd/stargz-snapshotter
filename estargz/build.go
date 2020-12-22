@@ -32,7 +32,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -393,7 +392,7 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 				return nil, errors.Wrap(err, "failed to parse tar file")
 			}
 		}
-		switch strings.TrimPrefix(cleanRootRelative(h.Name), "/") {
+		switch cleanEntryName(h.Name) {
 		case PrefetchLandmark, NoPrefetchLandmark:
 			// Ignore existing landmark
 			continue
@@ -413,8 +412,8 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 }
 
 func moveRec(name string, in *tarFile, out *tarFile) error {
-	name = cleanRootRelative(name)
-	if name == "/" { // root directory. stop recursion.
+	name = cleanEntryName(name)
+	if name == "" { // root directory. stop recursion.
 		if e, ok := in.get(name); ok {
 			// entry of the root directory exists. we should move it as well.
 			// this case will occur if tar entries are prefixed with "./", "/", etc.
@@ -460,18 +459,18 @@ func (f *tarFile) add(e *entry) {
 	if f.index == nil {
 		f.index = make(map[string]*entry)
 	}
-	f.index[cleanRootRelative(e.header.Name)] = e
+	f.index[cleanEntryName(e.header.Name)] = e
 	f.stream = append(f.stream, e)
 }
 
 func (f *tarFile) remove(name string) {
-	name = cleanRootRelative(name)
+	name = cleanEntryName(name)
 	if f.index != nil {
 		delete(f.index, name)
 	}
 	var filtered []*entry
 	for _, e := range f.stream {
-		if cleanRootRelative(e.header.Name) == name {
+		if cleanEntryName(e.header.Name) == name {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -483,7 +482,7 @@ func (f *tarFile) get(name string) (e *entry, ok bool) {
 	if f.index == nil {
 		return nil, false
 	}
-	e, ok = f.index[cleanRootRelative(name)]
+	e, ok = f.index[cleanEntryName(name)]
 	return
 }
 
@@ -593,9 +592,4 @@ func (cr *countReader) currentPos() int64 {
 	defer cr.mu.Unlock()
 
 	return *cr.cPos
-}
-
-// cleanRootRelative cleans a path with regarding the input as relative to root (or absolute path).
-func cleanRootRelative(name string) string {
-	return filepath.Clean("/" + name)
 }

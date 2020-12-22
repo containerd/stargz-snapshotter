@@ -38,6 +38,8 @@ import (
 	"testing"
 )
 
+var allowedPrefix = [4]string{"", "./", "/", "../"}
+
 var compressionLevels = [5]int{
 	gzip.NoCompression,
 	gzip.BestSpeed,
@@ -255,25 +257,25 @@ func TestWriteAndOpen(t *testing.T) {
 		{
 			name: "block_char_fifo",
 			in: tarOf(
-				tarEntryFunc(func(w *tar.Writer) error {
+				tarEntryFunc(func(w *tar.Writer, prefix string) error {
 					return w.WriteHeader(&tar.Header{
-						Name:     "b",
+						Name:     prefix + "b",
 						Typeflag: tar.TypeBlock,
 						Devmajor: 123,
 						Devminor: 456,
 					})
 				}),
-				tarEntryFunc(func(w *tar.Writer) error {
+				tarEntryFunc(func(w *tar.Writer, prefix string) error {
 					return w.WriteHeader(&tar.Header{
-						Name:     "c",
+						Name:     prefix + "c",
 						Typeflag: tar.TypeChar,
 						Devmajor: 111,
 						Devminor: 222,
 					})
 				}),
-				tarEntryFunc(func(w *tar.Writer) error {
+				tarEntryFunc(func(w *tar.Writer, prefix string) error {
 					return w.WriteHeader(&tar.Header{
-						Name:     "f",
+						Name:     prefix + "f",
 						Typeflag: tar.TypeFifo,
 					})
 				}),
@@ -290,40 +292,43 @@ func TestWriteAndOpen(t *testing.T) {
 	for _, tt := range tests {
 		for _, cl := range compressionLevels {
 			cl := cl
-			t.Run(tt.name+"-"+fmt.Sprintf("compression-%v", cl), func(t *testing.T) {
-				tr, cancel := buildTar(t, tt.in)
-				defer cancel()
-				var stargzBuf bytes.Buffer
-				w := NewWriterLevel(&stargzBuf, cl)
-				w.ChunkSize = tt.chunkSize
-				if err := w.AppendTar(tr); err != nil {
-					t.Fatalf("Append: %v", err)
-				}
-				if _, err := w.Close(); err != nil {
-					t.Fatalf("Writer.Close: %v", err)
-				}
-				b := stargzBuf.Bytes()
+			for _, prefix := range allowedPrefix {
+				prefix := prefix
+				t.Run(tt.name+"-"+fmt.Sprintf("compression=%v-prefix=%q", cl, prefix), func(t *testing.T) {
+					tr, cancel := buildTar(t, tt.in, prefix)
+					defer cancel()
+					var stargzBuf bytes.Buffer
+					w := NewWriterLevel(&stargzBuf, cl)
+					w.ChunkSize = tt.chunkSize
+					if err := w.AppendTar(tr); err != nil {
+						t.Fatalf("Append: %v", err)
+					}
+					if _, err := w.Close(); err != nil {
+						t.Fatalf("Writer.Close: %v", err)
+					}
+					b := stargzBuf.Bytes()
 
-				diffID := w.DiffID()
-				wantDiffID := diffIDOfGz(t, b)
-				if diffID != wantDiffID {
-					t.Errorf("DiffID = %q; want %q", diffID, wantDiffID)
-				}
+					diffID := w.DiffID()
+					wantDiffID := diffIDOfGz(t, b)
+					if diffID != wantDiffID {
+						t.Errorf("DiffID = %q; want %q", diffID, wantDiffID)
+					}
 
-				got := countGzStreams(t, b)
-				if got != tt.wantNumGz {
-					t.Errorf("number of gzip streams = %d; want %d", got, tt.wantNumGz)
-				}
+					got := countGzStreams(t, b)
+					if got != tt.wantNumGz {
+						t.Errorf("number of gzip streams = %d; want %d", got, tt.wantNumGz)
+					}
 
-				r, err := Open(io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b))))
-				if err != nil {
-					t.Fatalf("stargz.Open: %v", err)
-				}
-				for _, want := range tt.want {
-					want.check(t, r)
-				}
+					r, err := Open(io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b))))
+					if err != nil {
+						t.Fatalf("stargz.Open: %v", err)
+					}
+					for _, want := range tt.want {
+						want.check(t, r)
+					}
 
-			})
+				})
+			}
 		}
 	}
 }
@@ -580,7 +585,7 @@ func entryHasChildren(dir string, want ...string) stargzCheck {
 func hasDir(file string) stargzCheck {
 	return stargzCheckFn(func(t *testing.T, r *Reader) {
 		for _, ent := range r.toc.Entries {
-			if ent.Name == file {
+			if ent.Name == cleanEntryName(file) {
 				if ent.Type != "dir" {
 					t.Errorf("file type of %q is %q; want \"dir\"", file, ent.Type)
 				}
@@ -594,7 +599,7 @@ func hasDir(file string) stargzCheck {
 func hasDirLinkCount(file string, count int) stargzCheck {
 	return stargzCheckFn(func(t *testing.T, r *Reader) {
 		for _, ent := range r.toc.Entries {
-			if ent.Name == file {
+			if ent.Name == cleanEntryName(file) {
 				if ent.Type != "dir" {
 					t.Errorf("file type of %q is %q; want \"dir\"", file, ent.Type)
 					return
@@ -653,19 +658,19 @@ func hasEntryOwner(entry string, owner owner) stargzCheck {
 }
 
 type tarEntry interface {
-	appendTar(*tar.Writer) error
+	appendTar(tw *tar.Writer, prefix string) error
 }
 
-type tarEntryFunc func(*tar.Writer) error
+type tarEntryFunc func(*tar.Writer, string) error
 
-func (f tarEntryFunc) appendTar(tw *tar.Writer) error { return f(tw) }
+func (f tarEntryFunc) appendTar(tw *tar.Writer, prefix string) error { return f(tw, prefix) }
 
-func buildTar(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
+func buildTar(t *testing.T, ents []tarEntry, prefix string) (r io.Reader, cancel func()) {
 	pr, pw := io.Pipe()
 	go func() {
 		tw := tar.NewWriter(pw)
 		for _, ent := range ents {
-			if err := ent.appendTar(tw); err != nil {
+			if err := ent.appendTar(tw, prefix); err != nil {
 				t.Errorf("building input tar: %v", err)
 				pw.Close()
 				return
@@ -679,11 +684,11 @@ func buildTar(t *testing.T, ents []tarEntry) (r io.Reader, cancel func()) {
 	return pr, func() { go pr.Close(); go pw.Close() }
 }
 
-func buildTarStatic(t *testing.T, ents []tarEntry) *io.SectionReader {
+func buildTarStatic(t *testing.T, ents []tarEntry, prefix string) *io.SectionReader {
 	buf := new(bytes.Buffer)
 	tw := tar.NewWriter(buf)
 	for _, ent := range ents {
-		if err := ent.appendTar(tw); err != nil {
+		if err := ent.appendTar(tw, prefix); err != nil {
 			t.Fatalf("building input tar: %v", err)
 		}
 	}
@@ -695,7 +700,7 @@ func buildTarStatic(t *testing.T, ents []tarEntry) *io.SectionReader {
 }
 
 func dir(name string, opts ...interface{}) tarEntry {
-	return tarEntryFunc(func(tw *tar.Writer) error {
+	return tarEntryFunc(func(tw *tar.Writer, prefix string) error {
 		var o owner
 		for _, opt := range opts {
 			if v, ok := opt.(owner); ok {
@@ -709,7 +714,7 @@ func dir(name string, opts ...interface{}) tarEntry {
 		}
 		return tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeDir,
-			Name:     name,
+			Name:     prefix + name,
 			Mode:     0755,
 			Uid:      o.uid,
 			Gid:      o.gid,
@@ -727,7 +732,7 @@ type owner struct {
 }
 
 func file(name, contents string, opts ...interface{}) tarEntry {
-	return tarEntryFunc(func(tw *tar.Writer) error {
+	return tarEntryFunc(func(tw *tar.Writer, prefix string) error {
 		var xattrs xAttr
 		var o owner
 		for _, opt := range opts {
@@ -745,7 +750,7 @@ func file(name, contents string, opts ...interface{}) tarEntry {
 		}
 		if err := tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeReg,
-			Name:     name,
+			Name:     prefix + name,
 			Mode:     0644,
 			Xattrs:   xattrs,
 			Size:     int64(len(contents)),
@@ -760,10 +765,10 @@ func file(name, contents string, opts ...interface{}) tarEntry {
 }
 
 func symlink(name, target string) tarEntry {
-	return tarEntryFunc(func(tw *tar.Writer) error {
+	return tarEntryFunc(func(tw *tar.Writer, prefix string) error {
 		return tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeSymlink,
-			Name:     name,
+			Name:     prefix + name,
 			Linkname: target,
 			Mode:     0644,
 		})
