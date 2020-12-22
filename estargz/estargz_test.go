@@ -240,6 +240,19 @@ func TestWriteAndOpen(t *testing.T) {
 			),
 		},
 		{
+			name: "recursive",
+			in: tarOf(
+				dir("/", sampleOwner),
+				dir("bar/", sampleOwner),
+				dir("foo/", sampleOwner),
+				file("foo/bar.txt", content, sampleOwner),
+			),
+			wantNumGz: 4, // dirs, bar.txt alone, TOC, footer
+			want: checks(
+				maxDepth(2), // 0: root directory, 1: "foo/", 2: "bar.txt"
+			),
+		},
+		{
 			name: "block_char_fifo",
 			in: tarOf(
 				tarEntryFunc(func(w *tar.Writer) error {
@@ -389,6 +402,45 @@ type stargzCheck interface {
 type stargzCheckFn func(*testing.T, *Reader)
 
 func (f stargzCheckFn) check(t *testing.T, r *Reader) { f(t, r) }
+
+func maxDepth(max int) stargzCheck {
+	return stargzCheckFn(func(t *testing.T, r *Reader) {
+		e, ok := r.Lookup("")
+		if !ok {
+			t.Fatal("root directory not found")
+		}
+		d, err := getMaxDepth(t, e, 0, 10*max)
+		if err != nil {
+			t.Errorf("failed to get max depth (wanted %d): %v", max, err)
+			return
+		}
+		if d != max {
+			t.Errorf("invalid depth %d; want %d", d, max)
+			return
+		}
+	})
+}
+
+func getMaxDepth(t *testing.T, e *TOCEntry, current, limit int) (max int, rErr error) {
+	if current > limit {
+		return -1, fmt.Errorf("walkMaxDepth: exceeds limit: current:%d > limit:%d",
+			current, limit)
+	}
+	max = current
+	e.ForeachChild(func(baseName string, ent *TOCEntry) bool {
+		t.Logf("%q(basename:%q) is child of %q\n", ent.Name, baseName, e.Name)
+		d, err := getMaxDepth(t, ent, current+1, limit)
+		if err != nil {
+			rErr = err
+			return false
+		}
+		if d > max {
+			max = d
+		}
+		return true
+	})
+	return
+}
 
 func hasFileLen(file string, wantLen int) stargzCheck {
 	return stargzCheckFn(func(t *testing.T, r *Reader) {

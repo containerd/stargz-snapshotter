@@ -188,7 +188,15 @@ func (r *Reader) initFields() error {
 		if ent.Type == "dir" {
 			name = strings.TrimSuffix(name, "/")
 		}
-		pdir := r.getOrCreateDir(parentDir(name))
+		pdirName := parentDir(name)
+		if name == pdirName {
+			// This entry and its parent are the same.
+			// Ignore this for avoiding infinite loop of the reference.
+			// The example case where this can occur is when tar contains the root
+			// directory itself (e.g. "./", "/").
+			continue
+		}
+		pdir := r.getOrCreateDir(pdirName)
 		ent.NumLink++ // at least one name(ent.Name) references this entry.
 		if ent.Type == "hardlink" {
 			if org, ok := r.m[trimNamePrefix(ent.LinkName)]; ok {
