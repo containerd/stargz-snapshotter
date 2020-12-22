@@ -27,6 +27,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/converter"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/imageio"
+	"github.com/containerd/stargz-snapshotter/converter/optimizer/recorder"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
 	reglogs "github.com/google/go-containerregistry/pkg/logs"
@@ -139,6 +141,11 @@ var OptimizeCommand = cli.Command{
 			Name:  "no-optimize",
 			Usage: "convert image without optimization",
 		},
+		cli.StringFlag{
+			Name:  "record-out",
+			Usage: "record the monitor log to the specified file",
+		},
+		// TODO: add "record-in" to use existing record
 	},
 	Action: func(context *cli.Context) error {
 
@@ -199,6 +206,16 @@ var OptimizeCommand = cli.Command{
 			Period: time.Duration(context.Int("period")) * time.Second,
 		}
 
+		var rec *recorder.Recorder
+		if recordOut := context.String("record-out"); recordOut != "" {
+			recordWriter, err := os.Create(recordOut)
+			if err != nil {
+				return err
+			}
+			defer recordWriter.Close()
+			rec = recorder.New(recordWriter)
+		}
+
 		// Convert and push the image
 		srcIndex, err := srcIO.ReadIndex()
 		if err != nil {
@@ -209,13 +226,13 @@ var OptimizeCommand = cli.Command{
 				return err
 			}
 			p := platforms.DefaultSpec()
-			dstImage, err := converter.ConvertImage(ctx, noOptimize, optimizerOpts, srcImage, &p, tf, opts...)
+			dstImage, err := converter.ConvertImage(ctx, noOptimize, optimizerOpts, srcImage, &p, tf, rec, opts...)
 			if err != nil {
 				return err
 			}
 			return dstIO.WriteImage(dstImage)
 		}
-		dstIndex, err := converter.ConvertIndex(ctx, noOptimize, optimizerOpts, srcIndex, platform, tf, opts...)
+		dstIndex, err := converter.ConvertIndex(ctx, noOptimize, optimizerOpts, srcIndex, platform, tf, rec, opts...)
 		if err != nil {
 			return err
 		}
