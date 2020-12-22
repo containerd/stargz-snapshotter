@@ -36,7 +36,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -820,7 +819,7 @@ func formatModtime(t time.Time) string {
 }
 
 func cleanEntryName(name string) string {
-	return strings.TrimPrefix(filepath.Clean("/"+name), "/")
+	return strings.TrimPrefix(path.Clean("/"+name), "/")
 }
 
 // countWriter counts how many bytes have been written to its wrapped
