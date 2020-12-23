@@ -289,6 +289,7 @@ func makeBlob(t *testing.T, size int64, chunkSize int64, fn RoundTripFunc) *blob
 				},
 			},
 		},
+		fetchTimeout: time.Duration(defaultFetchTimeoutSec) * time.Second,
 	}
 }
 

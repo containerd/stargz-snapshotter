@@ -53,9 +53,10 @@ type Config struct {
 }
 
 type BlobConfig struct {
-	ValidInterval int64 `toml:"valid_interval"`
-	CheckAlways   bool  `toml:"check_always"`
-	ChunkSize     int64 `toml:"chunk_size"`
+	ValidInterval   int64 `toml:"valid_interval"`
+	CheckAlways     bool  `toml:"check_always"`
+	ChunkSize       int64 `toml:"chunk_size"`
+	FetchTimeoutSec int64 `toml:"fetching_timeout_sec"`
 }
 
 type DirectoryCacheConfig struct {
