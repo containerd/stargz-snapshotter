@@ -819,6 +819,7 @@ func formatModtime(t time.Time) string {
 }
 
 func cleanEntryName(name string) string {
+	// Use path.Clean to consistently deal with path separators across platforms.
 	return strings.TrimPrefix(path.Clean("/"+name), "/")
 }
 
