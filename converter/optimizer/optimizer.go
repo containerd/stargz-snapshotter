@@ -38,6 +38,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/layerconverter"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/logger"
+	"github.com/containerd/stargz-snapshotter/converter/optimizer/recorder"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/util"
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -55,7 +56,7 @@ type Opts struct {
 	Period time.Duration
 }
 
-func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfiles.TempFiles, samplerOpts ...sampler.Option) ([]mutate.Addendum, error) {
+func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfiles.TempFiles, rec *recorder.Recorder, samplerOpts ...sampler.Option) ([]mutate.Addendum, error) {
 	// Get image's basic information
 	manifest, err := srcImg.Manifest()
 	if err != nil {
@@ -97,6 +98,7 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 		eg           errgroup.Group
 		lowerdirs    []string
 		convertLayer = make([](func() (mutate.Addendum, error)), len(in))
+		monitors     = make([]logger.Monitor, len(in))
 	)
 	for i := range in {
 		i := i
@@ -137,6 +139,7 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 				return err
 			}
 			mon := logger.NewOpenReadMonitor()
+			monitors[i] = mon
 			if _, err := logger.Mount(mp, decompressedFile, mon); err != nil {
 				return errors.Wrapf(err, "failed to mount on %q", mp)
 			}
@@ -227,6 +230,27 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 	}
 	if err := eg.Wait(); err != nil {
 		return nil, err
+	}
+
+	if rec != nil {
+		manifestDigest, err := srcImg.Digest()
+		if err != nil {
+			return nil, err
+		}
+		manifestDigestStr := manifestDigest.String()
+		for i, mon := range monitors {
+			i := i
+			for _, f := range mon.DumpLog() {
+				e := &recorder.Entry{
+					Path:           f,
+					ManifestDigest: manifestDigestStr,
+					LayerIndex:     &i,
+				}
+				if err := rec.Record(e); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	return adds, nil

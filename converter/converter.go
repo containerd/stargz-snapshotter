@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/layer"
+	"github.com/containerd/stargz-snapshotter/converter/optimizer/recorder"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/util"
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -46,7 +47,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func ConvertIndex(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, srcIndex regpkg.ImageIndex, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (regpkg.ImageIndex, error) {
+func ConvertIndex(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, srcIndex regpkg.ImageIndex, platform *spec.Platform, tf *tempfiles.TempFiles, rec *recorder.Recorder, runopts ...sampler.Option) (regpkg.ImageIndex, error) {
 	var addendums []mutate.IndexAddendum
 	manifest, err := srcIndex.IndexManifest()
 	if err != nil {
@@ -67,7 +68,7 @@ func ConvertIndex(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, 
 			return nil, err
 		}
 		cctx := log.WithLogger(ctx, log.G(ctx).WithField("platform", platforms.Format(p)))
-		dstImg, err := ConvertImage(cctx, noOptimize, opts, srcImg, &p, tf, runopts...)
+		dstImg, err := ConvertImage(cctx, noOptimize, opts, srcImg, &p, tf, rec, runopts...)
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +90,7 @@ func ConvertIndex(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, 
 	return mutate.AppendManifests(empty.Index, addendums...), nil
 }
 
-func ConvertImage(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, srcImg regpkg.Image, platform *spec.Platform, tf *tempfiles.TempFiles, runopts ...sampler.Option) (dstImg regpkg.Image, _ error) {
+func ConvertImage(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, srcImg regpkg.Image, platform *spec.Platform, tf *tempfiles.TempFiles, rec *recorder.Recorder, runopts ...sampler.Option) (dstImg regpkg.Image, _ error) {
 	// The order of the list is base layer first, top layer last.
 	layers, err := srcImg.Layers()
 	if err != nil {
@@ -125,7 +126,7 @@ func ConvertImage(ctx gocontext.Context, noOptimize bool, opts *optimizer.Opts, 
 			return nil, errors.Wrapf(err, "failed to convert layer to stargz")
 		}
 	} else {
-		addendums, err = optimizer.Optimize(ctx, opts, srcImg, tf, runopts...)
+		addendums, err = optimizer.Optimize(ctx, opts, srcImg, tf, rec, runopts...)
 		if err != nil {
 			return nil, err
 		}
