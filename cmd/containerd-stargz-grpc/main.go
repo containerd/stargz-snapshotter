@@ -72,10 +72,8 @@ func main() {
 	)
 
 	// Get configuration from specified file
-	if *configPath != "" {
-		if _, err := toml.DecodeFile(*configPath, &config); err != nil {
-			log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
-		}
+	if _, err := toml.DecodeFile(*configPath, &config); err != nil && !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
+		log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
 	}
 
 	// Prepare kubeconfig-based keychain if required

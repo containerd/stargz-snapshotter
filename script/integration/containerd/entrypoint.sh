@@ -85,9 +85,6 @@ REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.soc
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
 function reboot_containerd {
     local CONFIG="${1:-}"
-    if [ "${CONFIG}" == "" ] ; then
-        CONFIG=/etc/containerd-stargz-grpc/config.toml
-    fi
 
     kill_all "containerd"
     kill_all "containerd-stargz-grpc"
@@ -100,10 +97,19 @@ function reboot_containerd {
              -maxdepth 1 -mindepth 1 -type d -exec umount "{}/fs" \;
     fi
     rm -rf "${REMOTE_SNAPSHOTTER_ROOT}"*
-    containerd-stargz-grpc --log-level=debug \
+    if [ "${CONFIG}" == "" ] ; then
+        containerd-stargz-grpc --log-level=debug \
+                           --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
+                           2>&1 | tee -a "${LOG_FILE}" & # Dump all log
+    else
+        containerd-stargz-grpc --log-level=debug \
                            --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
                            --config="${CONFIG}" \
-                           2>&1 | tee -a "${LOG_FILE}" & # Dump all log
+                           2>&1 | tee -a "${LOG_FILE}" &
+    fi
+    if [ `ps aux | grep containerd-stargz-grpc | grep -v grep | wc -l` == 0 ] ; then
+        return 1
+    fi
     retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
     containerd --log-level debug --config=/etc/containerd/config.toml &
     retry ctr version
@@ -246,5 +252,11 @@ diff --no-dereference -qr "${USR_NORMALSN_PLAIN_STARGZ}/" "${USR_STARGZSN_PLAIN_
 # Try to pull this image from different namespace.
 ctr-remote --namespace=dummy images rpull --user "${DUMMYUSER}:${DUMMYPASS}" \
            "${REGISTRY_HOST}:5000/ubuntu:esgz"
+
+############
+# Test for starting when no configuration file.
+mv /etc/containerd-stargz-grpc/config.toml /etc/containerd-stargz-grpc/config.toml_rm
+reboot_containerd
+mv /etc/containerd-stargz-grpc/config.toml_rm /etc/containerd-stargz-grpc/config.toml
 
 exit 0
