@@ -16,6 +16,9 @@ ARG CONTAINERD_VERSION=v1.4.3
 ARG RUNC_VERSION=v1.0.0-rc92
 ARG CNI_PLUGINS_VERSION=v0.9.0
 
+# Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
+# If TARGETARCH isn't supported by the builder, the default value is "amd64".
+
 FROM golang:1.13-buster AS golang-base
 
 # Build containerd
@@ -87,7 +90,7 @@ RUN apt-get update && apt-get install -y iptables && \
     # c.f. https://github.com/moby/moby/issues/26824
     update-alternatives --set iptables /usr/sbin/iptables-legacy && \
     mkdir -p /opt/cni/bin && \
-    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
 
 # Image which can be used as containerized `ctr-remote images optimize` command
 FROM ubuntu:20.04 AS oind
