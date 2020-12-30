@@ -119,7 +119,7 @@ ctr-remote image optimize --plain-http \
            http://registry2:5000/golang:1.15.3-esgz-hello-world
 ```
 
-The syntax of the `--mount` option is conpatible to containerd's `ctr` tool and [corresponds to the OCI Runtime Spec](https://github.com/opencontainers/runtime-spec/blob/v1.0.2/config.md#mounts).
+The syntax of the `--mount` option is compatible to containerd's `ctr` tool and [corresponds to the OCI Runtime Spec](https://github.com/opencontainers/runtime-spec/blob/v1.0.2/config.md#mounts).
 You need to specify the following key-value pairs with comma separators.
 
 |Field|Description|
