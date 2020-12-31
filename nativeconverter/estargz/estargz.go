@@ -69,6 +69,9 @@ func LayerConvertFunc(opts ...estargz.Option) nativeconverter.ConvertFunc {
 			return nil, err
 		}
 		labels := info.Labels
+		if labels == nil {
+			labels = make(map[string]string)
+		}
 
 		uncompressedReaderAt, err := cs.ReaderAt(ctx, *uncompressedDesc)
 		if err != nil {
