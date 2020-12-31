@@ -56,5 +56,5 @@ func (tf *TempFiles) CleanupAll() (allErr error) {
 		}
 	}
 	tf.files = nil
-	return nil
+	return
 }
