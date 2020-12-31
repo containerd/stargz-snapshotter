@@ -235,6 +235,9 @@ func (c *defaultConverter) convertManifest(ctx context.Context, cs content.Store
 	if err != nil {
 		return nil, err
 	}
+	if labels == nil {
+		labels = make(map[string]string)
+	}
 	if IsDockerType(manifest.MediaType) && c.docker2oci {
 		manifest.MediaType = ""
 		modified = true
@@ -314,6 +317,9 @@ func (c *defaultConverter) convertIndex(ctx context.Context, cs content.Store, d
 	if err != nil {
 		return nil, err
 	}
+	if labels == nil {
+		labels = make(map[string]string)
+	}
 	if IsDockerType(index.MediaType) && c.docker2oci {
 		index.MediaType = ""
 		modified = true
@@ -385,6 +391,9 @@ func (c *defaultConverter) convertConfig(ctx context.Context, cs content.Store, 
 	labels, err := readJSON(ctx, cs, &cfg, desc)
 	if err != nil {
 		return nil, err
+	}
+	if labels == nil {
+		labels = make(map[string]string)
 	}
 	if _, err := readJSON(ctx, cs, &cfgAsOCI, desc); err != nil {
 		return nil, err
