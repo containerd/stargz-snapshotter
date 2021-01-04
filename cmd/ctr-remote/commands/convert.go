@@ -78,12 +78,12 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		// platform flags
 		cli.StringSliceFlag{
 			Name:  "platform",
-			Usage: "Pull content from a specific platform",
+			Usage: "Convert content for a specific platform",
 			Value: &cli.StringSlice{},
 		},
 		cli.BoolFlag{
 			Name:  "all-platforms",
-			Usage: "exports content from all platforms",
+			Usage: "Convert content for all platforms",
 		},
 	},
 	Action: func(context *cli.Context) error {
