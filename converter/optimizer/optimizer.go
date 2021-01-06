@@ -26,20 +26,15 @@ import (
 	"compress/gzip"
 	gocontext "context"
 	"encoding/json"
-	"fmt"
 	"io"
-	"io/ioutil"
-	"os"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/stargz-snapshotter/analyzer"
+	"github.com/containerd/stargz-snapshotter/analyzer/sampler"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/layerconverter"
-	"github.com/containerd/stargz-snapshotter/converter/optimizer/logger"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/recorder"
-	"github.com/containerd/stargz-snapshotter/converter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/util"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
@@ -76,43 +71,15 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 		return nil, errors.Wrap(err, "failed to get image layers")
 	}
 
-	// Setup temporary workspace
-	tmpRoot, err := ioutil.TempDir("", "optimize-work")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(tmpRoot)
-	log.G(ctx).Debugf("workspace directory: %q", tmpRoot)
-	mktemp := func(name string) (path string, err error) {
-		if path, err = ioutil.TempDir(tmpRoot, "optimize-"+name+"-"); err != nil {
-			return "", err
-		}
-		if err = os.Chmod(path, 0755); err != nil {
-			return "", err
-		}
-		return path, nil
-	}
-
-	// mount layer loggers on temp directories.
+	// Unpack layers
 	var (
-		eg           errgroup.Group
-		lowerdirs    []string
-		convertLayer = make([](func() (mutate.Addendum, error)), len(in))
-		monitors     = make([]logger.Monitor, len(in))
+		eg                 errgroup.Group
+		decompressedLayers = make([]*io.SectionReader, len(in))
+		compressedLayers   = make([]*io.SectionReader, len(in))
+		mu                 sync.Mutex
 	)
-	for i := range in {
-		i := i
-		dgst, err := in[i].Digest()
-		if err != nil {
-			return nil, err
-		}
-		ctx := log.WithLogger(ctx, log.G(ctx).WithField("digest", dgst))
-		mp, err := mktemp(fmt.Sprintf("lower%d", i))
-		if err != nil {
-			return nil, err
-		}
-		defer syscall.Unmount(mp, syscall.MNT_FORCE)
-		lowerdirs = append([]string{mp}, lowerdirs...) // top layer first, base layer last (for overlayfs).
+	for i, layer := range in {
+		i, layer := i, layer
 		eg.Go(func() error {
 			// TODO: These files should be deduplicated.
 			compressedFile, err := tf.TempFile("", "compresseddata")
@@ -123,9 +90,7 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 			if err != nil {
 				return err
 			}
-
-			// Mount the layer
-			r, err := in[i].Compressed()
+			r, err := layer.Compressed()
 			if err != nil {
 				return err
 			}
@@ -138,35 +103,25 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 			if _, err := io.Copy(decompressedFile, zr); err != nil {
 				return err
 			}
-			mon := logger.NewOpenReadMonitor()
-			monitors[i] = mon
-			if _, err := logger.Mount(mp, decompressedFile, mon); err != nil {
-				return errors.Wrapf(err, "failed to mount on %q", mp)
-			}
-
-			// Prepare converters according to the layer type
-			var cvts []func() (mutate.Addendum, error)
-			if tocdgst, ok := getTOCDigest(manifest, dgst); ok && opts.Reuse {
-				// If this layer is a valid eStargz, try to reuse this layer.
-				// If no access occur to this layer during the specified workload,
-				// this layer will be reused without conversion.
-				compressedLayer, err := util.FileSectionReader(compressedFile)
-				if err != nil {
-					return err
-				}
-				f, err := layerconverter.FromEStargz(ctx, tocdgst, in[i], compressedLayer, mon)
-				if err == nil {
-					// TODO: remotely mount it instead of downloading the layer.
-					cvts = append(cvts, f)
-				}
-			}
 			decompressedLayer, err := util.FileSectionReader(decompressedFile)
 			if err != nil {
 				return err
 			}
-			convertLayer[i] = layerconverter.Compose(
-				append(cvts, layerconverter.FromTar(ctx, decompressedLayer, mon, tf))...)
-			log.G(ctx).Infof("unpacked")
+			compressedLayer, err := util.FileSectionReader(compressedFile)
+			if err != nil {
+				return err
+			}
+
+			mu.Lock()
+			decompressedLayers[i] = decompressedLayer
+			compressedLayers[i] = compressedLayer
+			mu.Unlock()
+
+			dgst, err := layer.Digest()
+			if err != nil {
+				return err
+			}
+			log.G(ctx).WithField("digest", dgst).Infof("unpacked")
 			return nil
 		})
 	}
@@ -174,57 +129,57 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 		return nil, err
 	}
 
-	// prepare FileSystem Bundle
-	var (
-		bundle   string
-		upperdir string
-		workdir  string
+	// Analyze prioritized files
+	var layerReaderAts []io.ReaderAt
+	for _, r := range decompressedLayers {
+		layerReaderAts = append(layerReaderAts, r)
+	}
+	logs, err := analyzer.Analyze(layerReaderAts, config,
+		analyzer.WithSamplerOpts(samplerOpts...),
+		analyzer.WithPeriod(opts.Period),
 	)
-	if bundle, err = mktemp("bundle"); err != nil {
-		return nil, err
-	}
-	if upperdir, err = mktemp("upperdir"); err != nil {
-		return nil, err
-	}
-	if workdir, err = mktemp("workdir"); err != nil {
-		return nil, err
-	}
-	var (
-		rootfs = sampler.GetRootfsPathUnder(bundle)
-		option = fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s",
-			strings.Join(lowerdirs, ":"), upperdir, workdir)
-	)
-	if err = os.Mkdir(rootfs, 0777); err != nil {
-		return nil, err
-	}
-	if err = syscall.Mount("overlay", rootfs, "overlay", 0, option); err != nil {
-		return nil, errors.Wrapf(err, "mount overlayfs on %q with data %q", rootfs, option)
-	}
-	defer syscall.Unmount(rootfs, syscall.MNT_FORCE)
-
-	// run the workload with timeout
-	runCtx, cancel := gocontext.WithTimeout(ctx, opts.Period)
-	defer cancel()
-	if err = sampler.Run(runCtx, bundle, config, samplerOpts...); err != nil {
-		return nil, errors.Wrap(err, "failed to run the sampler")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to analyze")
 	}
 
-	// get converted layers
+	// Convert layers
 	var (
-		adds   = make([]mutate.Addendum, len(convertLayer))
+		adds   = make([]mutate.Addendum, len(in))
 		addsMu sync.Mutex
 	)
-	for i, f := range convertLayer {
-		i, f := i, f
+	for i, layer := range in {
+		i, layer := i, layer
+		var (
+			prioritizedFiles = logs[i]
+			compressedL      = compressedLayers[i]
+			decompressedL    = decompressedLayers[i]
+		)
+		dgst, err := layer.Digest()
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get digest of layer")
+		}
+		ctx := log.WithLogger(ctx, log.G(ctx).WithField("digest", dgst))
 		eg.Go(func() error {
-			addendum, err := f()
+			var converters []layerconverter.LayerConverter
+			if tocdgst, ok := getTOCDigest(manifest, dgst); ok && opts.Reuse {
+				// If this layer is a valid eStargz, try to reuse this layer.
+				// If no access occur to this layer during the specified workload,
+				// this layer will be reused without conversion.
+				f, err := layerconverter.FromEStargz(ctx, tocdgst, layer, compressedL)
+				if err == nil {
+					// TODO: remotely mount it instead of downloading the layer.
+					converters = append(converters, f)
+				}
+			}
+			convert := layerconverter.Compose(append(converters,
+				layerconverter.FromTar(ctx, decompressedL, tf))...)
+			addendum, err := convert(prioritizedFiles)
 			if err != nil {
 				return errors.Wrap(err, "failed to get converted layer")
 			}
 			addsMu.Lock()
 			adds[i] = addendum
 			addsMu.Unlock()
-
 			return nil
 		})
 	}
@@ -232,15 +187,16 @@ func Optimize(ctx gocontext.Context, opts *Opts, srcImg regpkg.Image, tf *tempfi
 		return nil, err
 	}
 
+	// Dump records if required
 	if rec != nil {
 		manifestDigest, err := srcImg.Digest()
 		if err != nil {
 			return nil, err
 		}
 		manifestDigestStr := manifestDigest.String()
-		for i, mon := range monitors {
+		for i := range in {
 			i := i
-			for _, f := range mon.DumpLog() {
+			for _, f := range logs[i] {
 				e := &recorder.Entry{
 					Path:           f,
 					ManifestDigest: manifestDigestStr,

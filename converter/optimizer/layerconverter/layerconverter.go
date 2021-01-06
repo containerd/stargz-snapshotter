@@ -29,7 +29,6 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/layer"
-	"github.com/containerd/stargz-snapshotter/converter/optimizer/logger"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"
 	regpkg "github.com/google/go-containerregistry/pkg/v1"
@@ -38,14 +37,14 @@ import (
 	ocidigest "github.com/opencontainers/go-digest"
 )
 
-type LayerConverter = func() (mutate.Addendum, error)
+type LayerConverter = func(prioritizedFiles []string) (mutate.Addendum, error)
 
-func FromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *tempfiles.TempFiles) LayerConverter {
-	return func() (mutate.Addendum, error) {
+func FromTar(ctx context.Context, sr *io.SectionReader, tf *tempfiles.TempFiles) LayerConverter {
+	return func(prioritizedFiles []string) (mutate.Addendum, error) {
 		log.G(ctx).Debugf("converting...")
 		defer log.G(ctx).Infof("converted")
 
-		rc, err := estargz.Build(sr, estargz.WithPrioritizedFiles(mon.DumpLog()))
+		rc, err := estargz.Build(sr, estargz.WithPrioritizedFiles(prioritizedFiles))
 		if err != nil {
 			return mutate.Addendum{}, err
 		}
@@ -65,7 +64,7 @@ func FromTar(ctx context.Context, sr *io.SectionReader, mon logger.Monitor, tf *
 	}
 }
 
-func FromEStargz(ctx context.Context, tocdgst ocidigest.Digest, l regpkg.Layer, sr *io.SectionReader, mon logger.Monitor) (LayerConverter, error) {
+func FromEStargz(ctx context.Context, tocdgst ocidigest.Digest, l regpkg.Layer, sr *io.SectionReader) (LayerConverter, error) {
 	// If the layer is valid eStargz, use this layer without conversion
 	r, err := estargz.Open(sr)
 	if err != nil {
@@ -82,8 +81,8 @@ func FromEStargz(ctx context.Context, tocdgst ocidigest.Digest, l regpkg.Layer, 
 	if err != nil {
 		return nil, err
 	}
-	return func() (mutate.Addendum, error) {
-		if len(mon.DumpLog()) != 0 {
+	return func(prioritizedFiles []string) (mutate.Addendum, error) {
+		if len(prioritizedFiles) != 0 {
 			// There have been some accesses to this layer. we don't reuse this.
 			return mutate.Addendum{}, fmt.Errorf("unable to reuse accessed layer")
 		}
@@ -103,9 +102,9 @@ func FromEStargz(ctx context.Context, tocdgst ocidigest.Digest, l regpkg.Layer, 
 }
 
 func Compose(cs ...LayerConverter) LayerConverter {
-	return func() (add mutate.Addendum, allErr error) {
+	return func(prioritizedFiles []string) (add mutate.Addendum, allErr error) {
 		for _, f := range cs {
-			a, err := f()
+			a, err := f(prioritizedFiles)
 			if err == nil {
 				return a, nil
 			}

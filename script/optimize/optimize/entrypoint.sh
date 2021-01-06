@@ -23,6 +23,8 @@ ORG_IMAGE_TAG="${REGISTRY_HOST}:5000/test:org$(date '+%M%S')"
 OPT_IMAGE_TAG="${REGISTRY_HOST}:5000/test:opt$(date '+%M%S')"
 NOOPT_IMAGE_TAG="${REGISTRY_HOST}:5000/test:noopt$(date '+%M%S')"
 TOC_JSON_DIGEST_ANNOTATION="containerd.io/snapshot/stargz/toc.digest"
+NETWORK_MOUNT_TEST_ORG_IMAGE_TAG="ghcr.io/stargz-containers/centos:8-test"
+REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
 RETRYNUM=100
 RETRYINTERVAL=1
@@ -157,11 +159,18 @@ tar zcv -C "${CONTEXT_DIR}" . \
     | docker build -t "${ORG_IMAGE_TAG}" - \
     && docker push "${ORG_IMAGE_TAG}"
 
+echo "Loading original image"
+containerd --log-level debug &
+retry ctr version
+ctr i pull "${NETWORK_MOUNT_TEST_ORG_IMAGE_TAG}"
+ctr i pull -u "${DUMMYUSER}:${DUMMYPASS}" "${ORG_IMAGE_TAG}"
+
 echo "Checking optimized image..."
 WORKING_DIR=$(mktemp -d)
 PREFIX=/tmp/out/ make clean
 PREFIX=/tmp/out/ GO_BUILD_FLAGS="-race" make ctr-remote # Check data race
-/tmp/out/ctr-remote image optimize -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
+/tmp/out/ctr-remote ${OPTIMIZE_COMMAND} -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
+ctr i push -u "${DUMMYUSER}:${DUMMYPASS}" "${OPT_IMAGE_TAG}" || true
 cat <<EOF > "${WORKING_DIR}/0-want"
 accessor
 a.txt
@@ -189,7 +198,8 @@ check_optimization "${OPT_IMAGE_TAG}" \
                    "${WORKING_DIR}/2-want"
 
 echo "Checking non-optimized image..."
-/tmp/out/ctr-remote image optimize -no-optimize "${ORG_IMAGE_TAG}" "${NOOPT_IMAGE_TAG}"
+/tmp/out/ctr-remote ${NO_OPTIMIZE_COMMAND} "${ORG_IMAGE_TAG}" "${NOOPT_IMAGE_TAG}"
+ctr i push -u "${DUMMYUSER}:${DUMMYPASS}" "${NOOPT_IMAGE_TAG}" || true
 cat <<EOF > "${WORKING_DIR}/0-want"
 .no.prefetch.landmark
 a.txt
@@ -250,7 +260,7 @@ EOF
 
 # Try to connect to the internet from the container
 TESTDIR=$(mktemp -d)
-/tmp/out/ctr-remote i optimize \
+/tmp/out/ctr-remote ${OPTIMIZE_COMMAND} \
                     --period=20 \
                     --cni \
                     --cni-plugin-conf-dir='/tmp/cni' \
@@ -260,7 +270,7 @@ TESTDIR=$(mktemp -d)
                     --mount="type=bind,src=${TESTDIR},dst=/mnt,options=bind" \
                     --entrypoint='[ "/bin/bash", "-c" ]' \
                     --args='[ "curl example.com > /mnt/result_page && ip a show dev eth0 ; echo -n $? > /mnt/if_exists && ip a > /mnt/if_info && cat /etc/hosts > /mnt/hosts" ]' \
-                    ghcr.io/stargz-containers/centos:8-test "${REGISTRY_HOST}:5000/test:1"
+                    "${NETWORK_MOUNT_TEST_ORG_IMAGE_TAG}" "${REGISTRY_HOST}:5000/test:1"
 
 # Check if all contents are successfuly passed
 if ! [ -f "${TESTDIR}/if_exists" ] || \

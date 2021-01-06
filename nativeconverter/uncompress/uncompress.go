@@ -26,6 +26,7 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/stargz-snapshotter/nativeconverter"
+	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -39,6 +40,19 @@ func LayerConvertFunc(ctx context.Context, cs content.Store, desc ocispec.Descri
 	info, err := cs.Info(ctx, desc.Digest)
 	if err != nil {
 		return nil, err
+	}
+	// Check if uncompressed content already exists in the content store
+	if uDgstStr, ok := info.Labels[nativeconverter.LabelUncompressed]; ok {
+		if uDgst, err := digest.Parse(uDgstStr); err == nil {
+			uInfo, err := cs.Info(ctx, uDgst)
+			if err == nil {
+				newDesc := desc
+				newDesc.Digest = uInfo.Digest
+				newDesc.Size = uInfo.Size
+				newDesc.MediaType = convertMediaType(newDesc.MediaType)
+				return &newDesc, nil
+			}
+		}
 	}
 	readerAt, err := cs.ReaderAt(ctx, desc)
 	if err != nil {

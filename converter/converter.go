@@ -30,10 +30,10 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/stargz-snapshotter/analyzer/sampler"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/layer"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/recorder"
-	"github.com/containerd/stargz-snapshotter/converter/optimizer/sampler"
 	"github.com/containerd/stargz-snapshotter/converter/optimizer/util"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/util/tempfiles"

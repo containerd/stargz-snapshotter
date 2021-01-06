@@ -27,10 +27,24 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/nativeconverter"
 	"github.com/containerd/stargz-snapshotter/nativeconverter/uncompress"
+	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
+
+// LayerConvertWithOptsFunc converts legacy tar.gz layers into eStargz tar.gz layers.
+// Media type is unchanged. Should be used in conjunction with WithDockerToOCI(). See
+// LayerConvertFunc for more details. The difference between this function and
+// LayerConvertFunc is that this allows to specify additional eStargz options per layer.
+func LayerConvertWithOptsFunc(commonOpts []estargz.Option, opts map[digest.Digest][]estargz.Option) nativeconverter.ConvertFunc {
+	if opts == nil {
+		return LayerConvertFunc(commonOpts...)
+	}
+	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		return LayerConvertFunc(append(commonOpts, opts[desc.Digest]...)...)(ctx, cs, desc)
+	}
+}
 
 // LayerConvertFunc converts legacy tar.gz layers into eStargz tar.gz layers.
 // Media type is unchanged.
