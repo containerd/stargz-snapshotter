@@ -22,6 +22,7 @@ REPO="${CONTEXT}../../"
 REGISTRY_HOST="cri-registry"
 TEST_NODE_NAME="cri-testenv-container"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
+PREPARE_NODE_NAME="cri-prepare-node"
 
 source "${CONTEXT}/const.sh"
 source "${REPO}/script/util/utils.sh"
@@ -34,6 +35,7 @@ CONTAINERD_CONFIG=$(mktemp)
 SNAPSHOTTER_CONFIG=$(mktemp)
 TMPFILE=$(mktemp)
 LOG_FILE=$(mktemp)
+MIRROR_TMP=$(mktemp -d)
 function cleanup {
     ORG_EXIT_CODE="${1}"
     docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v || true
@@ -43,6 +45,7 @@ function cleanup {
     rm "${SNAPSHOTTER_CONFIG}" || true
     rm "${TMPFILE}" || true
     rm "${LOG_FILE}" || true
+    rm -rf "${MIRROR_TMP}" || true
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
@@ -61,12 +64,30 @@ services:
     - /dev/fuse:/dev/fuse
     - "critest-containerd-data:/var/lib/containerd"
     - "critest-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
+  image-prepare:
+    image: golang:1.15-buster
+    container_name: "${PREPARE_NODE_NAME}"
+    privileged: true
+    entrypoint:
+    - sleep
+    - infinity
+    tmpfs:
+    - /tmp:exec,mode=777
+    environment:
+    - TOOLS_DIR=/tools/
+    volumes:
+    - "critest-prepare-containerd-data:/var/lib/containerd"
+    - "critest-prepare-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
+    - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
+    - "${MIRROR_TMP}:/tools/"
   registry:
     image: registry:2
     container_name: ${REGISTRY_HOST}
 volumes:
   critest-containerd-data:
   critest-containerd-stargz-grpc-data:
+  critest-prepare-containerd-data:
+  critest-prepare-containerd-stargz-grpc-data:
 EOF
 docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate
 
@@ -84,13 +105,11 @@ if [ "${CONNECTED}" != "true" ] ; then
     exit 1
 fi
 
-# Mirror and stargzify all images used in tests
-cat "${IMAGE_LIST}" | sort | uniq | while read IMAGE ; do
-    MIRROR_URL="http://${REGISTRY_HOST}:5000"$(echo "${IMAGE}" | sed -E 's/^[^/]*//g' | sed -E 's/@.*//g')
-    STARGZIFY="ctr-remote images optimize --plain-http ${IMAGE} ${MIRROR_URL}"
-    echo "Mirroring: ${STARGZIFY}"
-    docker exec "${TEST_NODE_NAME}" /bin/bash -c "${STARGZIFY}"
-done
+# Mirror and optimize all images used in tests
+echo "${REGISTRY_HOST}:5000" > "${MIRROR_TMP}/host"
+cp "${IMAGE_LIST}" "${MIRROR_TMP}/list"
+cp "${REPO}/script/cri/mirror.sh" "${MIRROR_TMP}/mirror.sh"
+docker exec "${PREPARE_NODE_NAME}" /bin/bash /tools/mirror.sh
 
 # Configure mirror registries for containerd and snapshotter
 docker exec "${TEST_NODE_NAME}" cat /etc/containerd/config.toml > "${CONTAINERD_CONFIG}"
@@ -115,13 +134,14 @@ docker cp "${CONTAINERD_CONFIG}" "${TEST_NODE_NAME}":/etc/containerd/config.toml
 docker cp "${SNAPSHOTTER_CONFIG}" "${TEST_NODE_NAME}":/etc/containerd-stargz-grpc/config.toml
 
 # Replace digests specified in testing tool to stargz-formatted one
+docker exec "${PREPARE_NODE_NAME}" ctr-remote i ls
 cat "${IMAGE_LIST}" | grep "@sha256:" | while read IMAGE ; do
     URL_PATH=$(echo "${IMAGE}" | sed -E 's/^[^/]*//g' | sed -E 's/@.*//g')
-    URL="http://${REGISTRY_HOST}:5000/v2${URL_PATH}/manifests/latest"
+    MIRROR_TAG="${REGISTRY_HOST}:5000${URL_PATH}"
     OLD_DIGEST=$(echo "${IMAGE}" | sed -E 's/.*(sha256:[a-z0-9]*).*/\1/g')
-    NEW_DIGEST=$(docker exec "${TEST_NODE_NAME}" curl -k --head \
-                        -H "Accept: application/vnd.docker.distribution.manifest.v2+json" "${URL}" \
-                     | grep "Docker-Content-Digest" | sed -E 's/.*(sha256:[a-z0-9]*).*/\1/g')
+    echo "Getting the digest of : ${MIRROR_TAG}"
+    NEW_DIGEST=$(docker exec "${PREPARE_NODE_NAME}" ctr-remote i ls name=="${MIRROR_TAG}" \
+                     | grep "sha256" | sed -E 's/.*(sha256:[a-z0-9]*).*/\1/g')
     echo "Converting: ${OLD_DIGEST} => ${NEW_DIGEST}"
     docker exec "${TEST_NODE_NAME}" \
            find /go/src/github.com/kubernetes-sigs/cri-tools/pkg -type f -exec \

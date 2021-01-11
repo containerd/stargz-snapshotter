@@ -14,17 +14,24 @@
    limitations under the License.
 */
 
-package util
+package commands
 
 import (
-	"io"
+	"fmt"
 	"os"
+
+	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/service"
+	"github.com/urfave/cli"
 )
 
-func FileSectionReader(file *os.File) (*io.SectionReader, error) {
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	return io.NewSectionReader(file, 0, info.Size()), nil
+var FanotifyCommand = cli.Command{
+	Name:   "fanotify",
+	Hidden: true,
+	Action: func(context *cli.Context) error {
+		target := context.Args().Get(0)
+		if target == "" {
+			return fmt.Errorf("target must be specified")
+		}
+		return service.Serve(target, os.Stdin, os.Stdout)
+	},
 }

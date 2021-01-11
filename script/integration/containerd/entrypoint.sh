@@ -81,6 +81,7 @@ function kill_all {
 }
 
 CONTAINERD_ROOT=/var/lib/containerd/
+CONTAINERD_STATUS=/run/containerd/
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
 function reboot_containerd {
@@ -88,6 +89,7 @@ function reboot_containerd {
 
     kill_all "containerd"
     kill_all "containerd-stargz-grpc"
+    rm -rf "${CONTAINERD_STATUS}"*
     rm -rf "${CONTAINERD_ROOT}"*
     if [ -f "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
         rm "${REMOTE_SNAPSHOTTER_SOCKET}"
@@ -107,9 +109,6 @@ function reboot_containerd {
                            --config="${CONFIG}" \
                            2>&1 | tee -a "${LOG_FILE}" &
     fi
-    if [ `ps aux | grep containerd-stargz-grpc | grep -v grep | wc -l` == 0 ] ; then
-        return 1
-    fi
     retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
     containerd --log-level debug --config=/etc/containerd/config.toml &
     retry ctr version
@@ -120,16 +119,6 @@ cp /auth/certs/domain.crt /usr/local/share/ca-certificates
 update-ca-certificates
 retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
 
-echo "Preparing images..."
-crane copy ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
-crane copy alpine:3.10.2 "${REGISTRY_HOST}:5000/alpine:3.10.2"
-stargzify "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:sgz"
-ctr-remote image optimize "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:esgz"
-ctr-remote image optimize "${REGISTRY_HOST}:5000/alpine:3.10.2" "${REGISTRY_HOST}:5000/alpine:esgz"
-ctr-remote image optimize --plain-http "${REGISTRY_HOST}:5000/alpine:3.10.2" "http://${REGISTRY_ALT_HOST}:5000/alpine:esgz"
-
-############
-# Tests for stargz snapshotter
 reboot_containerd
 OK=$(ctr-remote plugins ls \
          | grep io.containerd.snapshotter \
@@ -141,6 +130,23 @@ if [ "${OK}" != "ok" ] ; then
     echo "Plugin ${PLUGIN} not found" 1>&2
     exit 1
 fi
+
+function optimize {
+    local SRC="${1}"
+    local DST="${2}"
+    local PUSHOPTS=${@:3}
+    ctr-remote image pull -u "${DUMMYUSER}:${DUMMYPASS}" "${SRC}"
+    ctr-remote image optimize --oci "${SRC}" "${DST}"
+    ctr-remote image push ${PUSHOPTS} -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
+}
+
+echo "Preparing images..."
+crane copy ubuntu:18.04 "${REGISTRY_HOST}:5000/ubuntu:18.04"
+crane copy alpine:3.10.2 "${REGISTRY_HOST}:5000/alpine:3.10.2"
+stargzify "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:sgz"
+optimize "${REGISTRY_HOST}:5000/ubuntu:18.04" "${REGISTRY_HOST}:5000/ubuntu:esgz"
+optimize "${REGISTRY_HOST}:5000/alpine:3.10.2" "${REGISTRY_HOST}:5000/alpine:esgz"
+optimize "${REGISTRY_HOST}:5000/alpine:3.10.2" "${REGISTRY_ALT_HOST}:5000/alpine:esgz" --plain-http
 
 ############
 # Tests for refreshing and mirror

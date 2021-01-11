@@ -83,4 +83,12 @@ else
 fi
 echo "running containerd..."
 containerd --config="${CONTAINERD_CONFIG_DIR}config.toml" &
-retry ctr version
+CTRCMD=ctr-remote
+if ! which "${CTRCMD}" ; then
+    if ! which ctr ; then
+        echo "ctr nor ctr-remote not found"
+        exit 1
+    fi
+    CTRCMD=ctr
+fi
+retry "${CTRCMD}" version
