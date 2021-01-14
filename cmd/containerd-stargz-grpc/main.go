@@ -34,8 +34,6 @@ import (
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/hashicorp/go-multierror"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -77,17 +75,17 @@ func main() {
 	}
 
 	// Prepare kubeconfig-based keychain if required
-	kc := authn.DefaultKeychain
+	credsFuncs := []func(string) (string, string, error){keychain.NewDockerconfigKeychain(ctx)}
 	if config.KubeconfigKeychainConfig.EnableKeychain {
 		var opts []keychain.KubeconfigOption
 		if kcp := config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
 			opts = append(opts, keychain.WithKubeconfigPath(kcp))
 		}
-		kc = authn.NewMultiKeychain(kc, keychain.NewKubeconfigKeychain(ctx, opts...))
+		credsFuncs = append(credsFuncs, keychain.NewKubeconfigKeychain(ctx, opts...))
 	}
 
 	// Use RegistryHosts based on ResolverConfig and keychain
-	hosts := hostsFromConfig(config.ResolverConfig, kc)
+	hosts := hostsFromConfig(config.ResolverConfig, credsFuncs...)
 
 	// Configure filesystem and snapshotter
 	fs, err := stargzfs.NewFilesystem(filepath.Join(*rootDir, "stargz"),
@@ -149,7 +147,7 @@ func waitForSIGINT() {
 	<-c
 }
 
-func hostsFromConfig(cfg ResolverConfig, keychain authn.Keychain) docker.RegistryHosts {
+func hostsFromConfig(cfg ResolverConfig, credsFuncs ...func(string) (string, string, error)) docker.RegistryHosts {
 	return func(host string) (hosts []docker.RegistryHost, _ error) {
 		for _, h := range append(cfg.Host[host].Mirrors, MirrorConfig{
 			Host: host,
@@ -164,25 +162,14 @@ func hostsFromConfig(cfg ResolverConfig, keychain authn.Keychain) docker.Registr
 				Authorizer: docker.NewDockerAuthorizer(
 					docker.WithAuthClient(tr),
 					docker.WithAuthCreds(func(host string) (string, string, error) {
-						if host == "registry-1.docker.io" {
-							host = "index.docker.io"
+						for _, f := range credsFuncs {
+							if username, secret, err := f(host); err != nil {
+								return "", "", err
+							} else if !(username == "" && secret == "") {
+								return username, secret, nil
+							}
 						}
-						reg, err := name.NewRegistry(host)
-						if err != nil {
-							return "", "", err
-						}
-						authn, err := keychain.Resolve(reg)
-						if err != nil {
-							return "", "", err
-						}
-						acfg, err := authn.Authorization()
-						if err != nil {
-							return "", "", err
-						}
-						if acfg.IdentityToken != "" {
-							return "", acfg.IdentityToken, nil
-						}
-						return acfg.Username, acfg.Password, nil
+						return "", "", nil
 					})),
 			}
 			if localhost, _ := docker.MatchLocalhost(config.Host); localhost || h.Insecure {
