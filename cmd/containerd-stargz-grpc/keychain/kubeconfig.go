@@ -26,9 +26,6 @@ import (
 
 	"github.com/containerd/containerd/log"
 	dcfile "github.com/docker/cli/cli/config/configfile"
-	dctypes "github.com/docker/cli/cli/config/types"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -66,24 +63,13 @@ func WithKubeconfigPath(path string) KubeconfigOption {
 // everything, including booting containerd/kubelet/apiserver and configuring
 // users/roles.
 // TODO: support update of kubeconfig file
-func NewKubeconfigKeychain(ctx context.Context, opts ...KubeconfigOption) authn.Keychain {
+func NewKubeconfigKeychain(ctx context.Context, opts ...KubeconfigOption) func(string) (string, string, error) {
 	var kcOpts options
 	for _, o := range opts {
 		o(&kcOpts)
 	}
-	return newKeychain(ctx, kcOpts.kubeconfigPath)
-}
-
-type authenticator struct {
-	keychain *keychain
-	target   authn.Resource
-}
-
-func (at *authenticator) Authorization() (*authn.AuthConfig, error) {
-	if ac, found := at.keychain.lookup(at.target); found {
-		return ac, nil
-	}
-	return nil, fmt.Errorf("creds for %q not found", at.target.String())
+	kc := newKeychain(ctx, kcOpts.kubeconfigPath)
+	return kc.credentials
 }
 
 func newKeychain(ctx context.Context, kubeconfigPath string) *keychain {
@@ -147,36 +133,23 @@ type keychain struct {
 	informer cache.SharedIndexInformer
 }
 
-func (kc *keychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
-	if _, found := kc.lookup(target); found {
-		return &authenticator{
-			keychain: kc,
-			target:   target,
-		}, nil
+func (kc *keychain) credentials(host string) (string, string, error) {
+	if host == "docker.io" || host == "registry-1.docker.io" {
+		// Creds of "docker.io" is stored keyed by "https://index.docker.io/v1/".
+		host = "https://index.docker.io/v1/"
 	}
-	return authn.Anonymous, nil
-}
-
-func (kc *keychain) lookup(target authn.Resource) (*authn.AuthConfig, bool) {
-	key := target.RegistryStr()
-	if key == name.DefaultRegistry {
-		key = authn.DefaultAuthKey
-	}
-	empty := dctypes.AuthConfig{}
 	kc.configMu.Lock()
 	defer kc.configMu.Unlock()
 	for _, cfg := range kc.config {
-		if acfg, err := cfg.GetAuthConfig(key); err == nil && acfg != empty {
-			return &authn.AuthConfig{
-				Username:      acfg.Username,
-				Password:      acfg.Password,
-				Auth:          acfg.Auth,
-				IdentityToken: acfg.IdentityToken,
-				RegistryToken: acfg.RegistryToken,
-			}, true
+		if acfg, err := cfg.GetAuthConfig(host); err == nil {
+			if acfg.IdentityToken != "" {
+				return "", acfg.IdentityToken, nil
+			} else if !(acfg.Username == "" && acfg.Password == "") {
+				return acfg.Username, acfg.Password, nil
+			}
 		}
 	}
-	return nil, false
+	return "", "", nil
 }
 
 func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Interface) error {
