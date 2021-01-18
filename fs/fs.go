@@ -45,6 +45,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -706,6 +707,11 @@ func (n *node) Readdir(ctx context.Context) (fusefs.DirStream, syscall.Errno) {
 
 		}
 	}
+
+	// Avoid undeterministic order of entries on each call
+	sort.Slice(ents, func(i, j int) bool {
+		return ents[i].Name < ents[j].Name
+	})
 
 	return fusefs.NewListDirStream(ents), 0
 }
