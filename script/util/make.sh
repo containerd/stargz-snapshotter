@@ -29,7 +29,7 @@ function cleanup {
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
-FROM golang:1.13
+FROM golang:1.15
 RUN apt-get update -y && apt-get --no-install-recommends install -y fuse
 EOF
 docker build -t "${IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"

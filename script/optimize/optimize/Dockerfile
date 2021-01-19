@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-FROM golang:1.13
+FROM golang:1.15
 
 # basic tools
 # docker-ce-cli is used only to log into registry with ~/.docker/config.json

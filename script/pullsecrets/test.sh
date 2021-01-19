@@ -78,7 +78,7 @@ if ! ( cd "${CONTEXT}" && \
                   -v "${AUTH_DIR}/certs/domain.crt:/usr/local/share/ca-certificates/rgst.crt:ro" \
                   -v "${DOCKERCONFIG}:/root/.docker/config.json:ro" \
                   -v "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro" \
-                  golang:1.13-buster /bin/bash -c "apt-get update -y && \
+                  golang:1.15-buster /bin/bash -c "apt-get update -y && \
 apt-get --no-install-recommends install -y fuse && \
 update-ca-certificates && \
 cd /go/src/github.com/containerd/stargz-snapshotter && \

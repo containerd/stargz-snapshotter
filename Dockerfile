@@ -19,7 +19,7 @@ ARG CNI_PLUGINS_VERSION=v0.9.0
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
-FROM golang:1.13-buster AS golang-base
+FROM golang:1.15-buster AS golang-base
 
 # Build containerd
 FROM golang-base AS containerd-dev
