@@ -57,6 +57,14 @@ func LayerConvertFunc(ctx context.Context, cs content.Store, desc ocispec.Descri
 		return nil, err
 	}
 	defer w.Close()
+
+	// Reset the writing position
+	// Old writer possibly remains without aborted
+	// (e.g. conversion interrupted by a signal)
+	if err := w.Truncate(0); err != nil {
+		return nil, err
+	}
+
 	n, err := io.Copy(w, newR)
 	if err != nil {
 		return nil, err
