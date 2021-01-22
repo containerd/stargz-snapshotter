@@ -24,9 +24,10 @@ import (
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/images/converter"
+	"github.com/containerd/containerd/images/converter/uncompress"
+	"github.com/containerd/containerd/labels"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/nativeconverter"
-	"github.com/containerd/stargz-snapshotter/nativeconverter/uncompress"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -39,7 +40,7 @@ import (
 //
 // Otherwise "containerd.io/snapshot/stargz/toc.digest" annotation will be lost,
 // because the Docker media type does not support layer annotations.
-func LayerConvertFunc(opts ...estargz.Option) nativeconverter.ConvertFunc {
+func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
 		if !images.IsLayerType(desc.MediaType) {
 			// No conversion. No need to return an error here.
@@ -68,9 +69,9 @@ func LayerConvertFunc(opts ...estargz.Option) nativeconverter.ConvertFunc {
 		if err != nil {
 			return nil, err
 		}
-		labels := info.Labels
-		if labels == nil {
-			labels = make(map[string]string)
+		labelz := info.Labels
+		if labelz == nil {
+			labelz = make(map[string]string)
 		}
 
 		uncompressedReaderAt, err := cs.ReaderAt(ctx, *uncompressedDesc)
@@ -106,8 +107,8 @@ func LayerConvertFunc(opts ...estargz.Option) nativeconverter.ConvertFunc {
 			return nil, err
 		}
 		// update diffID label
-		labels[nativeconverter.LabelUncompressed] = blob.DiffID().String()
-		if err = w.Commit(ctx, n, "", content.WithLabels(labels)); err != nil && !errdefs.IsAlreadyExists(err) {
+		labelz[labels.LabelUncompressed] = blob.DiffID().String()
+		if err = w.Commit(ctx, n, "", content.WithLabels(labelz)); err != nil && !errdefs.IsAlreadyExists(err) {
 			return nil, err
 		}
 		if err := w.Close(); err != nil {
@@ -115,7 +116,7 @@ func LayerConvertFunc(opts ...estargz.Option) nativeconverter.ConvertFunc {
 		}
 		newDesc := desc
 		if uncompress.IsUncompressedType(newDesc.MediaType) {
-			if nativeconverter.IsDockerType(newDesc.MediaType) {
+			if images.IsDockerType(newDesc.MediaType) {
 				newDesc.MediaType += ".gzip"
 			} else {
 				newDesc.MediaType += "+gzip"

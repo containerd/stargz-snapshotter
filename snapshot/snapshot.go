@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
+	"github.com/moby/sys/mountinfo"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
@@ -688,7 +689,7 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 }
 
 func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
-	mounts, err := mount.Self()
+	mounts, err := mountinfo.GetMounts(nil)
 	if err != nil {
 		return err
 	}
