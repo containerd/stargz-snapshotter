@@ -21,9 +21,9 @@ import (
 	"testing"
 
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/nativeconverter"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -39,8 +39,8 @@ func TestLayerConvertFunc(t *testing.T) {
 
 	lcf := LayerConvertFunc(estargz.WithPrioritizedFiles([]string{"hello"}))
 	docker2oci := true
-	platformMC := platforms.Default()
-	cf := nativeconverter.DefaultIndexConvertFunc(lcf, docker2oci, platformMC)
+	platformMC := platforms.DefaultStrict()
+	cf := converter.DefaultIndexConvertFunc(lcf, docker2oci, platformMC)
 
 	newDesc, err := cf(ctx, cs, *desc)
 	if err != nil {
