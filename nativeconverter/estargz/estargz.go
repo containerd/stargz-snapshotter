@@ -90,6 +90,14 @@ func LayerConvertFunc(opts ...estargz.Option) nativeconverter.ConvertFunc {
 			return nil, err
 		}
 		defer w.Close()
+
+		// Reset the writing position
+		// Old writer possibly remains without aborted
+		// (e.g. conversion interrupted by a signal)
+		if err := w.Truncate(0); err != nil {
+			return nil, err
+		}
+
 		n, err := io.Copy(w, blob)
 		if err != nil {
 			return nil, err
