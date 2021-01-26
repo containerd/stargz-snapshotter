@@ -93,10 +93,13 @@ class BenchRunner:
                     'drupal:8.7.6': RunArgs(waitline='apache2 -D FOREGROUND'),
                     'jenkins:2.60.3': RunArgs(waitline='Jenkins is fully up and running'),
                     'redis:5.0.5': RunArgs(waitline='Ready to accept connections'),
+                    'tomcat:10.0.0-jdk15-openjdk-buster': RunArgs(waitline='Server startup'),
+                    'postgres:13.1': RunArgs(waitline='database system is ready to accept connections',
+                                             env={'POSTGRES_PASSWORD': 'abc'}),
     }
 
     CMD_STDIN = {'php:7.3.8':  RunArgs(stdin='php -r "echo \\\"hello\\n\\\";"; exit\n'),
-                 'gcc:9.2.0': RunArgs(stdin='cd /src; gcc main.c; ./a.out; exit\n',
+                 'gcc:10.2.0': RunArgs(stdin='cd /src; gcc main.c; ./a.out; exit\n',
                                 mount=[('gcc', '/src')]),
                  'golang:1.12.9': RunArgs(stdin='cd /go/src; go run main.go; exit\n',
                                    mount=[('go', '/go/src')]),
@@ -105,7 +108,7 @@ class BenchRunner:
     }
 
     CMD_ARG = {'perl:5.30': RunArgs(arg='perl -e \'print("hello\\n")\''),
-               'python:3.7': RunArgs(arg='python -c \'print("hello")\''),
+               'python:3.9': RunArgs(arg='python -c \'print("hello")\''),
                'pypy:3.5': RunArgs(arg='pypy3 -c \'print("hello")\''),
                'node:13.13.0': RunArgs(arg='node -e \'console.log("hello")\''),
     }
@@ -115,19 +118,20 @@ class BenchRunner:
                 [Bench('alpine:3.10.2', 'distro'),
                  Bench('fedora:30', 'distro'),
                  Bench('rethinkdb:2.3.6', 'database'),
+                 Bench('postgres:13.1', 'database'),
                  Bench('redis:5.0.5', 'database'),
-                 Bench('python:3.7', 'language'),
+                 Bench('python:3.9', 'language'),
                  Bench('golang:1.12.9', 'language'),
-                 Bench('gcc:9.2.0', 'language'),
+                 Bench('gcc:10.2.0', 'language'),
                  Bench('jruby:9.2.8.0', 'language'),
                  Bench('perl:5.30', 'language'),
                  Bench('php:7.3.8', 'language'),
                  Bench('pypy:3.5', 'language'),
                  Bench('r-base:3.6.1', 'language'),
-                 Bench('glassfish:4.1-jdk8', 'web-server'),
                  Bench('drupal:8.7.6'),
                  Bench('jenkins:2.60.3'),
                  Bench('node:13.13.0'),
+                 Bench('tomcat:10.0.0-jdk15-openjdk-buster', 'web-server'),
              ]])
 
     def __init__(self, repository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER):
