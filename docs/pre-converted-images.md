@@ -25,10 +25,8 @@ Additionally, image names listed in `Image Name` contain the following suffixes 
 |`ghcr.io/stargz-containers/drupal:8.7.6-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
 |`ghcr.io/stargz-containers/fedora:30-org`|Executing `echo hello` on the shell|
 |`ghcr.io/stargz-containers/fedora:30-esgz`|Executing `echo hello` on the shell|
-|`ghcr.io/stargz-containers/gcc:9.2.0-org`|Compiling and executing a program which prints `hello`|
-|`ghcr.io/stargz-containers/gcc:9.2.0-esgz`|Compiling and executing a program which prints `hello`|
-|`ghcr.io/stargz-containers/glassfish:4.1-jdk8-org`|Code execution until up and ready message (`Running GlassFish`) is printed|
-|`ghcr.io/stargz-containers/glassfish:4.1-jdk8-esgz`|Code execution until up and ready message (`Running GlassFish`) is printed|
+|`ghcr.io/stargz-containers/gcc:10.2.0-org`|Compiling and executing a program which prints `hello`|
+|`ghcr.io/stargz-containers/gcc:10.2.0-esgz`|Compiling and executing a program which prints `hello`|
 |`ghcr.io/stargz-containers/golang:1.12.9-org`|Compiling and executing a program which prints `hello`|
 |`ghcr.io/stargz-containers/golang:1.12.9-esgz`|Compiling and executing a program which prints `hello`|
 |`ghcr.io/stargz-containers/jenkins:2.60.3-org`|Code execution until up and ready message (`Jenkins is fully up and running`) is printed|
@@ -43,11 +41,15 @@ Additionally, image names listed in `Image Name` contain the following suffixes 
 |`ghcr.io/stargz-containers/php:7.3.8-esgz`|Printing `hello`|
 |`ghcr.io/stargz-containers/pypy:3.5-org`|Printing `hello`|
 |`ghcr.io/stargz-containers/pypy:3.5-esgz`|Printing `hello`|
-|`ghcr.io/stargz-containers/python:3.7-org`|Printing `hello`|
-|`ghcr.io/stargz-containers/python:3.7-esgz`|Printing `hello`|
+|`ghcr.io/stargz-containers/python:3.9-org`|Printing `hello`|
+|`ghcr.io/stargz-containers/python:3.9-esgz`|Printing `hello`|
 |`ghcr.io/stargz-containers/r-base:3.6.1-org`|Printing `hello`|
 |`ghcr.io/stargz-containers/r-base:3.6.1-esgz`|Printing `hello`|
 |`ghcr.io/stargz-containers/redis:5.0.5-org`|Code execution until up and ready message (`Ready to accept connections`) is printed|
 |`ghcr.io/stargz-containers/redis:5.0.5-esgz`|Code execution until up and ready message (`Ready to accept connections`) is printed|
 |`ghcr.io/stargz-containers/rethinkdb:2.3.6-org`|Code execution until up and ready message (`Server ready`) is printed|
 |`ghcr.io/stargz-containers/rethinkdb:2.3.6-esgz`|Code execution until up and ready message (`Server ready`) is printed|
+|`ghcr.io/stargz-containers/tomcat:10.0.0-jdk15-openjdk-buster-org`|Code execution until up and ready message (`Server startup`) is printed|
+|`ghcr.io/stargz-containers/tomcat:10.0.0-jdk15-openjdk-buster-esgz`|Code execution until up and ready message (`Server startup`) is printed|
+|`ghcr.io/stargz-containers/postgres:13.1-org`|Code execution until up and ready message (`database system is ready to accept connections`) is printed|
+|`ghcr.io/stargz-containers/postgres:13.1-esgz`|Code execution until up and ready message (`database system is ready to accept connections`) is printed|
