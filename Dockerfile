@@ -92,17 +92,6 @@ RUN apt-get update && apt-get install -y iptables && \
     mkdir -p /opt/cni/bin && \
     curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
 
-# Image which can be used as containerized `ctr-remote images optimize` command
-FROM ubuntu:20.04 AS oind
-
-RUN apt-get update -y && \
-    apt-get --no-install-recommends install -y fuse runc ca-certificates
-
-COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
-COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
-
-ENTRYPOINT [ "/usr/local/bin/ctr-remote", "images", "optimize" ]
-
 # Image which can be used as a node image for KinD
 FROM kindest/node:v1.20.0
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/

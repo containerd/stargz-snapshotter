@@ -22,24 +22,51 @@ REGISTRY_HOST=registry-optimize
 REPO_PATH=/go/src/github.com/containerd/stargz-snapshotter
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
+OPTIMIZE_BASE_IMAGE_NAME="optimize-image-base"
+OPTIMIZE_TEST_IMAGE_NAME="optimize-image-test"
 
 source "${REPO}/script/util/utils.sh"
 
+if [ "${OPTIMIZE_NO_RECREATE:-}" != "true" ] ; then
+    echo "Preparing node image..."
+
+    # Enable to check race
+    docker build -t "${OPTIMIZE_BASE_IMAGE_NAME}" \
+           --target snapshotter-base \
+           --build-arg=SNAPSHOTTER_BUILD_FLAGS="-race" \
+           ${DOCKER_BUILD_ARGS:-} \
+           "${REPO}"
+fi
+
 DOCKER_COMPOSE_YAML=$(mktemp)
 AUTH_DIR=$(mktemp -d)
+TMP_CONTEXT=$(mktemp -d)
 function cleanup {
     local ORG_EXIT_CODE="${1}"
     rm "${DOCKER_COMPOSE_YAML}" || true
     rm -rf "${AUTH_DIR}" || true
+    rm -rf "${TMP_CONTEXT}" || true
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
+cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
+FROM ${OPTIMIZE_BASE_IMAGE_NAME}
+
+RUN apt-get update -y && \
+    apt-get --no-install-recommends install -y jq iptables && \
+    GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane
+EOF
+docker build -t "${OPTIMIZE_TEST_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
+
 echo "Preparing creds..."
 prepare_creds "${AUTH_DIR}" "${REGISTRY_HOST}" "${DUMMYUSER}" "${DUMMYPASS}"
 
-echo "Preparing docker-compose.yml..."
-cat <<EOF > "${DOCKER_COMPOSE_YAML}"
+echo "Testing..."
+function test_optimize {
+    local OPTIMIZE_COMMAND="${1}"
+    local NO_OPTIMIZE_COMMAND="${2}"
+    cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3.3"
 services:
   docker_opt:
@@ -59,9 +86,7 @@ services:
     - docker-client:/certs/client
     - ${AUTH_DIR}:/registry:ro
   testenv_opt:
-    build:
-      context: "${REPO}/script/optimize/optimize"
-      dockerfile: Dockerfile
+    image: ${OPTIMIZE_TEST_IMAGE_NAME}
     container_name: testenv_opt
     privileged: true
     working_dir: ${REPO_PATH}
@@ -70,13 +95,16 @@ services:
     - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000
     - DOCKER_HOST=tcp://docker:2376
     - DOCKER_TLS_VERIFY=1
+    - OPTIMIZE_COMMAND=${OPTIMIZE_COMMAND}
+    - NO_OPTIMIZE_COMMAND=${NO_OPTIMIZE_COMMAND}
     tmpfs:
     - /tmp:exec,mode=777
     volumes:
     - "${REPO}:${REPO_PATH}:ro"
     - ${AUTH_DIR}:/auth:ro
     - docker-client:/docker/client:ro
-    - /dev/fuse:/dev/fuse
+    - "optimize-containerd-data:/var/lib/containerd"
+    - "optimize-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
   registry:
     image: registry:2
     container_name: ${REGISTRY_HOST}
@@ -90,18 +118,21 @@ services:
     - ${AUTH_DIR}:/auth:ro
 volumes:
   docker-client:
+  optimize-containerd-data:
+  optimize-containerd-stargz-grpc-data:
 EOF
+    local FAIL=
+    if ! ( cd "${CONTEXT}" && \
+               docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} testenv_opt && \
+               docker-compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
+        FAIL=true
+    fi
+    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+    if [ "${FAIL}" == "true" ] ; then
+        exit 1
+    fi
+}
 
-echo "Testing..."
-FAIL=
-if ! ( cd "${CONTEXT}" && \
-           docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} testenv_opt && \
-           docker-compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
-    FAIL=true
-fi
-docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
-if [ "${FAIL}" == "true" ] ; then
-    exit 1
-fi
+test_optimize "image optimize --oci" "image optimize --no-optimize --oci"
 
 exit 0

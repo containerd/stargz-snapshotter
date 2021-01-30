@@ -42,7 +42,10 @@ TMP_DIR = tempfile.mkdtemp()
 LEGACY_MODE = "legacy"
 ESTARGZ_NOOPT_MODE = "estargz-noopt"
 ESTARGZ_MODE = "estargz"
-DEFAULT_OPTIMIZER = "ctr-remote image optimize"
+DEFAULT_OPTIMIZER = "ctr-remote image optimize --oci"
+DEFAULT_PULLER = "nerdctl image pull"
+DEFAULT_PUSHER = "nerdctl image push"
+DEFAULT_TAGGER = "nerdctl image tag"
 BENCHMARKOUT_MARK = "BENCHMARK_OUTPUT: "
 
 def exit(status):
@@ -134,11 +137,14 @@ class BenchRunner:
                  Bench('tomcat:10.0.0-jdk15-openjdk-buster', 'web-server'),
              ]])
 
-    def __init__(self, repository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER):
+    def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER):
         self.docker = 'ctr'
         self.repository = repository
+        self.srcrepository = srcrepository
         self.mode = mode
         self.optimizer = optimizer
+        self.puller = puller
+        self.pusher = pusher
 
     def lazypull(self):
         if self.mode == ESTARGZ_NOOPT_MODE or self.mode == ESTARGZ_MODE:
@@ -313,8 +319,8 @@ class BenchRunner:
     def convert_echo_hello(self, repo):
         self.mode = ESTARGZ_MODE
         period=10
-        cmd = ('%s -cni -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s %s/%s' %
-               (self.optimizer, period, repo, self.repository, self.add_suffix(repo)))
+        cmd = ('%s -cni -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s/%s %s/%s' %
+               (self.optimizer, period, self.srcrepository, repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -326,8 +332,8 @@ class BenchRunner:
         entry = ""
         if runargs.arg != "": # FIXME: this is naive...
             entry = '-entrypoint \'["/bin/sh", "-c"]\''
-        cmd = ('%s -cni -period %s %s %s %s %s/%s' %
-               (self.optimizer, period, entry, genargs(runargs.arg), repo, self.repository, self.add_suffix(repo)))
+        cmd = ('%s -cni -period %s %s %s %s/%s %s/%s' %
+               (self.optimizer, period, entry, genargs(runargs.arg), self.srcrepository, repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -336,8 +342,8 @@ class BenchRunner:
         self.mode = ESTARGZ_MODE
         period = 90
         env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s -cni -period %s %s %s %s %s/%s' %
-               (self.optimizer, period, env, genargs(runargs.arg), repo, self.repository, self.add_suffix(repo)))
+        cmd = ('%s -cni -period %s %s %s %s/%s %s/%s' %
+               (self.optimizer, period, env, genargs(runargs.arg), self.srcrepository, repo, self.repository, self.add_suffix(repo)))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -350,8 +356,8 @@ class BenchRunner:
             a = tmp_copy(a)
             mounts += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
         period = 60
-        cmd = ('%s -cni -period %s %s -entrypoint \'["/bin/sh", "-c"]\' %s %s %s/%s' %
-               (self.optimizer, period, mounts, genargs(runargs.stdin_sh), repo, self.repository, self.add_suffix(repo)))
+        cmd = ('%s -i -cni -period %s %s -entrypoint \'["/bin/sh", "-c"]\' %s %s/%s %s/%s' %
+               (self.optimizer, period, mounts, genargs(runargs.stdin_sh), self.srcrepository, repo, self.repository, self.add_suffix(repo)))
         print cmd
         p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         print runargs.stdin
@@ -362,18 +368,23 @@ class BenchRunner:
 
     def copy_img(self, repo):
         self.mode = LEGACY_MODE
-        cmd = 'crane copy %s %s/%s' % (repo, self.repository, self.add_suffix(repo))
+        cmd = 'crane copy %s/%s %s/%s' % (self.srcrepository, repo, self.repository, self.add_suffix(repo))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
+
+    def convert_and_push_img(self, repo):
         self.mode = ESTARGZ_NOOPT_MODE
-        cmd = '%s --no-optimize %s %s/%s' % (self.optimizer, repo, self.repository, self.add_suffix(repo))
+        self.pull_img(repo)
+        cmd = '%s --no-optimize %s/%s %s/%s' % (self.optimizer, self.srcrepository, repo, self.repository, self.add_suffix(repo))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
-    
-    def prepare(self, bench):
-        name = bench.name
+        self.push_img(repo)
+
+    def optimize_img(self, name):
+        self.mode = ESTARGZ_MODE
+        self.pull_img(name)
         if name in BenchRunner.ECHO_HELLO:
             self.convert_echo_hello(repo=name)
         elif name in BenchRunner.CMD_ARG:
@@ -385,7 +396,25 @@ class BenchRunner:
         else:
             print 'Unknown bench: '+name
             exit(1)
+        self.push_img(name)
+
+    def push_img(self, repo):
+        cmd = '%s %s/%s' % (self.pusher, self.repository, self.add_suffix(repo))
+        print cmd
+        rc = os.system(cmd)
+        assert(rc == 0)
+
+    def pull_img(self, name):
+        cmd = '%s %s/%s' % (self.puller, self.srcrepository, name)
+        print cmd
+        rc = os.system(cmd)
+        assert(rc == 0)
+
+    def prepare(self, bench):
+        name = bench.name
+        self.optimize_img(name)
         self.copy_img(name)
+        self.convert_and_push_img(name)
 
     def operation(self, op, bench, cid):
         if op == 'run':
@@ -402,6 +431,7 @@ def main():
         print 'Usage: bench.py [OPTIONS] [BENCHMARKS]'
         print 'OPTIONS:'
         print '--repository=<repository>'
+        print '--srcrepository=<repository>'
         print '--all'
         print '--list'
         print '--list-json'
