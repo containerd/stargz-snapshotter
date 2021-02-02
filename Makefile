@@ -18,6 +18,8 @@ CMD_DESTDIR ?= /usr/local
 GO111MODULE_VALUE=auto
 PREFIX ?= out/
 
+GO_LD_FLAGS=-ldflags "-s -w"
+
 CMD=containerd-stargz-grpc ctr-remote
 
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
@@ -31,10 +33,10 @@ build: $(CMD)
 FORCE:
 
 containerd-stargz-grpc: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) -v ./cmd/containerd-stargz-grpc
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/containerd-stargz-grpc
 
 ctr-remote: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) -v ./cmd/ctr-remote
+	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/ctr-remote
 
 check:
 	@echo "$@"
