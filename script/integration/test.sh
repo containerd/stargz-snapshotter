@@ -33,10 +33,9 @@ if [ "${INTEGRATION_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
 
     # Enable to check race
-    docker build -t "${INTEGRATION_BASE_IMAGE_NAME}" \
+    docker build ${DOCKER_BUILD_ARGS:-} -t "${INTEGRATION_BASE_IMAGE_NAME}" \
            --target snapshotter-base \
            --build-arg=SNAPSHOTTER_BUILD_FLAGS="-race" \
-           ${DOCKER_BUILD_ARGS:-} \
            "${REPO}"
 fi
 
@@ -80,7 +79,7 @@ ENV CONTAINERD_SNAPSHOTTER=""
 
 ENTRYPOINT [ "/entrypoint.sh" ]
 EOF
-docker build -t "${INTEGRATION_TEST_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
+docker build ${DOCKER_BUILD_ARGS:-} -t "${INTEGRATION_TEST_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
 
 echo "Preparing creds..."
 prepare_creds "${AUTH_DIR}" "${REGISTRY_HOST}" "${DUMMYUSER}" "${DUMMYPASS}"

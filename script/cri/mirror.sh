@@ -16,8 +16,6 @@
 
 set -euo pipefail
 
-CONTAINERD_VERSION="1.4.3"
-RUNC_VERSION="v1.0.0-rc92"
 if [ "${TOOLS_DIR}" == "" ] ; then
     echo "tools dir must be provided"
     exit 1
@@ -46,17 +44,12 @@ function retry {
     fi
 }
 
-apt-get update -y && apt-get --no-install-recommends install -y wget
-wget https://github.com/opencontainers/runc/releases/download/"${RUNC_VERSION}"/runc.amd64 -O /bin/runc
-chmod 755 /bin/runc
-wget https://github.com/containerd/containerd/releases/download/v"${CONTAINERD_VERSION}"/containerd-"${CONTAINERD_VERSION}"-linux-amd64.tar.gz
-tar zxf containerd-1.4.3-linux-amd64.tar.gz -C /
-containerd &
-retry ctr version
-
 cd "${SS_REPO}"
 PREFIX=/out/ make ctr-remote
 mv /out/ctr-remote /bin/ctr-remote
+
+containerd &
+retry ctr-remote version
 
 HOST=$(cat "${HOST_FILE}")
 cat "${LIST_FILE}" | sort | uniq | while read IMAGE ; do

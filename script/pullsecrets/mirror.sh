@@ -16,8 +16,6 @@
 
 set -euo pipefail
 
-CONTAINERD_VERSION="1.4.3"
-RUNC_VERSION="v1.0.0-rc92"
 SRC="${1}"
 DST="${2}"
 SS_REPO="/go/src/github.com/containerd/stargz-snapshotter"
@@ -42,16 +40,13 @@ function retry {
     fi
 }
 
-apt-get update -y && apt-get --no-install-recommends install -y wget
 update-ca-certificates
-wget https://github.com/opencontainers/runc/releases/download/"${RUNC_VERSION}"/runc.amd64 -O /bin/runc
-chmod 755 /bin/runc
-wget https://github.com/containerd/containerd/releases/download/v"${CONTAINERD_VERSION}"/containerd-"${CONTAINERD_VERSION}"-linux-amd64.tar.gz
-tar zxf containerd-1.4.3-linux-amd64.tar.gz -C /
-containerd &retry ctr version
 
 cd "${SS_REPO}"
 PREFIX=/out/ make ctr-remote
+
+containerd &
+retry /out/ctr-remote version
 /out/ctr-remote images pull "${SRC}"
 /out/ctr-remote images optimize --oci "${SRC}" "${DST}"
 /out/ctr-remote images push -u "${REGISTRY_CREDS}" "${DST}"

@@ -24,6 +24,7 @@ DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 OPTIMIZE_BASE_IMAGE_NAME="optimize-image-base"
 OPTIMIZE_TEST_IMAGE_NAME="optimize-image-test"
+CNI_VERSION="v0.9.0"
 
 source "${REPO}/script/util/utils.sh"
 
@@ -31,10 +32,9 @@ if [ "${OPTIMIZE_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
 
     # Enable to check race
-    docker build -t "${OPTIMIZE_BASE_IMAGE_NAME}" \
+    docker build ${DOCKER_BUILD_ARGS:-} -t "${OPTIMIZE_BASE_IMAGE_NAME}" \
            --target snapshotter-base \
            --build-arg=SNAPSHOTTER_BUILD_FLAGS="-race" \
-           ${DOCKER_BUILD_ARGS:-} \
            "${REPO}"
 fi
 
@@ -50,12 +50,46 @@ function cleanup {
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
+cat <<'EOF' > "${TMP_CONTEXT}/test.conflist"
+{
+  "cniVersion": "0.4.0",
+  "name": "test",
+  "plugins" : [{
+    "type": "bridge",
+    "bridge": "test0",
+    "isDefaultGateway": true,
+    "forceAddress": false,
+    "ipMasq": true,
+    "hairpinMode": true,
+    "ipam": {
+      "type": "host-local",
+      "subnet": "10.10.0.0/16"
+    }
+  },
+  {
+    "type": "loopback"
+  }]
+}
+EOF
+
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
+# Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
+# If TARGETARCH isn't supported by the builder, the default value is "amd64".
+
 FROM ${OPTIMIZE_BASE_IMAGE_NAME}
+ARG TARGETARCH
 
 RUN apt-get update -y && \
     apt-get --no-install-recommends install -y jq iptables && \
-    GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane
+    GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane && \
+    mkdir -p /opt/tmp/cni/bin /etc/tmp/cni/net.d && \
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-${CNI_VERSION}.tgz | tar xzv -C /opt/tmp/cni/bin
+
+# Installs CNI-related files to irregular paths (/opt/tmp/cni/bin and /etc/tmp/cni/net.d) for test.
+# see entrypoint.sh for more details.
+
+COPY ./test.conflist /etc/tmp/cni/net.d/test.conflist
+
 EOF
 docker build -t "${OPTIMIZE_TEST_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
 

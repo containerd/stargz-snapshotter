@@ -56,11 +56,12 @@ COPY --from=snapshotter-dev /out/* /
 # `docker-ce-cli` is used only for users to `docker login` to registries (e.g. DockerHub)
 # with configuring ~/.docker/config.json
 FROM golang-base AS containerd-base
+ARG TARGETARCH
 RUN apt-get update -y && apt-get --no-install-recommends install -y fuse \
                                  apt-transport-https gnupg2 software-properties-common && \
     curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
     add-apt-repository \
-      "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
+      "deb [arch=${TARGETARCH:-amd64}] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
     apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=runc-dev /out/sbin/* /usr/local/sbin/

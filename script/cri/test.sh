@@ -23,7 +23,8 @@ source "${CONTEXT}/const.sh"
 
 if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
-    docker build -t "${NODE_BASE_IMAGE_NAME}" "${REPO}"
+    docker build ${DOCKER_BUILD_ARGS:-} -t "${NODE_BASE_IMAGE_NAME}" "${REPO}"
+    docker build ${DOCKER_BUILD_ARGS:-} -t "${PREPARE_NODE_IMAGE}" --target containerd-base "${REPO}"
 fi
 
 TMP_CONTEXT=$(mktemp -d)
@@ -38,12 +39,16 @@ trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 # Prepare the testing node
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
+# Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
+# If TARGETARCH isn't supported by the builder, the default value is "amd64".
+
 FROM ${NODE_BASE_IMAGE_NAME}
+ARG TARGETARCH
 
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
 RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
-    curl https://dl.google.com/go/go1.15.6.linux-amd64.tar.gz \
+    curl https://dl.google.com/go/go1.15.6.linux-\${TARGETARCH:-amd64}.tar.gz \
     | tar -C /usr/local -xz && \
     go get -u github.com/onsi/ginkgo/ginkgo && \
     git clone -b v1.19.0 https://github.com/kubernetes-sigs/cri-tools \
