@@ -1,0 +1,59 @@
+name: Nightly
+on:
+  schedule:
+    - cron: '0 0 * * *' # Every day at midnight
+  pull_request:
+    paths:
+      - '.github/workflows/nightly.yml'
+
+# This nightly test helps us to track changes on containerd on daily basis
+# and enable us to quickly fix snapshotter when some of recent changes on
+# containerd cause incompatibility with this snapshotter.
+#
+# TODO1(ktock): Output binaries if needed.
+# TODO2(ktock): Ideally, this test should be invoked in containerd/containerd's CI on each PR.
+#               This will make sure that each commit merged into containerd/containerd safely
+#               works with stargz snapshotter.
+
+env:
+  DOCKER_BUILDKIT: 1
+  DOCKER_BUILD_ARGS: --build-arg=CONTAINERD_VERSION=master # do tests with the latest containerd
+
+jobs:
+  integration:
+    runs-on: ubuntu-20.04
+    name: Integration
+    steps:
+    - name: Install htpasswd for setting up private registry
+      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
+    - uses: actions/checkout@v2
+    - name: Run integration test
+      run: make integration
+
+  test-optimize:
+    runs-on: ubuntu-20.04
+    name: Optimize
+    steps:
+    - name: Install htpasswd for setting up private registry
+      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
+    - uses: actions/checkout@v2
+    - name: Run test for optimize subcommand of ctr-remote
+      run: make test-optimize
+
+  test-pullsecrets:
+    runs-on: ubuntu-20.04
+    name: PullSecrets
+    steps:
+    - name: Install htpasswd for setting up private registry
+      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
+    - uses: actions/checkout@v2
+    - name: Run test for pulling image from private registry on Kubernetes
+      run: make test-pullsecrets
+
+  test-cri:
+    runs-on: ubuntu-20.04
+    name: CRIValidation
+    steps:
+    - uses: actions/checkout@v2
+    - name: Varidate the runtime through CRI
+      run: make test-cri

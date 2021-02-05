@@ -18,3 +18,4 @@ set -euo pipefail
 
 NODE_BASE_IMAGE_NAME="cri-image-base"
 NODE_TEST_IMAGE_NAME="cri-image-test"
+PREPARE_NODE_IMAGE="cri-prepare-image"

@@ -52,7 +52,13 @@ done
 
 # If container started successfully, varidate the runtime through CRI
 if [ "${FAIL}" == "" ] ; then
-    if ! docker exec -i "${TEST_NODE_ID}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK} ; then
+    if ! (
+            echo "===== VERSION INFORMATION =====" && \
+                docker exec "${TEST_NODE_ID}" runc --version && \
+                docker exec "${TEST_NODE_ID}" containerd --version && \
+                echo "===============================" && \
+                docker exec -i "${TEST_NODE_ID}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK}
+        ) ; then
         FAIL=true
     fi
 fi

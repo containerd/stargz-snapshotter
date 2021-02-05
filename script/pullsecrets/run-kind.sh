@@ -42,7 +42,7 @@ trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 if [ "${KIND_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
-    docker build -t "${NODE_BASE_IMAGE_NAME}" "${REPO}"
+    docker build ${DOCKER_BUILD_ARGS:-} -t "${NODE_BASE_IMAGE_NAME}" "${REPO}"
 fi
 
 # Prepare the testing node with enabling k8s keychain
@@ -74,6 +74,11 @@ docker network connect "${REGISTRY_NETWORK}" "${KIND_NODENAME}"
 docker cp "${KIND_REGISTRY_CA}" "${KIND_NODENAME}:${NODE_TEST_CERT_FILE}"
 docker exec -i "${KIND_NODENAME}" update-ca-certificates
 docker exec -i "${KIND_NODENAME}" systemctl restart stargz-snapshotter
+
+echo "===== VERSION INFORMATION ====="
+docker exec "${KIND_NODENAME}" containerd --version
+docker exec "${KIND_NODENAME}" runc --version
+echo "==============================="
 
 echo "Configuring kubernetes cluster..."
 CONFIGJSON_BASE64="$(cat ${DOCKERCONFIGJSON_DATA} | base64 -i -w 0)"

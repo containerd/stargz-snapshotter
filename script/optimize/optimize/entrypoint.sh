@@ -147,6 +147,11 @@ function check_optimization {
     return 0
 }
 
+echo "===== VERSION INFORMATION ====="
+containerd --version
+runc --version
+echo "==============================="
+
 echo "Connecting to the docker server..."
 retry ls /docker/client/cert.pem /docker/client/ca.pem
 mkdir -p /root/.docker/ && cp /docker/client/* /root/.docker/
@@ -240,38 +245,15 @@ check_optimization "${NOOPT_IMAGE_TAG}" \
 # c.f. https://github.com/moby/moby/issues/26824
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 
-# Install CNI plugins and configs to the customized paths (not /opt/cni/bin and /etc/cni/net.d)
-mkdir /tmp/cni/ /tmp/bin/
-curl -Ls https://github.com/containernetworking/plugins/releases/download/v0.8.7/cni-plugins-linux-amd64-v0.8.7.tgz | tar xzv -C /tmp/bin
-cat <<'EOF' > /tmp/cni/test.conflist
-{
-  "cniVersion": "0.4.0",
-  "name": "test",
-  "plugins" : [{
-    "type": "bridge",
-    "bridge": "test0",
-    "isDefaultGateway": true,
-    "forceAddress": false,
-    "ipMasq": true,
-    "hairpinMode": true,
-    "ipam": {
-      "type": "host-local",
-      "subnet": "10.10.0.0/16"
-    }
-  },
-  {
-    "type": "loopback"
-  }]
-}
-EOF
-
 # Try to connect to the internet from the container
+# CNI-related files are installed to irregular paths (see Dockerfile for more details).
+# Check if these files are recognized through flags.
 TESTDIR=$(mktemp -d)
 /tmp/out/ctr-remote ${OPTIMIZE_COMMAND} \
                     --period=20 \
                     --cni \
-                    --cni-plugin-conf-dir='/tmp/cni' \
-                    --cni-plugin-dir='/tmp/bin' \
+                    --cni-plugin-conf-dir='/etc/tmp/cni/net.d' \
+                    --cni-plugin-dir='/opt/tmp/cni/bin' \
                     --add-hosts='testhost:1.2.3.4,test2:5.6.7.8' \
                     --dns-nameservers='8.8.8.8' \
                     --mount="type=bind,src=${TESTDIR},dst=/mnt,options=bind" \

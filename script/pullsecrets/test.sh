@@ -25,10 +25,15 @@ DUMMYPASS=dummypass
 TESTIMAGE_ORIGIN="ghcr.io/stargz-containers/ubuntu:20.04"
 TESTIMAGE="${REGISTRY_HOST}:5000/library/ubuntu:20.04"
 KIND_CLUSTER_NAME=kind-stargz-snapshotter
-CONTAINERD_VERSION="1.4.3"
 PREPARE_NODE_NAME="cri-prepare-node"
+PREPARE_NODE_IMAGE="cri-prepare-image"
 
 source "${REPO}/script/util/utils.sh"
+
+if [ "${KIND_NO_RECREATE:-}" != "true" ] ; then
+    echo "Preparing preparation node image..."
+    docker build ${DOCKER_BUILD_ARGS:-} -t "${PREPARE_NODE_IMAGE}" --target containerd-base "${REPO}"
+fi
 
 AUTH_DIR=$(mktemp -d)
 DOCKERCONFIG=$(mktemp)
@@ -70,7 +75,7 @@ services:
     volumes:
     - ${AUTH_DIR}:/auth
   image-prepare:
-    image: golang:1.15-buster
+    image: "${PREPARE_NODE_IMAGE}"
     container_name: "${PREPARE_NODE_NAME}"
     privileged: true
     entrypoint:

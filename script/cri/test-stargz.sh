@@ -65,7 +65,7 @@ services:
     - "critest-containerd-data:/var/lib/containerd"
     - "critest-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
   image-prepare:
-    image: golang:1.15-buster
+    image: "${PREPARE_NODE_IMAGE}"
     container_name: "${PREPARE_NODE_NAME}"
     privileged: true
     entrypoint:
@@ -168,6 +168,10 @@ if [ "${CONNECTED}" != "true" ] ; then
     echo "Failed to connect to containerd"
     exit 1
 fi
+echo "===== VERSION INFORMATION ====="
+docker exec "${TEST_NODE_NAME}" runc --version
+docker exec "${TEST_NODE_NAME}" containerd --version
+echo "==============================="
 docker exec "${TEST_NODE_NAME}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK}
 
 # Check if stargz snapshotter is working
