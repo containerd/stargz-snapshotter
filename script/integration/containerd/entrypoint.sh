@@ -111,7 +111,10 @@ function reboot_containerd {
     fi
     retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
     containerd --log-level debug --config=/etc/containerd/config.toml &
-    retry ctr version
+
+    # Makes sure containerd and containerd-stargz-grpc are up-and-running.
+    UNIQUE_SUFFIX=$(date +%s%N | shasum | base64 | fold -w 10 | head -1)
+    retry ctr snapshots --snapshotter="${PLUGIN}" prepare "connectiontest-dummy-${UNIQUE_SUFFIX}" ""
 }
 
 echo "Logging into the registry..."
