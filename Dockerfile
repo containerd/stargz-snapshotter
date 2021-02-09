@@ -41,12 +41,14 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev && \
 
 # Build stargz snapshotter
 FROM golang-base AS snapshotter-dev
+ARG TARGETARCH
+ARG GOARM
 ARG SNAPSHOTTER_BUILD_FLAGS
 ARG CTR_REMOTE_BUILD_FLAGS
 COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
 RUN cd $GOPATH/src/github.com/containerd/stargz-snapshotter && \
-    PREFIX=/out/ GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make containerd-stargz-grpc && \
-    PREFIX=/out/ GO_BUILD_FLAGS=${CTR_REMOTE_BUILD_FLAGS} make ctr-remote
+    PREFIX=/out/ GOARCH=${TARGETARCH} GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make containerd-stargz-grpc && \
+    PREFIX=/out/ GOARCH=${TARGETARCH} GO_BUILD_FLAGS=${CTR_REMOTE_BUILD_FLAGS} make ctr-remote
 
 # Binaries for release
 FROM scratch AS release-binaries

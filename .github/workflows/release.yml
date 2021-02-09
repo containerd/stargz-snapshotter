@@ -10,7 +10,10 @@ env:
 jobs:
   build:
     runs-on: ubuntu-20.04
-    name: Release
+    name: Build
+    strategy:
+      matrix:
+        arch: ["amd64", "arm-v7", "arm64", "ppc64le", "s390x"]
     env:
       OUTPUT_DIR: ${{ github.workspace }}/out
     steps:
@@ -21,10 +24,33 @@ jobs:
       run: |
         mkdir ${OUTPUT_DIR}
         RELEASE_TAG="${GITHUB_REF##*/}"
-        TAR_FILE_NAME="stargz-snapshotter-${RELEASE_TAG}-linux-amd64.tar.gz"
+        ARCH_ID="${{ matrix.arch }}"
+        BUILD_ARGS=--build-arg=TARGETARCH=${ARCH_ID}
+        if [ "${ARCH_ID}" == "arm-v7" ] ; then
+          BUILD_ARGS="--build-arg=TARGETARCH=arm --build-arg=GOARM=7"
+        fi
+        TAR_FILE_NAME="stargz-snapshotter-${RELEASE_TAG}-linux-${ARCH_ID}.tar.gz"
         SHA256SUM_FILE_NAME="${TAR_FILE_NAME}.sha256sum"
-        docker build --target release-binaries -o - . | gzip > "${OUTPUT_DIR}/${TAR_FILE_NAME}"
+        docker build ${BUILD_ARGS} --target release-binaries -o - . | gzip > "${OUTPUT_DIR}/${TAR_FILE_NAME}"
         ( cd ${OUTPUT_DIR}; sha256sum ${TAR_FILE_NAME} ) > "${OUTPUT_DIR}/${SHA256SUM_FILE_NAME}"
+    - name: Save Binary
+      uses: actions/upload-artifact@v2
+      with:
+        name: builds-${{ matrix.arch }}
+        path: ${{ env.OUTPUT_DIR }}/*
+
+  release:
+    runs-on: ubuntu-20.04
+    name: Release
+    needs: [build]
+    env:
+      OUTPUT_DIR: ${{ github.workspace }}/builds
+    steps:
+    - uses: actions/checkout@v2
+    - name: Download Builds
+      uses: actions/download-artifact@v2
+      with:
+        path: ${{ env.OUTPUT_DIR }}
     - name: Create Release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -36,5 +62,10 @@ jobs:
         (TBD)
         EOF
         ASSET_FLAGS=()
-        for F in ${OUTPUT_DIR}/*; do ASSET_FLAGS+=("-a" "$F"); done
+        ls -al ${OUTPUT_DIR}/
+        for A in "amd64" "arm-v7" "arm64" "ppc64le" "s390x" ; do
+          for F in ${OUTPUT_DIR}/builds-${A}/* ; do
+            ASSET_FLAGS+=("-a" "$F")
+          done
+        done
         hub release create "${ASSET_FLAGS[@]}" -F ${GITHUB_WORKSPACE}/release-note.txt --draft "${RELEASE_TAG}"
