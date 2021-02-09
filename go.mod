@@ -8,7 +8,7 @@ require (
 	github.com/containerd/containerd v1.5.0-beta.0.0.20210122062454-5a66c2ae5cec
 	github.com/containerd/continuity v0.0.0-20201208142359-180525291bb7
 	github.com/containerd/go-cni v1.0.1
-	github.com/containerd/stargz-snapshotter/estargz v0.0.0-00010101000000-000000000000
+	github.com/containerd/stargz-snapshotter/estargz v0.3.0
 	github.com/docker/cli v0.0.0-20191017083524-a8ff7f821017
 	github.com/docker/docker v17.12.0-ce-rc1.0.20200730172259-9f28837c1d93+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.6.3 // indirect
