@@ -157,6 +157,15 @@ root@8dab301bd68d:/# ls
 bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
 ```
 
+## Importing Stargz Snapshotter as go module
+
+Currently, Stargz Snapshotter repository contains two Go modules as the following and both of them need to be imported.
+
+- `github.com/containerd/stargz-snapshotter`
+- `github.com/containerd/stargz-snapshotter/estargz`
+
+Please make sure you import the both of them and they point to *the same commit version*.
+
 ## Project details
 
 Stargz Snapshotter is a containerd **non-core** sub-project, licensed under the [Apache 2.0 license](./LICENSE).
