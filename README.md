@@ -2,6 +2,7 @@
 
 [![Tests Status](https://github.com/containerd/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ATests+branch%3Amaster)
 [![Benchmarking](https://github.com/containerd/stargz-snapshotter/workflows/Benchmark/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ABenchmark+branch%3Amaster)
+[![Nightly](https://github.com/containerd/stargz-snapshotter/workflows/Nightly/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ANightly+branch%3Amaster)
 
 Read also introductory blog: [Startup Containers in Lightning Speed with Lazy Image Distribution on Containerd](https://medium.com/nttlabs/startup-containers-in-lightning-speed-with-lazy-image-distribution-on-containerd-243d94522361)
 
