@@ -30,6 +30,20 @@ RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     cd $GOPATH/src/github.com/containerd/containerd && \
     GO111MODULE=off make && DESTDIR=/out/ make install
 
+# Build containerd with builtin stargz snapshotter
+FROM golang-base AS containerd-snapshotter-dev
+ARG CONTAINERD_VERSION
+COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
+RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
+    git clone -b ${CONTAINERD_VERSION} --depth 1 \
+              https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
+    echo 'require github.com/containerd/stargz-snapshotter v0.0.0\nreplace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' \
+      >> $GOPATH/src/github.com/containerd/containerd/go.mod && \
+    echo 'package main \nimport _ "github.com/containerd/stargz-snapshotter/service/plugin"' \
+      > $GOPATH/src/github.com/containerd/containerd/cmd/containerd/builtins_stargz_snapshotter.go && \
+    cd $GOPATH/src/github.com/containerd/containerd && \
+    make vendor && make && DESTDIR=/out/ make install
+
 # Build runc
 FROM golang-base AS runc-dev
 ARG RUNC_VERSION
@@ -73,6 +87,21 @@ FROM containerd-base AS snapshotter-base
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
 
+# Base image which contains containerd with builtin stargz snapshotter
+# `docker-ce-cli` is used only for users to `docker login` to registries (e.g. DockerHub)
+# with configuring ~/.docker/config.json
+FROM golang-base AS containerd-snapshotter-base
+RUN apt-get update -y && apt-get --no-install-recommends install -y fuse \
+                                 apt-transport-https gnupg2 software-properties-common && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
+    add-apt-repository \
+      "deb [arch=${TARGETARCH:-amd64}] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
+    apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli
+COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
+COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
+COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
+RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
+
 # Image which can be used as all-in-one single node demo environment
 FROM snapshotter-base AS cind
 COPY ./script/config/ /
@@ -94,6 +123,14 @@ RUN apt-get update && apt-get install -y iptables && \
     update-alternatives --set iptables /usr/sbin/iptables-legacy && \
     mkdir -p /opt/cni/bin && \
     curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
+
+# Image which can be used as a node image for KinD (containerd with builtin snapshotter)
+FROM kindest/node:v1.20.0 AS kind-builtin-snapshotter
+COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
+COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
+COPY ./script/config/ /
+RUN apt-get update -y && apt-get install --no-install-recommends -y fuse
+ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
 
 # Image which can be used as a node image for KinD
 FROM kindest/node:v1.20.0

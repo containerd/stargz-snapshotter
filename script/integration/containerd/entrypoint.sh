@@ -85,8 +85,6 @@ CONTAINERD_STATUS=/run/containerd/
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
 function reboot_containerd {
-    local CONFIG="${1:-}"
-
     kill_all "containerd"
     kill_all "containerd-stargz-grpc"
     rm -rf "${CONTAINERD_STATUS}"*
@@ -99,18 +97,26 @@ function reboot_containerd {
              -maxdepth 1 -mindepth 1 -type d -exec umount "{}/fs" \;
     fi
     rm -rf "${REMOTE_SNAPSHOTTER_ROOT}"*
-    if [ "${CONFIG}" == "" ] ; then
-        containerd-stargz-grpc --log-level=debug \
-                           --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
-                           2>&1 | tee -a "${LOG_FILE}" & # Dump all log
+    if [ "${BUILTIN_SNAPSHOTTER}" == "true" ] ; then
+        if [ "${CONTAINERD_CONFIG:-}" != "" ] ; then
+            containerd --log-level debug --config="${CONTAINERD_CONFIG:-}" 2>&1 | tee -a "${LOG_FILE}" &
+        else
+            containerd --log-level debug --config=/etc/containerd/config.toml 2>&1 | tee -a "${LOG_FILE}" &
+        fi
     else
-        containerd-stargz-grpc --log-level=debug \
-                           --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
-                           --config="${CONFIG}" \
-                           2>&1 | tee -a "${LOG_FILE}" &
+        if [ "${SNAPSHOTTER_CONFIG:-}" == "" ] ; then
+            containerd-stargz-grpc --log-level=debug \
+                                   --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
+                                   2>&1 | tee -a "${LOG_FILE}" & # Dump all log
+        else
+            containerd-stargz-grpc --log-level=debug \
+                                   --address="${REMOTE_SNAPSHOTTER_SOCKET}" \
+                                   --config="${SNAPSHOTTER_CONFIG}" \
+                                   2>&1 | tee -a "${LOG_FILE}" &
+        fi
+        retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
+        containerd --log-level debug --config=/etc/containerd/config.toml &
     fi
-    retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
-    containerd --log-level debug --config=/etc/containerd/config.toml &
 
     # Makes sure containerd and containerd-stargz-grpc are up-and-running.
     UNIQUE_SUFFIX=$(date +%s%N | shasum | base64 | fold -w 10 | head -1)
@@ -121,6 +127,20 @@ echo "===== VERSION INFORMATION ====="
 containerd --version
 runc --version
 echo "==============================="
+
+cat <<EOF >> /etc/containerd/config.toml
+[debug]
+format = "json"
+level = "debug"
+EOF
+if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
+    cat <<EOF >> /etc/containerd/config.toml
+[proxy_plugins]
+  [proxy_plugins.stargz]
+    type = "snapshot"
+    address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+EOF
+fi
 
 echo "Logging into the registry..."
 cp /auth/certs/domain.crt /usr/local/share/ca-certificates
@@ -250,9 +270,15 @@ ctr-remote run --rm "${REGISTRY_HOST}:5000/ubuntu:sgz" test tar -c /usr \
     | tar -xC "${USR_NORMALSN_PLAIN_STARGZ}"
 
 echo "Getting (legacy) stargz image with stargz snapshotter..."
-echo "disable_verification = true" > /tmp/config.noverify.toml
-cat /etc/containerd-stargz-grpc/config.toml >> /tmp/config.noverify.toml
-reboot_containerd /tmp/config.noverify.toml
+if [ "${BUILTIN_SNAPSHOTTER}" == "true" ] ; then
+    cp /etc/containerd/config.toml /tmp/config.containerd.noverify.toml
+    sed -i 's/disable_verification = false/disable_verification = true/g' /tmp/config.containerd.noverify.toml
+    CONTAINERD_CONFIG="/tmp/config.containerd.noverify.toml" reboot_containerd
+else
+    echo "disable_verification = true" > /tmp/config.stargz.noverify.toml
+    cat /etc/containerd-stargz-grpc/config.toml >> /tmp/config.stargz.noverify.toml
+    SNAPSHOTTER_CONFIG="/tmp/config.stargz.noverify.toml" reboot_containerd
+fi
 echo -n "" > "${LOG_FILE}"
 ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}:5000/ubuntu:sgz"
 check_remote_snapshots "${LOG_FILE}"

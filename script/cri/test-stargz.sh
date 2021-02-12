@@ -120,11 +120,19 @@ cat "${IMAGE_LIST}" | sed -E 's/^([^/]*).*/\1/g' | sort | uniq | while read DOMA
 [plugins."io.containerd.grpc.v1.cri".registry.mirrors."${DOMAIN}"]
 endpoint = ["http://${REGISTRY_HOST}:5000"]
 EOF
-    cat <<EOF >> "${SNAPSHOTTER_CONFIG}"
+    if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+        cat <<EOF >> "${CONTAINERD_CONFIG}"
+[[plugins."io.containerd.snapshotter.v1.stargz".resolver.host."${DOMAIN}".mirrors]]
+host = "${REGISTRY_HOST}:5000"
+insecure = true
+EOF
+    else
+        cat <<EOF >> "${SNAPSHOTTER_CONFIG}"
 [[resolver.host."${DOMAIN}".mirrors]]
 host = "${REGISTRY_HOST}:5000"
 insecure = true
 EOF
+    fi
 done
 echo "==== Containerd config ===="
 cat "${CONTAINERD_CONFIG}"
@@ -153,7 +161,9 @@ docker exec "${TEST_NODE_NAME}" /bin/bash -c \
        "cd /go/src/github.com/kubernetes-sigs/cri-tools && make critest && make install-critest -e BINDIR=/go/bin"
 
 # Varidate the runtime through CRI
-docker exec "${TEST_NODE_NAME}" systemctl restart stargz-snapshotter
+if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then
+    docker exec "${TEST_NODE_NAME}" systemctl restart stargz-snapshotter
+fi
 docker exec "${TEST_NODE_NAME}" systemctl restart containerd
 CONNECTED=
 for i in $(seq 100) ; do
@@ -174,7 +184,7 @@ docker exec "${TEST_NODE_NAME}" containerd --version
 echo "==============================="
 docker exec "${TEST_NODE_NAME}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK}
 
-# Check if stargz snapshotter is working
+echo "Check if stargz snapshotter is working"
 docker exec "${TEST_NODE_NAME}" \
        ctr-remote --namespace=k8s.io snapshot --snapshotter=stargz ls \
     | sed -E '1d' > "${TMPFILE}"
@@ -183,10 +193,16 @@ if ! [ -s "${TMPFILE}" ] ; then
     exit 1
 fi
 
-# Check all remote snapshots are created successfully
-docker exec "${TEST_NODE_NAME}" journalctl -u stargz-snapshotter \
-    | grep "${LOG_REMOTE_SNAPSHOT}" \
-    | sed -E 's/^[^\{]*(\{.*)$/\1/g' > "${LOG_FILE}"
+echo "Check all remote snapshots are created successfully"
+if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+    docker exec "${TEST_NODE_NAME}" journalctl -u containerd \
+        | grep "${LOG_REMOTE_SNAPSHOT}" \
+        | sed -E 's/^[^\{]*(\{.*)$/\1/g' > "${LOG_FILE}"
+else
+    docker exec "${TEST_NODE_NAME}" journalctl -u stargz-snapshotter \
+        | grep "${LOG_REMOTE_SNAPSHOT}" \
+        | sed -E 's/^[^\{]*(\{.*)$/\1/g' > "${LOG_FILE}"
+fi
 check_remote_snapshots "${LOG_FILE}"
 
 exit 0

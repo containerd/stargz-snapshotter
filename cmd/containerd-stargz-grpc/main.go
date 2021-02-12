@@ -21,7 +21,6 @@ import (
 	"flag"
 	golog "log"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,12 +29,7 @@ import (
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/keychain"
-	stargzfs "github.com/containerd/stargz-snapshotter/fs"
-	"github.com/containerd/stargz-snapshotter/fs/source"
-	snbase "github.com/containerd/stargz-snapshotter/snapshot"
-	"github.com/hashicorp/go-multierror"
+	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -67,7 +61,7 @@ func main() {
 
 	var (
 		ctx    = log.WithLogger(context.Background(), log.L)
-		config Config
+		config service.Config
 	)
 	// Streams log of standard lib (go-fuse uses this) into debug log
 	// Snapshotter should use "github.com/containerd/containerd/log" otherwize
@@ -79,31 +73,7 @@ func main() {
 		log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
 	}
 
-	// Prepare kubeconfig-based keychain if required
-	credsFuncs := []func(string) (string, string, error){keychain.NewDockerconfigKeychain(ctx)}
-	if config.KubeconfigKeychainConfig.EnableKeychain {
-		var opts []keychain.KubeconfigOption
-		if kcp := config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
-			opts = append(opts, keychain.WithKubeconfigPath(kcp))
-		}
-		credsFuncs = append(credsFuncs, keychain.NewKubeconfigKeychain(ctx, opts...))
-	}
-
-	// Use RegistryHosts based on ResolverConfig and keychain
-	hosts := hostsFromConfig(config.ResolverConfig, credsFuncs...)
-
-	// Configure filesystem and snapshotter
-	fs, err := stargzfs.NewFilesystem(filepath.Join(*rootDir, "stargz"),
-		config.Config,
-		stargzfs.WithGetSources(sources(
-			sourceFromCRILabels(hosts),      // provides source info based on CRI labels
-			source.FromDefaultLabels(hosts), // provides source info based on default labels
-		)),
-	)
-	if err != nil {
-		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
-	}
-	rs, err := snbase.NewSnapshotter(ctx, filepath.Join(*rootDir, "snapshotter"), fs, snbase.AsynchronousRemove)
+	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
 	}
@@ -117,10 +87,10 @@ func main() {
 	rpc := grpc.NewServer()
 
 	// Convert the snapshotter to a gRPC service,
-	service := snapshotservice.FromSnapshotter(rs)
+	snsvc := snapshotservice.FromSnapshotter(rs)
 
 	// Register the service with the gRPC server
-	snapshotsapi.RegisterSnapshotsServer(rpc, service)
+	snapshotsapi.RegisterSnapshotsServer(rpc, snsvc)
 
 	// Prepare the directory for the socket
 	if err := os.MkdirAll(filepath.Dir(*address), 0700); err != nil {
@@ -150,54 +120,4 @@ func waitForSIGINT() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	<-c
-}
-
-func hostsFromConfig(cfg ResolverConfig, credsFuncs ...func(string) (string, string, error)) docker.RegistryHosts {
-	return func(host string) (hosts []docker.RegistryHost, _ error) {
-		for _, h := range append(cfg.Host[host].Mirrors, MirrorConfig{
-			Host: host,
-		}) {
-			tr := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
-			config := docker.RegistryHost{
-				Client:       tr,
-				Host:         h.Host,
-				Scheme:       "https",
-				Path:         "/v2",
-				Capabilities: docker.HostCapabilityPull,
-				Authorizer: docker.NewDockerAuthorizer(
-					docker.WithAuthClient(tr),
-					docker.WithAuthCreds(func(host string) (string, string, error) {
-						for _, f := range credsFuncs {
-							if username, secret, err := f(host); err != nil {
-								return "", "", err
-							} else if !(username == "" && secret == "") {
-								return username, secret, nil
-							}
-						}
-						return "", "", nil
-					})),
-			}
-			if localhost, _ := docker.MatchLocalhost(config.Host); localhost || h.Insecure {
-				config.Scheme = "http"
-			}
-			if config.Host == "docker.io" {
-				config.Host = "registry-1.docker.io"
-			}
-			hosts = append(hosts, config)
-		}
-		return
-	}
-}
-
-func sources(ps ...source.GetSources) source.GetSources {
-	return func(labels map[string]string) (source []source.Source, allErr error) {
-		for _, p := range ps {
-			src, err := p(labels)
-			if err == nil {
-				return src, nil
-			}
-			allErr = multierror.Append(allErr, err)
-		}
-		return
-	}
 }

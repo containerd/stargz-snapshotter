@@ -23,7 +23,13 @@ source "${CONTEXT}/const.sh"
 
 if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
-    docker build ${DOCKER_BUILD_ARGS:-} -t "${NODE_BASE_IMAGE_NAME}" "${REPO}"
+
+    TARGET_STAGE=
+    if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+        TARGET_STAGE="--target kind-builtin-snapshotter"
+    fi
+
+    docker build ${DOCKER_BUILD_ARGS:-} -t "${NODE_BASE_IMAGE_NAME}" ${TARGET_STAGE} "${REPO}"
     docker build ${DOCKER_BUILD_ARGS:-} -t "${PREPARE_NODE_IMAGE}" --target containerd-base "${REPO}"
 fi
 
@@ -36,6 +42,27 @@ function cleanup {
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
+
+BUILTIN_HACK_INST=
+if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+    # Special configuration for CRI containerd + builtin stargz snapshotter
+    cat <<EOF > "${TMP_CONTEXT}/containerd.hack.toml"
+version = 2
+
+[debug]
+  format = "json"
+  level = "debug"
+[plugins."io.containerd.grpc.v1.cri".containerd]
+  default_runtime_name = "runc"
+  snapshotter = "stargz"
+  disable_snapshot_annotations = false
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.test-handler]
+  runtime_type = "io.containerd.runc.v2"
+EOF
+    BUILTIN_HACK_INST="COPY containerd.hack.toml /etc/containerd/config.toml"
+fi
 
 # Prepare the testing node
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
@@ -61,6 +88,8 @@ RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
     NOSUDO=true ./hack/install/install-cni.sh && \
     NOSUDO=true ./hack/install/install-cni-config.sh && \
     systemctl disable kubelet
+
+${BUILTIN_HACK_INST}
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
 EOF
