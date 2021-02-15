@@ -38,6 +38,10 @@ jobs:
       fail-fast: false
       matrix:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        builtin: ["true", "false"]
+        exclude:
+        - buildargs: ""
+          builtin: "true"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -45,6 +49,7 @@ jobs:
     - name: Run integration test
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
+        BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
       run: make integration
 
   test-optimize:
@@ -70,6 +75,10 @@ jobs:
       fail-fast: false
       matrix:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        builtin: ["true", "false"]
+        exclude:
+        - buildargs: ""
+          builtin: "true"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -77,6 +86,7 @@ jobs:
     - name: Run test for pulling image from private registry on Kubernetes
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
+        BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
       run: make test-pullsecrets
 
   test-cri:
@@ -86,11 +96,16 @@ jobs:
       fail-fast: false
       matrix:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        builtin: ["true", "false"]
+        exclude:
+        - buildargs: ""
+          builtin: "true"
     steps:
     - uses: actions/checkout@v2
     - name: Varidate the runtime through CRI
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
+        BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
       run: make test-cri
 
   #

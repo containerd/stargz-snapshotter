@@ -1,4 +1,10 @@
-[proxy_plugins]
-  [proxy_plugins.stargz]
-    type = "snapshot"
-    address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+[plugins.stargz]
+root_path = "/var/lib/containerd-stargz-grpc/"
+disable_verification = false
+
+[plugins.stargz.blob]
+check_always = true
+
+[[plugins.stargz.resolver.host."registry-integration:5000".mirrors]]
+host = "registry-alt:5000"
+insecure = true

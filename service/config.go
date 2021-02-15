@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package main
+package service
 
 import "github.com/containerd/stargz-snapshotter/fs/config"
 

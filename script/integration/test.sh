@@ -32,9 +32,14 @@ source "${REPO}/script/util/utils.sh"
 if [ "${INTEGRATION_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
 
+    TARGET_STAGE=snapshotter-base
+    if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+        TARGET_STAGE=containerd-snapshotter-base
+    fi
+
     # Enable to check race
     docker build ${DOCKER_BUILD_ARGS:-} -t "${INTEGRATION_BASE_IMAGE_NAME}" \
-           --target snapshotter-base \
+           --target "${TARGET_STAGE}" \
            --build-arg=SNAPSHOTTER_BUILD_FLAGS="-race" \
            "${REPO}"
 fi
@@ -98,6 +103,7 @@ services:
     - HTTPS_PROXY=${HTTPS_PROXY:-}
     - http_proxy=${http_proxy:-}
     - https_proxy=${https_proxy:-}
+    - BUILTIN_SNAPSHOTTER=${BUILTIN_SNAPSHOTTER:-}
     tmpfs:
     - /tmp:exec,mode=777
     volumes:

@@ -30,19 +30,27 @@ REPO="${4}"
 REGISTRY_NETWORK="${5}"
 DOCKERCONFIGJSON_DATA="${6}"
 
+TMP_BUILTIN_CONF=$(mktemp)
 TMP_CONTEXT=$(mktemp -d)
 SN_KUBECONFIG=$(mktemp)
 function cleanup {
     local ORG_EXIT_CODE="${1}"
     rm "${SN_KUBECONFIG}"
     rm -rf "${TMP_CONTEXT}"
+    rm -rf "${TMP_BUILTIN_CONF}"
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 if [ "${KIND_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
-    docker build ${DOCKER_BUILD_ARGS:-} -t "${NODE_BASE_IMAGE_NAME}" "${REPO}"
+
+    TARGET_STAGE=
+    if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+        TARGET_STAGE="--target kind-builtin-snapshotter"
+    fi
+
+    docker build ${DOCKER_BUILD_ARGS:-} -t "${NODE_BASE_IMAGE_NAME}" ${TARGET_STAGE} "${REPO}"
 fi
 
 # Prepare the testing node with enabling k8s keychain
@@ -55,12 +63,43 @@ cat <<EOF > "${TMP_CONTEXT}/config.containerd.append.toml"
 [plugins."io.containerd.grpc.v1.cri".registry.configs."${REGISTRY_HOST}:5000".tls]
 ca_file = "${NODE_TEST_CERT_FILE}"
 EOF
+BUILTIN_HACK_INST=
+if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+    # Special configuration for CRI containerd + builtin stargz snapshotter
+    cat <<EOF > "${TMP_CONTEXT}/containerd.hack.toml"
+version = 2
+
+[debug]
+  format = "json"
+  level = "debug"
+[plugins."io.containerd.grpc.v1.cri".containerd]
+  default_runtime_name = "runc"
+  snapshotter = "stargz"
+  disable_snapshot_annotations = false
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.test-handler]
+  runtime_type = "io.containerd.runc.v2"
+[plugins."io.containerd.grpc.v1.cri".registry.configs."${REGISTRY_HOST}:5000".tls]
+ca_file = "${NODE_TEST_CERT_FILE}"
+[plugins."io.containerd.snapshotter.v1.stargz".kubeconfig_keychain]
+enable_keychain = true
+kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
+EOF
+    BUILTIN_HACK_INST="COPY containerd.hack.toml /etc/containerd/config.toml"
+fi
+cp "${KIND_REGISTRY_CA}" "${TMP_CONTEXT}/registry.crt"
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${NODE_BASE_IMAGE_NAME}
 
+COPY registry.crt "${NODE_TEST_CERT_FILE}"
 COPY ./config.stargz.append.toml ./config.containerd.append.toml /tmp/
 RUN cat /tmp/config.stargz.append.toml >> /etc/containerd-stargz-grpc/config.toml && \
-    cat /tmp/config.containerd.append.toml >> /etc/containerd/config.toml
+    cat /tmp/config.containerd.append.toml >> /etc/containerd/config.toml && \
+    update-ca-certificates
+
+${BUILTIN_HACK_INST}
+
 EOF
 docker build -t "${NODE_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
 
@@ -71,9 +110,6 @@ kind create cluster --name "${KIND_CLUSTER_NAME}" \
      --image "${NODE_IMAGE_NAME}"
 KIND_NODENAME=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sed -n 1p) # must be single node
 docker network connect "${REGISTRY_NETWORK}" "${KIND_NODENAME}"
-docker cp "${KIND_REGISTRY_CA}" "${KIND_NODENAME}:${NODE_TEST_CERT_FILE}"
-docker exec -i "${KIND_NODENAME}" update-ca-certificates
-docker exec -i "${KIND_NODENAME}" systemctl restart stargz-snapshotter
 
 echo "===== VERSION INFORMATION ====="
 docker exec "${KIND_NODENAME}" containerd --version
