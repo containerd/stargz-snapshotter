@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	golog "log"
 	"net"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/service"
+	"github.com/containerd/stargz-snapshotter/version"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -42,10 +44,11 @@ const (
 )
 
 var (
-	address    = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
-	configPath = flag.String("config", defaultConfigPath, "path to the configuration file")
-	logLevel   = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
-	rootDir    = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
+	address      = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
+	configPath   = flag.String("config", defaultConfigPath, "path to the configuration file")
+	logLevel     = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
+	rootDir      = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
+	printVersion = flag.Bool("version", false, "print the version")
 )
 
 func main() {
@@ -53,6 +56,10 @@ func main() {
 	lvl, err := logrus.ParseLevel(*logLevel)
 	if err != nil {
 		log.L.WithError(err).Fatal("failed to prepare logger")
+	}
+	if *printVersion {
+		fmt.Println("containerd-stargz-grpc", version.Version, version.Revision)
+		return
 	}
 	logrus.SetLevel(lvl)
 	logrus.SetFormatter(&logrus.JSONFormatter{
