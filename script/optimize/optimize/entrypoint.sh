@@ -16,12 +16,12 @@
 
 set -euo pipefail
 
-REGISTRY_HOST=registry-optimize
+REGISTRY_HOST=registry-optimize.test
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
-ORG_IMAGE_TAG="${REGISTRY_HOST}:5000/test:org$(date '+%M%S')"
-OPT_IMAGE_TAG="${REGISTRY_HOST}:5000/test:opt$(date '+%M%S')"
-NOOPT_IMAGE_TAG="${REGISTRY_HOST}:5000/test:noopt$(date '+%M%S')"
+ORG_IMAGE_TAG="${REGISTRY_HOST}/test/test:org$(date '+%M%S')"
+OPT_IMAGE_TAG="${REGISTRY_HOST}/test/test:opt$(date '+%M%S')"
+NOOPT_IMAGE_TAG="${REGISTRY_HOST}/test/test:noopt$(date '+%M%S')"
 TOC_JSON_DIGEST_ANNOTATION="containerd.io/snapshot/stargz/toc.digest"
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
@@ -112,7 +112,7 @@ function check_optimization {
 
     LOCAL_WORKING_DIR="${WORKING_DIR}/$(date '+%H%M%S')"
     mkdir "${LOCAL_WORKING_DIR}"
-    docker pull "${TARGET}" && docker save "${TARGET}" | tar xv -C "${LOCAL_WORKING_DIR}"
+    nerdctl pull "${TARGET}" && nerdctl save "${TARGET}" | tar xv -C "${LOCAL_WORKING_DIR}"
     LAYERS="$(cat "${LOCAL_WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[]')"
 
     echo "Checking layers..."
@@ -152,37 +152,35 @@ containerd --version
 runc --version
 echo "==============================="
 
-echo "Connecting to the docker server..."
-retry ls /docker/client/cert.pem /docker/client/ca.pem
-mkdir -p /root/.docker/ && cp /docker/client/* /root/.docker/
-retry docker version
-
 echo "Logging into the registry..."
 cp /auth/certs/domain.crt /usr/local/share/ca-certificates
 update-ca-certificates
-retry docker login "${REGISTRY_HOST}:5000" -u "${DUMMYUSER}" -p "${DUMMYPASS}"
+retry nerdctl login -u "${DUMMYUSER}" -p "${DUMMYPASS}" "https://${REGISTRY_HOST}"
+
+echo "Running containerd and BuildKit..."
+buildkitd --oci-cni-binary-dir=/opt/tmp/cni/bin &
+containerd --log-level debug &
+retry buildctl du
+retry nerdctl version
 
 echo "Building sample image for testing..."
 CONTEXT_DIR=$(mktemp -d)
 prepare_context "${CONTEXT_DIR}"
 
 echo "Preparing sample image..."
-tar zcv -C "${CONTEXT_DIR}" . \
-    | docker build -t "${ORG_IMAGE_TAG}" - \
-    && docker push "${ORG_IMAGE_TAG}"
+nerdctl build -t "${ORG_IMAGE_TAG}" "${CONTEXT_DIR}"
+nerdctl push "${ORG_IMAGE_TAG}"
 
 echo "Loading original image"
-containerd --log-level debug &
-retry ctr version
-ctr i pull "${NETWORK_MOUNT_TEST_ORG_IMAGE_TAG}"
-ctr i pull -u "${DUMMYUSER}:${DUMMYPASS}" "${ORG_IMAGE_TAG}"
+nerdctl pull "${NETWORK_MOUNT_TEST_ORG_IMAGE_TAG}"
+nerdctl pull "${ORG_IMAGE_TAG}"
 
 echo "Checking optimized image..."
 WORKING_DIR=$(mktemp -d)
 PREFIX=/tmp/out/ make clean
 PREFIX=/tmp/out/ GO_BUILD_FLAGS="-race" make ctr-remote # Check data race
 /tmp/out/ctr-remote ${OPTIMIZE_COMMAND} -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
-ctr i push -u "${DUMMYUSER}:${DUMMYPASS}" "${OPT_IMAGE_TAG}" || true
+nerdctl push "${OPT_IMAGE_TAG}" || true
 cat <<EOF > "${WORKING_DIR}/0-want"
 accessor
 a.txt
@@ -211,7 +209,7 @@ check_optimization "${OPT_IMAGE_TAG}" \
 
 echo "Checking non-optimized image..."
 /tmp/out/ctr-remote ${NO_OPTIMIZE_COMMAND} "${ORG_IMAGE_TAG}" "${NOOPT_IMAGE_TAG}"
-ctr i push -u "${DUMMYUSER}:${DUMMYPASS}" "${NOOPT_IMAGE_TAG}" || true
+nerdctl push "${NOOPT_IMAGE_TAG}" || true
 cat <<EOF > "${WORKING_DIR}/0-want"
 .no.prefetch.landmark
 a.txt
@@ -259,7 +257,7 @@ TESTDIR=$(mktemp -d)
                     --mount="type=bind,src=${TESTDIR},dst=/mnt,options=bind" \
                     --entrypoint='[ "/bin/bash", "-c" ]' \
                     --args='[ "curl example.com > /mnt/result_page && ip a show dev eth0 ; echo -n $? > /mnt/if_exists && ip a > /mnt/if_info && cat /etc/hosts > /mnt/hosts" ]' \
-                    "${NETWORK_MOUNT_TEST_ORG_IMAGE_TAG}" "${REGISTRY_HOST}:5000/test:1"
+                    "${NETWORK_MOUNT_TEST_ORG_IMAGE_TAG}" "${REGISTRY_HOST}/test:1"
 
 # Check if all contents are successfuly passed
 if ! [ -f "${TESTDIR}/if_exists" ] || \

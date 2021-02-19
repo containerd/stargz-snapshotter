@@ -18,7 +18,7 @@ set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
-REGISTRY_HOST=registry-optimize
+REGISTRY_HOST=registry-optimize.test
 REPO_PATH=/go/src/github.com/containerd/stargz-snapshotter
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
@@ -76,14 +76,18 @@ cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
+ARG BUILDKIT_VERSION=v0.8.1
+
 FROM ${OPTIMIZE_BASE_IMAGE_NAME}
 ARG TARGETARCH
+ARG BUILDKIT_VERSION
 
 RUN apt-get update -y && \
     apt-get --no-install-recommends install -y jq iptables && \
     GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane && \
     mkdir -p /opt/tmp/cni/bin /etc/tmp/cni/net.d && \
-    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-${CNI_VERSION}.tgz | tar xzv -C /opt/tmp/cni/bin
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-${CNI_VERSION}.tgz | tar xzv -C /opt/tmp/cni/bin && \
+    curl -Ls https://github.com/moby/buildkit/releases/download/\${BUILDKIT_VERSION}/buildkit-\${BUILDKIT_VERSION}.linux-\${TARGETARCH:-amd64}.tar.gz | tar xzv -C /usr/local
 
 # Installs CNI-related files to irregular paths (/opt/tmp/cni/bin and /etc/tmp/cni/net.d) for test.
 # see entrypoint.sh for more details.
@@ -103,22 +107,6 @@ function test_optimize {
     cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3.3"
 services:
-  docker_opt:
-    image: docker:dind
-    container_name: docker
-    privileged: true
-    environment:
-    - DOCKER_TLS_CERTDIR=/certs
-    entrypoint:
-    - sh
-    - -c
-    - |
-      mkdir -p /etc/docker/certs.d/${REGISTRY_HOST}:5000 && \
-      cp /registry/certs/domain.crt /etc/docker/certs.d/${REGISTRY_HOST}:5000 && \
-      dockerd-entrypoint.sh
-    volumes:
-    - docker-client:/certs/client
-    - ${AUTH_DIR}:/registry:ro
   testenv_opt:
     image: ${OPTIMIZE_TEST_IMAGE_NAME}
     container_name: testenv_opt
@@ -126,9 +114,7 @@ services:
     working_dir: ${REPO_PATH}
     entrypoint: ./script/optimize/optimize/entrypoint.sh
     environment:
-    - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000
-    - DOCKER_HOST=tcp://docker:2376
-    - DOCKER_TLS_VERIFY=1
+    - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:443
     - OPTIMIZE_COMMAND=${OPTIMIZE_COMMAND}
     - NO_OPTIMIZE_COMMAND=${NO_OPTIMIZE_COMMAND}
     tmpfs:
@@ -136,9 +122,9 @@ services:
     volumes:
     - "${REPO}:${REPO_PATH}:ro"
     - ${AUTH_DIR}:/auth:ro
-    - docker-client:/docker/client:ro
     - "optimize-containerd-data:/var/lib/containerd"
     - "optimize-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
+    - "optimize-buildkit-data:/var/lib/buildkit"
   registry:
     image: registry:2
     container_name: ${REGISTRY_HOST}
@@ -148,12 +134,14 @@ services:
     - REGISTRY_AUTH_HTPASSWD_PATH=/auth/auth/htpasswd
     - REGISTRY_HTTP_TLS_CERTIFICATE=/auth/certs/domain.crt
     - REGISTRY_HTTP_TLS_KEY=/auth/certs/domain.key
+    - REGISTRY_HTTP_ADDR=${REGISTRY_HOST}:443
     volumes:
     - ${AUTH_DIR}:/auth:ro
 volumes:
-  docker-client:
   optimize-containerd-data:
   optimize-containerd-stargz-grpc-data:
+  optimize-buildkit-data:
+
 EOF
     local FAIL=
     if ! ( cd "${CONTEXT}" && \
