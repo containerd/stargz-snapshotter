@@ -21,8 +21,8 @@ REPO="${CONTEXT}../../"
 
 INTEGRATION_BASE_IMAGE_NAME="integration-image-base"
 INTEGRATION_TEST_IMAGE_NAME="integration-image-test"
-REGISTRY_HOST=registry-integration
-REGISTRY_ALT_HOST=registry-alt
+REGISTRY_HOST=registry-integration.test
+REGISTRY_ALT_HOST=registry-alt.test
 CONTAINERD_NODE=testenv_integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
@@ -66,11 +66,6 @@ FROM ${INTEGRATION_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
     apt-get --no-install-recommends install -y iptables jq && \
-    git clone https://github.com/google/go-containerregistry \
-              \${GOPATH}/src/github.com/google/go-containerregistry && \
-    cd \${GOPATH}/src/github.com/google/go-containerregistry && \
-    git checkout eb7c14b719c60883de5747caa25463b44f8bf896 && \
-    GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane && \
     git clone https://github.com/google/crfs \${GOPATH}/src/github.com/google/crfs && \
     cd \${GOPATH}/src/github.com/google/crfs && \
     git checkout 71d77da419c90be7b05d12e59945ac7a8c94a543 && \
@@ -98,7 +93,7 @@ services:
     container_name: testenv_integration
     privileged: true
     environment:
-    - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:5000,${REGISTRY_ALT_HOST}:5000
+    - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:443,${REGISTRY_ALT_HOST}:5000
     - HTTP_PROXY=${HTTP_PROXY:-}
     - HTTPS_PROXY=${HTTPS_PROXY:-}
     - http_proxy=${http_proxy:-}
@@ -125,11 +120,12 @@ services:
     - REGISTRY_AUTH_HTPASSWD_PATH=/auth/auth/htpasswd
     - REGISTRY_HTTP_TLS_CERTIFICATE=/auth/certs/domain.crt
     - REGISTRY_HTTP_TLS_KEY=/auth/certs/domain.key
+    - REGISTRY_HTTP_ADDR=${REGISTRY_HOST}:443
     volumes:
     - ${AUTH_DIR}:/auth
   registry-alt:
     image: registry:2
-    container_name: registry-alt
+    container_name: "${REGISTRY_ALT_HOST}"
 volumes:
   integration-containerd-data:
   integration-containerd-stargz-grpc-data:

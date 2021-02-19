@@ -165,7 +165,19 @@ EOF
 echo "Installing kubeconfig for stargz snapshotter on node...."
 APISERVER_PORT=$(docker exec -i "${KIND_NODENAME}" ps axww \
                      | grep kube-apiserver | sed -n -E 's/.*--secure-port=([0-9]*).*/\1/p')
-TOKENNAME=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get sa stargz-snapshotter -o jsonpath='{.secrets[0].name}')
+TOKENNAME=
+for (( RETRY=1; RETRY<=50; RETRY++ )) ; do
+    echo "[${RETRY}] Getting token name..."
+    TOKENNAME=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get sa stargz-snapshotter -o jsonpath='{.secrets[0].name}')
+    if [ "${TOKENNAME}" != "" ] ; then
+        break
+    fi
+    sleep 3
+done
+if [ "${TOKENNAME}" == "" ] ; then
+    echo "Failed to get token name of stargz snapshotter service account"
+    exit 1
+fi
 CA=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/${TOKENNAME} -o jsonpath='{.data.ca\.crt}')
 TOKEN=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/${TOKENNAME} -o jsonpath='{.data.token}' \
             | base64 --decode)

@@ -15,6 +15,7 @@
 ARG CONTAINERD_VERSION=v1.4.3
 ARG RUNC_VERSION=v1.0.0-rc92
 ARG CNI_PLUGINS_VERSION=v0.9.0
+ARG NERDCTL_VERSION=0.6.0
 
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
@@ -61,24 +62,21 @@ ARG SNAPSHOTTER_BUILD_FLAGS
 ARG CTR_REMOTE_BUILD_FLAGS
 COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
 RUN cd $GOPATH/src/github.com/containerd/stargz-snapshotter && \
-    PREFIX=/out/ GOARCH=${TARGETARCH} GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make containerd-stargz-grpc && \
-    PREFIX=/out/ GOARCH=${TARGETARCH} GO_BUILD_FLAGS=${CTR_REMOTE_BUILD_FLAGS} make ctr-remote
+    PREFIX=/out/ GOARCH=${TARGETARCH:-amd64} GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make containerd-stargz-grpc && \
+    PREFIX=/out/ GOARCH=${TARGETARCH:-amd64} GO_BUILD_FLAGS=${CTR_REMOTE_BUILD_FLAGS} make ctr-remote
 
 # Binaries for release
 FROM scratch AS release-binaries
 COPY --from=snapshotter-dev /out/* /
 
 # Base image which contains containerd with default snapshotter
-# `docker-ce-cli` is used only for users to `docker login` to registries (e.g. DockerHub)
-# with configuring ~/.docker/config.json
 FROM golang-base AS containerd-base
 ARG TARGETARCH
-RUN apt-get update -y && apt-get --no-install-recommends install -y fuse \
-                                 apt-transport-https gnupg2 software-properties-common && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
-    add-apt-repository \
-      "deb [arch=${TARGETARCH:-amd64}] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
-    apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli
+ARG NERDCTL_VERSION
+RUN apt-get update -y && apt-get --no-install-recommends install -y fuse && \
+    curl -sSL --output /tmp/nerdctl.tgz https://github.com/AkihiroSuda/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${TARGETARCH:-amd64}.tar.gz && \
+    tar zxvf /tmp/nerdctl.tgz -C /usr/local/bin && \
+    rm -f /tmp/nerdctl.tgz
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
 
@@ -88,15 +86,13 @@ COPY --from=snapshotter-dev /out/* /usr/local/bin/
 RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
 
 # Base image which contains containerd with builtin stargz snapshotter
-# `docker-ce-cli` is used only for users to `docker login` to registries (e.g. DockerHub)
-# with configuring ~/.docker/config.json
 FROM golang-base AS containerd-snapshotter-base
-RUN apt-get update -y && apt-get --no-install-recommends install -y fuse \
-                                 apt-transport-https gnupg2 software-properties-common && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
-    add-apt-repository \
-      "deb [arch=${TARGETARCH:-amd64}] https://download.docker.com/linux/debian $(lsb_release -cs) stable" && \
-    apt-get update -y && apt-get --no-install-recommends install -y docker-ce-cli
+ARG TARGETARCH
+ARG NERDCTL_VERSION
+RUN apt-get update -y && apt-get --no-install-recommends install -y fuse && \
+    curl -sSL --output /tmp/nerdctl.tgz https://github.com/AkihiroSuda/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${TARGETARCH:-amd64}.tar.gz && \
+    tar zxvf /tmp/nerdctl.tgz -C /usr/local/bin && \
+    rm -f /tmp/nerdctl.tgz
 COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/

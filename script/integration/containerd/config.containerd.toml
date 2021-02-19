@@ -5,6 +5,6 @@ disable_verification = false
 [plugins.stargz.blob]
 check_always = true
 
-[[plugins.stargz.resolver.host."registry-integration:5000".mirrors]]
-host = "registry-alt:5000"
+[[plugins.stargz.resolver.host."registry-integration.test".mirrors]]
+host = "registry-alt.test:5000"
 insecure = true
