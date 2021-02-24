@@ -30,9 +30,13 @@ import (
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/version"
+	sddaemon "github.com/coreos/go-systemd/v22/daemon"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 )
 
@@ -84,12 +88,20 @@ func main() {
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
 	}
-	defer func() {
+
+	cleanup, err := serve(ctx, *address, rs)
+	if err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to serve snapshotter")
+	}
+
+	if cleanup {
 		log.G(ctx).Debug("Closing the snapshotter")
 		rs.Close()
-		log.G(ctx).Info("Exiting")
-	}()
+	}
+	log.G(ctx).Info("Exiting")
+}
 
+func serve(ctx context.Context, addr string, rs snapshots.Snapshotter) (bool, error) {
 	// Create a gRPC server
 	rpc := grpc.NewServer()
 
@@ -100,31 +112,49 @@ func main() {
 	snapshotsapi.RegisterSnapshotsServer(rpc, snsvc)
 
 	// Prepare the directory for the socket
-	if err := os.MkdirAll(filepath.Dir(*address), 0700); err != nil {
-		log.G(ctx).WithError(err).Fatalf("failed to create directory %q", filepath.Dir(*address))
+	if err := os.MkdirAll(filepath.Dir(addr), 0700); err != nil {
+		return false, errors.Wrapf(err, "failed to create directory %q", filepath.Dir(addr))
 	}
 
 	// Try to remove the socket file to avoid EADDRINUSE
-	if err := os.RemoveAll(*address); err != nil {
-		log.G(ctx).WithError(err).Fatalf("failed to remove %q", *address)
+	if err := os.RemoveAll(addr); err != nil {
+		return false, errors.Wrapf(err, "failed to remove %q", addr)
 	}
 
 	// Listen and serve
-	l, err := net.Listen("unix", *address)
+	l, err := net.Listen("unix", addr)
 	if err != nil {
-		log.G(ctx).WithError(err).Fatalf("error on listen socket %q", *address)
+		return false, errors.Wrapf(err, "error on listen socket %q", addr)
 	}
+	errCh := make(chan error, 1)
 	go func() {
 		if err := rpc.Serve(l); err != nil {
-			log.G(ctx).WithError(err).Fatalf("error on serving via socket %q", *address)
+			errCh <- errors.Wrapf(err, "error on serving via socket %q", addr)
 		}
 	}()
-	waitForSIGINT()
-	log.G(ctx).Info("Got SIGINT")
-}
 
-func waitForSIGINT() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	<-c
+	if os.Getenv("NOTIFY_SOCKET") != "" {
+		notified, notifyErr := sddaemon.SdNotify(false, sddaemon.SdNotifyReady)
+		log.G(ctx).Debugf("SdNotifyReady notified=%v, err=%v", notified, notifyErr)
+	}
+	defer func() {
+		if os.Getenv("NOTIFY_SOCKET") != "" {
+			notified, notifyErr := sddaemon.SdNotify(false, sddaemon.SdNotifyStopping)
+			log.G(ctx).Debugf("SdNotifyStopping notified=%v, err=%v", notified, notifyErr)
+		}
+	}()
+
+	var s os.Signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, unix.SIGINT, unix.SIGTERM)
+	select {
+	case s = <-sigCh:
+		log.G(ctx).Infof("Got %v", s)
+	case err := <-errCh:
+		return false, err
+	}
+	if s == unix.SIGINT {
+		return true, nil // do cleanup on SIGINT
+	}
+	return false, nil
 }
