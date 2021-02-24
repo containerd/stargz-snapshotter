@@ -317,6 +317,8 @@ func (tc *testCache) Add(key string, p []byte, opts ...cache.Option) {
 	tc.t.Logf("  cached [%s...]: %q", key[:8], string(p))
 }
 
+func (tc *testCache) Close() error { return nil }
+
 func TestCheckInterval(t *testing.T) {
 	var (
 		tr        = &calledRoundTripper{}

@@ -23,32 +23,27 @@
 package fs
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/fs/reader"
-	"github.com/containerd/stargz-snapshotter/fs/remote"
+	"github.com/containerd/stargz-snapshotter/fs/layer"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/task"
+	"github.com/containerd/stargz-snapshotter/util/testutil"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
@@ -60,60 +55,51 @@ const (
 	sampleChunkSize    = 3
 	sampleMiddleOffset = sampleChunkSize / 2
 	sampleData1        = "0123456789"
-	sampleData2        = "abcdefghij"
 	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
 )
 
 func TestCheck(t *testing.T) {
-	bb := &breakBlob{}
-	l := &layer{
-		blob:            bb,
-		r:               nopreader{},
-		prefetchWaiter:  newWaiter(),
-		prefetchTimeout: time.Second,
-	}
+	bl := &breakableLayer{}
 	fs := &filesystem{
-		layer: map[string]*layer{
-			"test": l,
+		layer: map[string]layer.Layer{
+			"test": bl,
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
 		getSources: source.FromDefaultLabels(
 			docker.ConfigureDefaultRegistries(docker.WithPlainHTTP(docker.MatchLocalhost))),
 	}
-	bb.success = true
+	bl.success = true
 	if err := fs.Check(context.TODO(), "test", nil); err != nil {
 		t.Errorf("connection failed; wanted to succeed: %v", err)
 	}
 
-	bb.success = false
+	bl.success = false
 	if err := fs.Check(context.TODO(), "test", nil); err == nil {
 		t.Errorf("connection succeeded; wanted to fail")
 	}
 }
 
-type nopreader struct{}
-
-func (r nopreader) OpenFile(name string) (io.ReaderAt, error)    { return nil, nil }
-func (r nopreader) Lookup(name string) (*estargz.TOCEntry, bool) { return nil, false }
-func (r nopreader) Cache(opts ...reader.CacheOption) error       { return nil }
-
-type breakBlob struct {
+type breakableLayer struct {
 	success bool
 }
 
-func (r *breakBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error)         { return nil, nil }
-func (r *breakBlob) Size() int64                                                   { return 10 }
-func (r *breakBlob) FetchedSize() int64                                            { return 5 }
-func (r *breakBlob) ReadAt(p []byte, o int64, opts ...remote.Option) (int, error)  { return 0, nil }
-func (r *breakBlob) Cache(offset int64, size int64, option ...remote.Option) error { return nil }
-func (r *breakBlob) Check() error {
-	if !r.success {
+func (l *breakableLayer) Done()                                     {}
+func (l *breakableLayer) Info() layer.Info                          { return layer.Info{} }
+func (l *breakableLayer) Verify(tocDigest digest.Digest) error      { return nil }
+func (l *breakableLayer) SkipVerify() error                         { return nil }
+func (l *breakableLayer) Root() *estargz.TOCEntry                   { return nil }
+func (l *breakableLayer) OpenFile(name string) (io.ReaderAt, error) { return nil, fmt.Errorf("fail") }
+func (l *breakableLayer) Prefetch(prefetchSize int64) error         { return fmt.Errorf("fail") }
+func (l *breakableLayer) WaitForPrefetchCompletion() error          { return fmt.Errorf("fail") }
+func (l *breakableLayer) BackgroundFetch() error                    { return fmt.Errorf("fail") }
+func (l *breakableLayer) Check() error {
+	if !l.success {
 		return fmt.Errorf("failed")
 	}
 	return nil
 }
-func (r *breakBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
-	if !r.success {
+func (l *breakableLayer) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+	if !l.success {
 		return fmt.Errorf("failed")
 	}
 	return nil
@@ -198,7 +184,7 @@ func TestNodeRead(t *testing.T) {
 
 func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 	testName := "test"
-	sgz, _ := buildStargz(t, []tarent{regfile(testName, string(contents))}, chunkSizeInfo(chunkSize))
+	sgz, _ := buildStargz(t, []testutil.TarEntry{testutil.File(testName, string(contents))}, chunkSizeInfo(chunkSize))
 	r, err := estargz.Open(sgz)
 	if err != nil {
 		t.Fatal("failed to make stargz")
@@ -219,15 +205,15 @@ func makeNodeReader(t *testing.T, contents []byte, chunkSize int64) *file {
 func TestExistence(t *testing.T) {
 	tests := []struct {
 		name string
-		in   []tarent
+		in   []testutil.TarEntry
 		want []check
 	}{
 		{
 			name: "1_whiteout_with_sibling",
-			in: []tarent{
-				directory("foo/"),
-				regfile("foo/bar.txt", ""),
-				regfile("foo/.wh.foo.txt", ""),
+			in: []testutil.TarEntry{
+				testutil.Dir("foo/"),
+				testutil.File("foo/bar.txt", ""),
+				testutil.File("foo/.wh.foo.txt", ""),
 			},
 			want: []check{
 				hasValidWhiteout("foo/foo.txt"),
@@ -236,10 +222,10 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "1_whiteout_with_duplicated_name",
-			in: []tarent{
-				directory("foo/"),
-				regfile("foo/bar.txt", "test"),
-				regfile("foo/.wh.bar.txt", ""),
+			in: []testutil.TarEntry{
+				testutil.Dir("foo/"),
+				testutil.File("foo/bar.txt", "test"),
+				testutil.File("foo/.wh.bar.txt", ""),
 			},
 			want: []check{
 				hasFileDigest("foo/bar.txt", digestFor("test")),
@@ -248,9 +234,9 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "1_opaque",
-			in: []tarent{
-				directory("foo/"),
-				regfile("foo/.wh..wh..opq", ""),
+			in: []testutil.TarEntry{
+				testutil.Dir("foo/"),
+				testutil.File("foo/.wh..wh..opq", ""),
 			},
 			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
@@ -259,10 +245,10 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "1_opaque_with_sibling",
-			in: []tarent{
-				directory("foo/"),
-				regfile("foo/.wh..wh..opq", ""),
-				regfile("foo/bar.txt", "test"),
+			in: []testutil.TarEntry{
+				testutil.Dir("foo/"),
+				testutil.File("foo/.wh..wh..opq", ""),
+				testutil.File("foo/bar.txt", "test"),
 			},
 			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
@@ -272,9 +258,9 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "1_opaque_with_xattr",
-			in: []tarent{
-				directory("foo/", xAttr{"foo": "bar"}),
-				regfile("foo/.wh..wh..opq", ""),
+			in: []testutil.TarEntry{
+				testutil.Dir("foo/", testutil.WithDirXattrs(map[string]string{"foo": "bar"})),
+				testutil.File("foo/.wh..wh..opq", ""),
 			},
 			want: []check{
 				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
@@ -284,10 +270,10 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "prefetch_landmark",
-			in: []tarent{
-				regfile(estargz.PrefetchLandmark, "test"),
-				directory("foo/"),
-				regfile(fmt.Sprintf("foo/%s", estargz.PrefetchLandmark), "test"),
+			in: []testutil.TarEntry{
+				testutil.File(estargz.PrefetchLandmark, "test"),
+				testutil.Dir("foo/"),
+				testutil.File(fmt.Sprintf("foo/%s", estargz.PrefetchLandmark), "test"),
 			},
 			want: []check{
 				fileNotExist(estargz.PrefetchLandmark),
@@ -296,10 +282,10 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "no_prefetch_landmark",
-			in: []tarent{
-				regfile(estargz.NoPrefetchLandmark, "test"),
-				directory("foo/"),
-				regfile(fmt.Sprintf("foo/%s", estargz.NoPrefetchLandmark), "test"),
+			in: []testutil.TarEntry{
+				testutil.File(estargz.NoPrefetchLandmark, "test"),
+				testutil.Dir("foo/"),
+				testutil.File(fmt.Sprintf("foo/%s", estargz.NoPrefetchLandmark), "test"),
 			},
 			want: []check{
 				fileNotExist(estargz.NoPrefetchLandmark),
@@ -308,8 +294,8 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "state_file",
-			in: []tarent{
-				regfile("test", "test"),
+			in: []testutil.TarEntry{
+				testutil.File("test", "test"),
 			},
 			want: []check{
 				hasFileDigest("test", digestFor("test")),
@@ -318,8 +304,8 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "file_suid",
-			in: []tarent{
-				regfile("test", "test", os.ModeSetuid),
+			in: []testutil.TarEntry{
+				testutil.File("test", "test", testutil.WithFileMode(0644|os.ModeSetuid)),
 			},
 			want: []check{
 				hasExtraMode("test", os.ModeSetuid),
@@ -327,8 +313,8 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "dir_sgid",
-			in: []tarent{
-				directory("test/", os.ModeSetgid),
+			in: []testutil.TarEntry{
+				testutil.Dir("test/", testutil.WithDirMode(0755|os.ModeSetgid)),
 			},
 			want: []check{
 				hasExtraMode("test/", os.ModeSetgid),
@@ -336,8 +322,8 @@ func TestExistence(t *testing.T) {
 		},
 		{
 			name: "file_sticky",
-			in: []tarent{
-				regfile("test", "test", os.ModeSticky),
+			in: []testutil.TarEntry{
+				testutil.File("test", "test", testutil.WithFileMode(0644|os.ModeSticky)),
 			},
 			want: []check{
 				hasExtraMode("test", os.ModeSticky),
@@ -360,17 +346,16 @@ func TestExistence(t *testing.T) {
 	}
 }
 
-var testStateLayerDigest = digest.FromString("dummy")
-
 func getRootNode(t *testing.T, r *estargz.Reader) *node {
 	root, ok := r.Lookup("")
 	if !ok {
 		t.Fatalf("failed to find root in stargz")
 	}
+	l := &testLayer{r}
 	rootNode := &node{
-		layer: &testLayer{r},
+		layer: l,
 		e:     root,
-		s:     newState(testStateLayerDigest.String(), &dummyBlob{}),
+		s:     newState(l),
 	}
 	fusefs.NewNodeFS(rootNode, &fusefs.Options{})
 	return rootNode
@@ -380,75 +365,49 @@ type testLayer struct {
 	r *estargz.Reader
 }
 
+var testStateLayerDigest = digest.FromString("dummy")
+
 func (tl *testLayer) OpenFile(name string) (io.ReaderAt, error) {
 	return tl.r.OpenFile(name)
 }
-
-type dummyBlob struct{}
-
-func (db *dummyBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error)             { return nil, nil }
-func (db *dummyBlob) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) { return 0, nil }
-func (db *dummyBlob) Size() int64                                                       { return 10 }
-func (db *dummyBlob) FetchedSize() int64                                                { return 5 }
-func (db *dummyBlob) Check() error                                                      { return nil }
-func (db *dummyBlob) Cache(offset int64, size int64, option ...remote.Option) error     { return nil }
-func (db *dummyBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+func (tl *testLayer) Info() layer.Info {
+	return layer.Info{
+		Digest:      testStateLayerDigest,
+		Size:        10,
+		FetchedSize: 5,
+	}
+}
+func (tl *testLayer) Verify(tocDigest digest.Digest) error { return nil }
+func (tl *testLayer) SkipVerify() error                    { return nil }
+func (tl *testLayer) Root() *estargz.TOCEntry              { return nil }
+func (tl *testLayer) Prefetch(prefetchSize int64) error    { return fmt.Errorf("fail") }
+func (tl *testLayer) WaitForPrefetchCompletion() error     { return fmt.Errorf("fail") }
+func (tl *testLayer) BackgroundFetch() error               { return fmt.Errorf("fail") }
+func (tl *testLayer) Check() error                         { return nil }
+func (tl *testLayer) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	return nil
 }
+func (tl *testLayer) Done() {}
 
 type chunkSizeInfo int
-type prioritizedFilesInfo []string
-type stargzOnlyInfo bool
 
-func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionReader, digest.Digest) {
+func buildStargz(t *testing.T, ents []testutil.TarEntry, opts ...interface{}) (*io.SectionReader, digest.Digest) {
 	var chunkSize chunkSizeInfo
-	var prioritizedFiles prioritizedFilesInfo
-	var stargzOnly bool
 	for _, opt := range opts {
 		if v, ok := opt.(chunkSizeInfo); ok {
 			chunkSize = v
-		} else if v, ok := opt.(prioritizedFilesInfo); ok {
-			prioritizedFiles = v
-		} else if v, ok := opt.(stargzOnlyInfo); ok {
-			stargzOnly = bool(v)
 		} else {
 			t.Fatalf("unsupported opt")
 		}
 	}
 
 	tarBuf := new(bytes.Buffer)
-	tw := tar.NewWriter(tarBuf)
-	for _, ent := range ents {
-		if err := tw.WriteHeader(ent.header); err != nil {
-			t.Fatalf("writing header to the input tar: %v", err)
-		}
-		if _, err := tw.Write(ent.contents); err != nil {
-			t.Fatalf("writing contents to the input tar: %v", err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("closing write of input tar: %v", err)
+	if _, err := io.Copy(tarBuf, testutil.BuildTar(ents)); err != nil {
+		t.Fatalf("failed to build tar: %v", err)
 	}
 	tarData := tarBuf.Bytes()
-
-	if stargzOnly {
-		stargzBuf := new(bytes.Buffer)
-		w := estargz.NewWriter(stargzBuf)
-		if chunkSize > 0 {
-			w.ChunkSize = int(chunkSize)
-		}
-		if err := w.AppendTar(bytes.NewReader(tarData)); err != nil {
-			t.Fatalf("failed to append tar file to stargz: %q", err)
-		}
-		if _, err := w.Close(); err != nil {
-			t.Fatalf("failed to close stargz writer: %q", err)
-		}
-		stargzData := stargzBuf.Bytes()
-		return io.NewSectionReader(bytes.NewReader(stargzData), 0, int64(len(stargzData))), ""
-	}
 	rc, err := estargz.Build(
 		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
-		estargz.WithPrioritizedFiles([]string(prioritizedFiles)),
 		estargz.WithChunkSize(int(chunkSize)),
 	)
 	if err != nil {
@@ -462,80 +421,6 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 	vsbb := vsb.Bytes()
 
 	return io.NewSectionReader(bytes.NewReader(vsbb), 0, int64(len(vsbb))), rc.TOCDigest()
-}
-
-type tarent struct {
-	header   *tar.Header
-	contents []byte
-}
-
-// suid, guid, sticky bits for archive/tar
-// https://github.com/golang/go/blob/release-branch.go1.13/src/archive/tar/common.go#L607-L609
-const (
-	cISUID = 04000 // Set uid
-	cISGID = 02000 // Set gid
-	cISVTX = 01000 // Save text (sticky bit)
-)
-
-func extraModeToTarMode(fm os.FileMode) (tm int64) {
-	if fm&os.ModeSetuid != 0 {
-		tm |= cISUID
-	}
-	if fm&os.ModeSetgid != 0 {
-		tm |= cISGID
-	}
-	if fm&os.ModeSticky != 0 {
-		tm |= cISVTX
-	}
-	return
-}
-
-func regfile(name string, contents string, opts ...interface{}) tarent {
-	if strings.HasSuffix(name, "/") {
-		panic(fmt.Sprintf("file %q has suffix /", name))
-	}
-	var xmodes os.FileMode
-	for _, opt := range opts {
-		if v, ok := opt.(os.FileMode); ok {
-			xmodes = v
-		}
-	}
-	return tarent{
-		header: &tar.Header{
-			Typeflag: tar.TypeReg,
-			Name:     name,
-			Mode:     0644 | extraModeToTarMode(xmodes),
-			Size:     int64(len(contents)),
-		},
-		contents: []byte(contents),
-	}
-}
-
-type xAttr map[string]string
-
-func directory(name string, opts ...interface{}) tarent {
-	if !strings.HasSuffix(name, "/") {
-		panic(fmt.Sprintf("dir %q hasn't suffix /", name))
-	}
-	var (
-		xattrs xAttr
-		xmodes os.FileMode
-	)
-	for _, opt := range opts {
-		if v, ok := opt.(xAttr); ok {
-			xattrs = v
-		} else if v, ok := opt.(os.FileMode); ok {
-			xmodes = v
-		}
-	}
-	return tarent{
-		header: &tar.Header{
-			Typeflag: tar.TypeDir,
-			Name:     name,
-			Mode:     0755 | extraModeToTarMode(xmodes),
-			Xattrs:   xattrs,
-		},
-	}
 }
 
 type check func(*testing.T, *node)
@@ -812,223 +697,23 @@ func digestFor(content string) string {
 	return fmt.Sprintf("sha256:%x", sum)
 }
 
-// Tests prefetch method of each stargz file.
-func TestPrefetch(t *testing.T) {
-	defaultPrefetchSize := int64(10000)
-	landmarkPosition := func(t *testing.T, l *layer) int64 {
-		lr, err := l.reader()
-		if err != nil {
-			t.Fatalf("failed to get reader from layer: %v", err)
-		}
-		if e, ok := lr.Lookup(estargz.PrefetchLandmark); ok {
-			return e.Offset
-		}
-		return defaultPrefetchSize
+// suid, guid, sticky bits for archive/tar
+// https://github.com/golang/go/blob/release-branch.go1.13/src/archive/tar/common.go#L607-L609
+const (
+	cISUID = 04000 // Set uid
+	cISGID = 02000 // Set gid
+	cISVTX = 01000 // Save text (sticky bit)
+)
+
+func extraModeToTarMode(fm os.FileMode) (tm int64) {
+	if fm&os.ModeSetuid != 0 {
+		tm |= cISUID
 	}
-	defaultPrefetchPosition := func(t *testing.T, l *layer) int64 {
-		return l.blob.Size()
+	if fm&os.ModeSetgid != 0 {
+		tm |= cISGID
 	}
-	tests := []struct {
-		name             string
-		in               []tarent
-		wantNum          int      // number of chunks wanted in the cache
-		wants            []string // filenames to compare
-		prefetchSize     func(*testing.T, *layer) int64
-		prioritizedFiles []string
-		stargz           bool
-	}{
-		{
-			name: "default_prefetch",
-			in: []tarent{
-				regfile("foo.txt", sampleData1),
-			},
-			wantNum:          chunkNum(sampleData1),
-			wants:            []string{"foo.txt"},
-			prefetchSize:     defaultPrefetchPosition,
-			prioritizedFiles: nil,
-			stargz:           true,
-		},
-		{
-			name: "no_prefetch",
-			in: []tarent{
-				regfile("foo.txt", sampleData1),
-			},
-			wantNum:          0,
-			prioritizedFiles: nil,
-		},
-		{
-			name: "prefetch",
-			in: []tarent{
-				regfile("foo.txt", sampleData1),
-				regfile("bar.txt", sampleData2),
-			},
-			wantNum:          chunkNum(sampleData1),
-			wants:            []string{"foo.txt"},
-			prefetchSize:     landmarkPosition,
-			prioritizedFiles: []string{"foo.txt"},
-		},
-		{
-			name: "with_dir",
-			in: []tarent{
-				directory("foo/"),
-				regfile("foo/bar.txt", sampleData1),
-				directory("buz/"),
-				regfile("buz/buzbuz.txt", sampleData2),
-			},
-			wantNum:          chunkNum(sampleData1),
-			wants:            []string{"foo/bar.txt"},
-			prefetchSize:     landmarkPosition,
-			prioritizedFiles: []string{"foo/", "foo/bar.txt"},
-		},
+	if fm&os.ModeSticky != 0 {
+		tm |= cISVTX
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sr, dgst := buildStargz(t, tt.in,
-				chunkSizeInfo(sampleChunkSize),
-				prioritizedFilesInfo(tt.prioritizedFiles),
-				stargzOnlyInfo(tt.stargz))
-			blob := newBlob(sr)
-			cache := &testCache{membuf: map[string]string{}, t: t}
-			vr, _, err := reader.NewReader(sr, cache)
-			if err != nil {
-				t.Fatalf("failed to make stargz reader: %v", err)
-			}
-			l := newLayer(ocispec.Descriptor{Digest: testStateLayerDigest}, blob, vr, nil, time.Second)
-			if tt.stargz {
-				l.skipVerify()
-			} else if err := l.verify(dgst); err != nil {
-				t.Errorf("failed to verify reader: %v", err)
-				return
-			}
-			prefetchSize := int64(0)
-			if tt.prefetchSize != nil {
-				prefetchSize = tt.prefetchSize(t, l)
-			}
-			if err := l.prefetch(defaultPrefetchSize); err != nil {
-				t.Errorf("failed to prefetch: %v", err)
-				return
-			}
-			if blob.calledPrefetchOffset != 0 {
-				t.Errorf("invalid prefetch offset %d; want %d",
-					blob.calledPrefetchOffset, 0)
-			}
-			if blob.calledPrefetchSize != prefetchSize {
-				t.Errorf("invalid prefetch size %d; want %d",
-					blob.calledPrefetchSize, prefetchSize)
-			}
-			if tt.wantNum != len(cache.membuf) {
-				t.Errorf("number of chunks in the cache %d; want %d: %v", len(cache.membuf), tt.wantNum, err)
-				return
-			}
-
-			lr, err := l.reader()
-			if err != nil {
-				t.Fatalf("failed to get reader from layer: %v", err)
-			}
-			for _, file := range tt.wants {
-				e, ok := lr.Lookup(file)
-				if !ok {
-					t.Fatalf("failed to lookup %q", file)
-				}
-				wantFile, err := lr.OpenFile(file)
-				if err != nil {
-					t.Fatalf("failed to open file %q", file)
-				}
-				blob.readCalled = false
-				if _, err := io.Copy(ioutil.Discard, io.NewSectionReader(wantFile, 0, e.Size)); err != nil {
-					t.Fatalf("failed to read file %q", file)
-				}
-				if blob.readCalled {
-					t.Errorf("chunks of file %q aren't cached", file)
-					return
-				}
-			}
-		})
-	}
-}
-
-func chunkNum(data string) int {
-	return (len(data)-1)/sampleChunkSize + 1
-}
-
-func newBlob(sr *io.SectionReader) *sampleBlob {
-	return &sampleBlob{
-		r: sr,
-	}
-}
-
-type sampleBlob struct {
-	r                    *io.SectionReader
-	readCalled           bool
-	calledPrefetchOffset int64
-	calledPrefetchSize   int64
-}
-
-func (sb *sampleBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error) { return nil, nil }
-func (sb *sampleBlob) Check() error                                          { return nil }
-func (sb *sampleBlob) Size() int64                                           { return sb.r.Size() }
-func (sb *sampleBlob) FetchedSize() int64                                    { return 0 }
-func (sb *sampleBlob) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
-	sb.readCalled = true
-	return sb.r.ReadAt(p, offset)
-}
-func (sb *sampleBlob) Cache(offset int64, size int64, option ...remote.Option) error {
-	sb.calledPrefetchOffset = offset
-	sb.calledPrefetchSize = size
-	return nil
-}
-func (sb *sampleBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
-	return nil
-}
-
-type testCache struct {
-	membuf map[string]string
-	t      *testing.T
-	mu     sync.Mutex
-}
-
-func (tc *testCache) FetchAt(key string, offset int64, p []byte, opts ...cache.Option) (int, error) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-
-	cache, ok := tc.membuf[key]
-	if !ok {
-		return 0, fmt.Errorf("Missed cache: %q", key)
-	}
-	return copy(p, cache[offset:]), nil
-}
-
-func (tc *testCache) Add(key string, p []byte, opts ...cache.Option) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	tc.membuf[key] = string(p)
-	tc.t.Logf("  cached [%s...]: %q", key[:8], string(p))
-}
-
-func TestWaiter(t *testing.T) {
-	var (
-		w         = newWaiter()
-		waitTime  = time.Second
-		startTime = time.Now()
-		doneTime  time.Time
-		done      = make(chan struct{})
-	)
-
-	go func() {
-		defer close(done)
-		if err := w.wait(10 * time.Second); err != nil {
-			t.Errorf("failed to wait: %v", err)
-			return
-		}
-		doneTime = time.Now()
-	}()
-
-	time.Sleep(waitTime)
-	w.done()
-	<-done
-
-	if doneTime.Sub(startTime) < waitTime {
-		t.Errorf("wait time is too short: %v; want %v", doneTime.Sub(startTime), waitTime)
-	}
+	return
 }

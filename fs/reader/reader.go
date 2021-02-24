@@ -46,6 +46,7 @@ type Reader interface {
 	OpenFile(name string) (io.ReaderAt, error)
 	Lookup(name string) (*estargz.TOCEntry, bool)
 	Cache(opts ...CacheOption) error
+	Close() error
 }
 
 // VerifiableReader produces a Reader with a given verifier.
@@ -53,18 +54,28 @@ type VerifiableReader struct {
 	r *reader
 }
 
-func (vr *VerifiableReader) SkipVerify() Reader {
+func (vr *VerifiableReader) SkipVerify() (Reader, error) {
+	if vr.r.isClosed() {
+		return nil, fmt.Errorf("reader already closed")
+	}
 	vr.r.verifier = nopTOCEntryVerifier{}
-	return vr.r
+	return vr.r, nil
 }
 
 func (vr *VerifiableReader) VerifyTOC(tocDigest digest.Digest) (Reader, error) {
+	if vr.r.isClosed() {
+		return nil, fmt.Errorf("reader already closed")
+	}
 	v, err := vr.r.r.VerifyTOC(tocDigest)
 	if err != nil {
 		return nil, err
 	}
 	vr.r.verifier = v
 	return vr.r, nil
+}
+
+func (vr *VerifiableReader) Close() error {
+	return vr.r.Close()
 }
 
 type nopTOCEntryVerifier struct{}
@@ -117,9 +128,15 @@ type reader struct {
 	cache    cache.BlobCache
 	bufPool  sync.Pool
 	verifier estargz.TOCEntryVerifier
+
+	closed   bool
+	closedMu sync.Mutex
 }
 
 func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
+	if gr.isClosed() {
+		return nil, fmt.Errorf("reader already closed")
+	}
 	sr, err := gr.r.OpenFile(name)
 	if err != nil {
 		return nil, err
@@ -143,6 +160,10 @@ func (gr *reader) Lookup(name string) (*estargz.TOCEntry, bool) {
 }
 
 func (gr *reader) Cache(opts ...CacheOption) (err error) {
+	if gr.isClosed() {
+		return fmt.Errorf("reader already closed")
+	}
+
 	var cacheOpts cacheOptions
 	for _, o := range opts {
 		o(&cacheOpts)
@@ -176,6 +197,11 @@ func (gr *reader) Cache(opts ...CacheOption) (err error) {
 }
 
 func (gr *reader) cacheWithReader(ctx context.Context, currentDepth int, eg *errgroup.Group, sem *semaphore.Weighted, dir *estargz.TOCEntry, r *estargz.Reader, filter func(*estargz.TOCEntry) bool, opts ...cache.Option) (rErr error) {
+	if gr.isClosed() {
+		// reader is closed. stop the recursion.
+		return fmt.Errorf("reader already closed")
+	}
+
 	if currentDepth > maxWalkDepth {
 		return fmt.Errorf("TOCEntry tree is too deep (depth:%d)", currentDepth)
 	}
@@ -273,6 +299,23 @@ func (gr *reader) cacheWithReader(ctx context.Context, currentDepth int, eg *err
 	})
 
 	return
+}
+
+func (gr *reader) Close() error {
+	gr.closedMu.Lock()
+	defer gr.closedMu.Unlock()
+	if gr.closed {
+		return nil
+	}
+	gr.closed = true
+	return gr.cache.Close()
+}
+
+func (gr *reader) isClosed() bool {
+	gr.closedMu.Lock()
+	closed := gr.closed
+	gr.closedMu.Unlock()
+	return closed
 }
 
 type file struct {

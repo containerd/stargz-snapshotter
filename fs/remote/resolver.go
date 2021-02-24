@@ -54,7 +54,9 @@ const (
 	defaultFetchTimeoutSec  = 300
 )
 
-func NewResolver(cache cache.BlobCache, cfg config.BlobConfig) *Resolver {
+type cacheFactory func() (cache.BlobCache, error)
+
+func NewResolver(cacheFactory cacheFactory, cfg config.BlobConfig) *Resolver {
 	if cfg.ChunkSize == 0 { // zero means "use default chunk size"
 		cfg.ChunkSize = defaultChunkSize
 	}
@@ -74,13 +76,13 @@ func NewResolver(cache cache.BlobCache, cfg config.BlobConfig) *Resolver {
 				return new(bytes.Buffer)
 			},
 		},
-		blobCache:  cache,
+		blobCache:  cacheFactory,
 		blobConfig: cfg,
 	}
 }
 
 type Resolver struct {
-	blobCache  cache.BlobCache
+	blobCache  cacheFactory
 	blobConfig config.BlobConfig
 	bufPool    sync.Pool
 }
@@ -90,11 +92,15 @@ func (r *Resolver) Resolve(ctx context.Context, hosts docker.RegistryHosts, refs
 	if err != nil {
 		return nil, err
 	}
+	blobCache, err := r.blobCache()
+	if err != nil {
+		return nil, err
+	}
 	return &blob{
 		fetcher:       fetcher,
 		size:          size,
 		chunkSize:     r.blobConfig.ChunkSize,
-		cache:         r.blobCache,
+		cache:         blobCache,
 		lastCheck:     time.Now(),
 		checkInterval: time.Duration(r.blobConfig.ValidInterval) * time.Second,
 		resolver:      r,
