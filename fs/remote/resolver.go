@@ -54,7 +54,7 @@ const (
 	defaultFetchTimeoutSec  = 300
 )
 
-func NewResolver(cache cache.BlobCache, cfg config.BlobConfig) *Resolver {
+func NewResolver(blobCache cache.BlobCache, cfg config.BlobConfig) *Resolver {
 	if cfg.ChunkSize == 0 { // zero means "use default chunk size"
 		cfg.ChunkSize = defaultChunkSize
 	}
@@ -74,7 +74,7 @@ func NewResolver(cache cache.BlobCache, cfg config.BlobConfig) *Resolver {
 				return new(bytes.Buffer)
 			},
 		},
-		blobCache:  cache,
+		blobCache:  blobCache,
 		blobConfig: cfg,
 	}
 }

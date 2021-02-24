@@ -23,7 +23,6 @@
 package reader
 
 import (
-	"archive/tar"
 	"bytes"
 	"fmt"
 	"io"
@@ -33,6 +32,7 @@ import (
 
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/util/testutil"
 	digest "github.com/opencontainers/go-digest"
 )
 
@@ -46,8 +46,8 @@ const (
 // Tests Reader for failure cases.
 func TestFailReader(t *testing.T) {
 	testFileName := "test"
-	stargzFile, _ := buildStargz(t, []tarent{
-		regfile(testFileName, sampleData1),
+	stargzFile, _ := buildStargz(t, []testutil.TarEntry{
+		testutil.File(testFileName, sampleData1),
 	}, chunkSizeInfo(sampleChunkSize))
 	br := &breakReaderAt{
 		ReaderAt: stargzFile,
@@ -301,8 +301,8 @@ func (er *exceptSectionReader) ReadAt(p []byte, offset int64) (int, error) {
 
 func makeFile(t *testing.T, contents []byte, chunkSize int64) *file {
 	testName := "test"
-	sr, dgst := buildStargz(t, []tarent{
-		regfile(testName, string(contents)),
+	sr, dgst := buildStargz(t, []testutil.TarEntry{
+		testutil.File(testName, string(contents)),
 	}, chunkSizeInfo(chunkSize))
 
 	sgz, err := estargz.Open(sr)
@@ -329,29 +329,9 @@ func makeFile(t *testing.T, contents []byte, chunkSize int64) *file {
 	return f
 }
 
-type tarent struct {
-	header   *tar.Header
-	contents []byte
-}
-
-func regfile(name string, contents string) tarent {
-	if strings.HasSuffix(name, "/") {
-		panic(fmt.Sprintf("file %q has suffix /", name))
-	}
-	return tarent{
-		header: &tar.Header{
-			Typeflag: tar.TypeReg,
-			Name:     name,
-			Mode:     0644,
-			Size:     int64(len(contents)),
-		},
-		contents: []byte(contents),
-	}
-}
-
 type chunkSizeInfo int
 
-func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionReader, digest.Digest) {
+func buildStargz(t *testing.T, ents []testutil.TarEntry, opts ...interface{}) (*io.SectionReader, digest.Digest) {
 	var chunkSize chunkSizeInfo
 	for _, opt := range opts {
 		if v, ok := opt.(chunkSizeInfo); ok {
@@ -362,21 +342,10 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 	}
 
 	tarBuf := new(bytes.Buffer)
-	tw := tar.NewWriter(tarBuf)
-	for _, ent := range ents {
-		if err := tw.WriteHeader(ent.header); err != nil {
-			t.Fatalf("writing header to the input tar: %v", err)
-		}
-		if _, err := tw.Write(ent.contents); err != nil {
-			t.Fatalf("writing contents to the input tar: %v", err)
-		}
+	if _, err := io.Copy(tarBuf, testutil.BuildTar(ents)); err != nil {
+		t.Fatalf("failed to build tar: %v", err)
 	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("closing write of input tar: %v", err)
-	}
-
 	tarData := tarBuf.Bytes()
-
 	rc, err := estargz.Build(
 		io.NewSectionReader(bytes.NewReader(tarData), 0, int64(len(tarData))),
 		estargz.WithChunkSize(int(chunkSize)),
@@ -384,6 +353,7 @@ func buildStargz(t *testing.T, ents []tarent, opts ...interface{}) (*io.SectionR
 	if err != nil {
 		t.Fatalf("failed to build verifiable stargz: %v", err)
 	}
+	defer rc.Close()
 	vsb := new(bytes.Buffer)
 	if _, err := io.Copy(vsb, rc); err != nil {
 		t.Fatalf("failed to copy built stargz blob: %v", err)

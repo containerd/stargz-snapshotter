@@ -22,6 +22,7 @@ import (
 	"archive/tar"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 )
@@ -80,8 +81,10 @@ func (f tarEntryFunc) AppendTar(tw *tar.Writer, opts Options) error { return f(t
 type DirectoryOption func(o *dirOpts)
 
 type dirOpts struct {
-	uid int
-	gid int
+	uid    int
+	gid    int
+	xattrs map[string]string
+	mode   *os.FileMode
 }
 
 // WithDirOwner specifies the owner of the directory.
@@ -89,6 +92,20 @@ func WithDirOwner(uid, gid int) DirectoryOption {
 	return func(o *dirOpts) {
 		o.uid = uid
 		o.gid = gid
+	}
+}
+
+// WithDirXattrs specifies the extended attributes of the directory.
+func WithDirXattrs(xattrs map[string]string) DirectoryOption {
+	return func(o *dirOpts) {
+		o.xattrs = xattrs
+	}
+}
+
+// WithFileMode specifies the mode of the directory.
+func WithDirMode(mode os.FileMode) DirectoryOption {
+	return func(o *dirOpts) {
+		o.mode = &mode
 	}
 }
 
@@ -102,10 +119,15 @@ func Dir(name string, opts ...DirectoryOption) TarEntry {
 		if !strings.HasSuffix(name, "/") {
 			panic(fmt.Sprintf("missing trailing slash in dir %q ", name))
 		}
+		var mode int64 = 0755
+		if dOpts.mode != nil {
+			mode = permAndExtraMode2TarMode(*dOpts.mode)
+		}
 		return tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeDir,
 			Name:     buildOpts.Prefix + name,
-			Mode:     0755,
+			Mode:     mode,
+			Xattrs:   dOpts.xattrs,
 			Uid:      dOpts.uid,
 			Gid:      dOpts.gid,
 		})
@@ -119,6 +141,7 @@ type fileOpts struct {
 	uid    int
 	gid    int
 	xattrs map[string]string
+	mode   *os.FileMode
 }
 
 // WithFileOwner specifies the owner of the file.
@@ -136,6 +159,13 @@ func WithFileXattrs(xattrs map[string]string) FileOption {
 	}
 }
 
+// WithFileMode specifies the mode of the file.
+func WithFileMode(mode os.FileMode) FileOption {
+	return func(o *fileOpts) {
+		o.mode = &mode
+	}
+}
+
 // File is a regilar file entry
 func File(name, contents string, opts ...FileOption) TarEntry {
 	return tarEntryFunc(func(tw *tar.Writer, buildOpts Options) error {
@@ -146,10 +176,14 @@ func File(name, contents string, opts ...FileOption) TarEntry {
 		if strings.HasSuffix(name, "/") {
 			return fmt.Errorf("bogus trailing slash in file %q", name)
 		}
+		var mode int64 = 0644
+		if fOpts.mode != nil {
+			mode = permAndExtraMode2TarMode(*fOpts.mode)
+		}
 		if err := tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeReg,
 			Name:     buildOpts.Prefix + name,
-			Mode:     0644,
+			Mode:     mode,
 			Xattrs:   fOpts.xattrs,
 			Size:     int64(len(contents)),
 			Uid:      fOpts.uid,
@@ -233,4 +267,26 @@ func Fifo(name string) TarEntry {
 			ChangeTime: now,
 		})
 	})
+}
+
+// suid, guid, sticky bits for archive/tar
+// https://github.com/golang/go/blob/release-branch.go1.13/src/archive/tar/common.go#L607-L609
+const (
+	cISUID = 04000 // Set uid
+	cISGID = 02000 // Set gid
+	cISVTX = 01000 // Save text (sticky bit)
+)
+
+func permAndExtraMode2TarMode(fm os.FileMode) (tm int64) {
+	tm = int64(fm & os.ModePerm)
+	if fm&os.ModeSetuid != 0 {
+		tm |= cISUID
+	}
+	if fm&os.ModeSetgid != 0 {
+		tm |= cISGID
+	}
+	if fm&os.ModeSticky != 0 {
+		tm |= cISVTX
+	}
+	return
 }
