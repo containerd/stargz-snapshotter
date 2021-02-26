@@ -4,6 +4,7 @@ After=network.target
 Before=containerd.service
 
 [Service]
+Type=notify
 Environment=HOME=/root
 ExecStart=/usr/local/bin/containerd-stargz-grpc --log-level=debug --config=/etc/containerd-stargz-grpc/config.toml
 Restart=always
