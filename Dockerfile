@@ -12,10 +12,10 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-ARG CONTAINERD_VERSION=v1.4.3
-ARG RUNC_VERSION=v1.0.0-rc92
-ARG CNI_PLUGINS_VERSION=v0.9.0
-ARG NERDCTL_VERSION=0.6.0
+ARG CONTAINERD_VERSION=v1.5.0-beta.2
+ARG RUNC_VERSION=v1.0.0-rc93
+ARG CNI_PLUGINS_VERSION=v0.9.1
+ARG NERDCTL_VERSION=0.6.1
 
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".

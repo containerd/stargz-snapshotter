@@ -24,7 +24,7 @@ DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 OPTIMIZE_BASE_IMAGE_NAME="optimize-image-base"
 OPTIMIZE_TEST_IMAGE_NAME="optimize-image-test"
-CNI_VERSION="v0.9.0"
+CNI_VERSION="v0.9.1"
 
 source "${REPO}/script/util/utils.sh"
 
