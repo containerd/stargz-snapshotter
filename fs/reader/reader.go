@@ -83,11 +83,30 @@ func (nv nopVerifier) Verified() bool {
 	return true
 }
 
+type ReaderOption func(o *readerOpts) error
+
+type readerOpts struct {
+	estargzOpenOpts []estargz.OpenOption
+}
+
+func WithEstargzOpenOptions(openOpts ...estargz.OpenOption) ReaderOption {
+	return func(o *readerOpts) error {
+		o.estargzOpenOpts = openOpts
+		return nil
+	}
+}
+
 // NewReader creates a Reader based on the given stargz blob and cache implementation.
 // It returns VerifiableReader so the caller must provide a estargz.TOCEntryVerifier
 // to use for verifying file or chunk contained in this stargz blob.
-func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*VerifiableReader, *estargz.TOCEntry, error) {
-	r, err := estargz.Open(sr)
+func NewReader(sr *io.SectionReader, cache cache.BlobCache, readOpts ...ReaderOption) (*VerifiableReader, *estargz.TOCEntry, error) {
+	var opts readerOpts
+	for _, o := range readOpts {
+		if err := o(&opts); err != nil {
+			return nil, nil, err
+		}
+	}
+	r, err := estargz.Open(sr, opts.estargzOpenOpts...)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to parse stargz")
 	}

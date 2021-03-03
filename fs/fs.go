@@ -87,6 +87,9 @@ const (
 	defaultMaxConcurrency     = 2
 	statFileMode              = syscall.S_IFREG | 0400 // -r--------
 	stateDirMode              = syscall.S_IFDIR | 0500 // dr-x------
+
+	// TocOffsetLabelPrefix is a label that tells the offset of TOC to the filesystem
+	TocOffsetLabelPrefix = "containerd.io/snapshot/stargz/toc-offset."
 )
 
 type Option func(*options)
@@ -218,7 +221,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	go func() {
 		rErr := fmt.Errorf("failed to resolve target")
 		for _, s := range src {
-			l, err := fs.resolveLayer(ctx, s.Hosts, s.Name, s.Target)
+			l, err := fs.resolveLayer(ctx, s.Hosts, s.Name, s.Target, labels)
 			if err == nil {
 				resultChan <- l
 				return
@@ -232,8 +235,14 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// Also resolve other layers in parallel
 	preResolve := src[0] // TODO: should we pre-resolve blobs in other sources as well?
 	for _, desc := range preResolve.Manifest.Layers {
+		desc := desc
 		if desc.Digest.String() != preResolve.Target.Digest.String() {
-			go fs.resolveLayer(ctx, preResolve.Hosts, preResolve.Name, desc)
+			// Avoids to get canceled by client. Otherwise client possibly cacnel the
+			// context as soon as this function returns even if the pre-resolve is
+			// on-going. If a mountpoint refers to this singleflight for mounting, it'll
+			// fail because of the cancelalation.
+			ctx := context.Background()
+			go fs.resolveLayer(ctx, preResolve.Hosts, preResolve.Name, desc, labels)
 		}
 	}
 
@@ -364,10 +373,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	return server.WaitMount()
 }
 
-func (fs *filesystem) resolveLayer(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (*layer, error) {
+func (fs *filesystem) resolveLayer(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, labels map[string]string) (*layer, error) {
 	name := refspec.String() + "/" + desc.Digest.String()
-	ctx, cancel := context.WithCancel(log.WithLogger(ctx, log.G(ctx).WithField("src", name)))
-	defer cancel()
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("src", name))
 
 	fs.resolveResultMu.Lock()
 	c, ok := fs.resolveResult.Get(name)
@@ -408,7 +416,14 @@ func (fs *filesystem) resolveLayer(ctx context.Context, hosts docker.RegistryHos
 			defer fs.backgroundTaskManager.DonePrioritizedTask()
 			return blob.ReadAt(p, offset)
 		}), 0, blob.Size())
-		vr, root, err := reader.NewReader(sr, fs.fsCache)
+		var readerOpts []reader.ReaderOption
+		if tocOffStr, ok := labels[TocOffsetLabelPrefix+desc.Digest.String()]; ok {
+			if tocOff, err := strconv.ParseInt(tocOffStr, 10, 64); err == nil {
+				readerOpts = append(readerOpts,
+					reader.WithEstargzOpenOptions(estargz.WithTOCOffset(tocOff)))
+			}
+		}
+		vr, root, err := reader.NewReader(sr, fs.fsCache, readerOpts...)
 		if err != nil {
 			log.G(ctx).WithError(err).Debugf("failed to resolve: layer cannot be read")
 			return nil, errors.Wrap(err, "failed to read layer")

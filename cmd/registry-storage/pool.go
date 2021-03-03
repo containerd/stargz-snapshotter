@@ -34,6 +34,7 @@ import (
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/snapshot/types"
 	"github.com/containers/storage/pkg/archive"
 	digest "github.com/opencontainers/go-digest"
@@ -51,6 +52,18 @@ const (
 	// targetImageLayersLabel is a label which contains layer digests contained in
 	// the target image.
 	targetImageLayersLabel = "containerd.io/snapshot/remote/stargz.layers"
+
+	// remoteSnapshotLogKey is a key for log line, which indicates whether
+	// `Prepare` method successfully prepared targeting remote snapshot or not, as
+	// defined in the following:
+	// - "true"  : indicates the snapshot has been successfully prepared as a
+	//             remote snapshot
+	// - "false" : indicates the snapshot failed to be prepared as a remote
+	//             snapshot
+	// - null    : undetermined
+	remoteSnapshotLogKey = "remote-snapshot-prepared"
+	prepareSucceeded     = "true"
+	prepareFailed        = "false"
 )
 
 type pool struct {
@@ -61,6 +74,10 @@ type pool struct {
 	hosts        docker.RegistryHosts
 	refcounter   map[string]map[string]int
 	refcounterMu sync.Mutex
+}
+
+func (p *pool) root() string {
+	return p.path
 }
 
 func (p *pool) metadataDir(refspec reference.Spec) string {
@@ -162,17 +179,28 @@ func (p *pool) loadChain(ctx context.Context, refspec reference.Spec, chain []oc
 		return "", err
 	}
 
+	commonLabels := make(map[string]string)
 	var layers []string
 	for _, l := range chain {
 		if images.IsLayerType(l.MediaType) {
 			layers = append(layers, l.Digest.String())
+			if tocInfo, ok := l.Annotations[estargz.ZstdChunkedManifestInfoAnnotation]; ok {
+				var off, compressedSize, uncompressedSize, manifestType uint64
+				if _, err := fmt.Sscanf(tocInfo, "%d:%d:%d:%d",
+					&off, &compressedSize, &uncompressedSize, &manifestType,
+				); err == nil {
+					commonLabels[stargzfs.TocOffsetLabelPrefix+l.Digest.String()] = fmt.Sprintf("%d", off)
+				}
+			}
 		}
 	}
+	commonLabels[targetImageLayersLabel] = strings.Join(layers, ",")
 	// TODO: unmount on failure
 	chainPaths := make([]string, len(chain))
 	for i, l := range chain {
-		labels := map[string]string{
-			targetImageLayersLabel: strings.Join(layers, ","),
+		labels := make(map[string]string)
+		for k, v := range commonLabels {
+			labels[k] = v
 		}
 		if l.Annotations != nil {
 			tocDigest, ok := l.Annotations[estargz.TOCJSONDigestAnnotation]
@@ -232,8 +260,19 @@ func (p *pool) loadLayer(ctx context.Context, refspec reference.Spec, dgst diges
 	labels[targetRefLabel] = refspec.String()
 	labels[targetDigestLabel] = dgst.String()
 	if err := p.fs.Mount(ctx, mp, labels); err != nil {
+		if cErr := ctx.Err(); errors.Is(cErr, context.Canceled) || errors.Is(err, context.Canceled) {
+			// When filesystem client canceled to lookup this layer, do not log
+			// this as "preparation failure" because it's intensional.
+			log.G(ctx).WithError(err).
+				Debugf("canceled to mount layer (context error: %v)", cErr)
+		} else {
+			// Log this as preparation failure
+			log.G(ctx).WithField(remoteSnapshotLogKey, prepareFailed).
+				WithError(err).Debugf("failed to mount layer (context error: %v)", cErr)
+		}
 		return "", errors.Wrapf(err, "failed to mount layer %q", dgst.String())
 	}
+	log.G(ctx).WithField(remoteSnapshotLogKey, prepareSucceeded).Debug("prepared remote snapshot")
 
 	return mp, nil
 }

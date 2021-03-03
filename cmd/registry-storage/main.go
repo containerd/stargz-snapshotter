@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"flag"
+	golog "log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -92,6 +93,11 @@ func main() {
 		ctx    = log.WithLogger(context.Background(), log.L)
 		config Config
 	)
+	// Streams log of standard lib (go-fuse uses this) into debug log
+	// Snapshotter should use "github.com/containerd/containerd/log" otherwize
+	// logs are always printed as "debug" mode.
+	golog.SetOutput(log.G(ctx).WriterLevel(logrus.DebugLevel))
+
 	if mountPoint == "" {
 		log.G(ctx).Fatalf("mount point must be specified")
 	}

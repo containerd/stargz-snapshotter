@@ -43,7 +43,7 @@ LEGACY_MODE = "legacy"
 ESTARGZ_NOOPT_MODE = "estargz-noopt"
 ESTARGZ_MODE = "estargz"
 ZSTDCHUNKED_MODE = "zstdchunked"
-DEFAULT_OPTIMIZER = "ctr-remote image optimize --oci"
+DEFAULT_OPTIMIZER = "ctr-remote image convert --oci --zstdchunked"
 DEFAULT_PULLER = "nerdctl image pull"
 DEFAULT_PUSHER = "nerdctl image push"
 DEFAULT_TAGGER = "nerdctl image tag"
@@ -139,7 +139,7 @@ class BenchRunner:
              ]])
 
     def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER):
-        self.docker = 'ctr'
+        self.docker = 'podman'
         self.repository = repository
         self.srcrepository = srcrepository
         self.mode = mode
@@ -155,10 +155,10 @@ class BenchRunner:
 
     def cleanup(self, name, image):
         print "Cleaning up environment..."
-        cmd = '%s t kill -s 9 %s' % (self.docker, name)
+        cmd = '%s kill -s 9 %s' % (self.docker, name)
         print cmd
         rc = os.system(cmd) # sometimes containers already exit. we ignore the failure.
-        cmd = '%s c rm %s' % (self.docker, name)
+        cmd = '%s rm %s' % (self.docker, name)
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -166,16 +166,10 @@ class BenchRunner:
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
-        cmd = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../reboot_containerd.sh') # clear cache
+        cmd = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../reboot_store.sh') # clear cache
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
-
-    def snapshotter_opt(self):
-        if self.lazypull():
-            return "--snapshotter=stargz"
-        else:
-            return ""
 
     def add_suffix(self, repo):
         if self.mode == ESTARGZ_MODE:
@@ -187,20 +181,8 @@ class BenchRunner:
         else:
             return "%s-org" % repo
 
-    def pull_subcmd(self):
-        if self.lazypull():
-            return "rpull"
-        else:
-            return "pull"
-        
-    def docker_pullbin(self):
-        if self.lazypull():
-            return "ctr-remote"
-        else:
-            return "ctr"
-
     def run_task(self, cid):
-        cmd = '%s t start %s' % (self.docker, cid)
+        cmd = '%s start -a %s' % (self.docker, cid)
         print cmd
         startrun = time.time()
         rc = os.system(cmd)
@@ -209,8 +191,8 @@ class BenchRunner:
         return runtime
         
     def run_echo_hello(self, repo, cid):
-        cmd = ('%s c create --net-host %s -- %s/%s %s echo hello' %
-               (self.docker, self.snapshotter_opt(), self.repository, self.add_suffix(repo), cid))
+        cmd = ('%s create --name %s %s/%s echo hello' %
+               (self.docker, cid, self.repository, self.add_suffix(repo)))
         print cmd
         startcreate = time.time()
         rc = os.system(cmd)
@@ -220,8 +202,7 @@ class BenchRunner:
 
     def run_cmd_arg(self, repo, cid, runargs):
         assert(len(runargs.mount) == 0)
-        cmd = '%s c create --net-host %s ' % (self.docker, self.snapshotter_opt())
-        cmd += '-- %s/%s %s ' % (self.repository, self.add_suffix(repo), cid)
+        cmd = '%s create --name %s %s/%s ' % (self.docker, cid, self.repository, self.add_suffix(repo))
         cmd += runargs.arg
         print cmd
         startcreate = time.time()
@@ -232,14 +213,14 @@ class BenchRunner:
 
     def run_cmd_arg_wait(self, repo, cid, runargs):
         env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s c create --net-host %s %s -- %s/%s %s %s' %
-               (self.docker, self.snapshotter_opt(), env, self.repository, self.add_suffix(repo), cid, runargs.arg))
+        cmd = ('%s create %s --name %s %s/%s %s ' %
+               (self.docker, env, cid, self.repository, self.add_suffix(repo), runargs.arg))
         print cmd
         startcreate = time.time()
         rc = os.system(cmd)
         createtime = time.time() - startcreate
         assert(rc == 0)
-        cmd = '%s t start %s' % (self.docker, cid)
+        cmd = '%s start -a %s' % (self.docker, cid)
         print cmd
         runtime = 0
         startrun = time.time()
@@ -258,7 +239,7 @@ class BenchRunner:
                 runtime = time.time() - startrun
                 # cleanup
                 print 'DONE'
-                cmd = '%s t kill -s 9 %s' % (self.docker, cid)
+                cmd = '%s kill -s 9 %s' % (self.docker, cid)
                 rc = os.system(cmd)
                 assert(rc == 0)
                 break
@@ -266,12 +247,12 @@ class BenchRunner:
         return createtime, runtime
 
     def run_cmd_stdin(self, repo, cid, runargs):
-        cmd = '%s c create --net-host %s ' % (self.docker, self.snapshotter_opt())
+        cmd = '%s create -i ' % self.docker
         for a,b in runargs.mount:
             a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
             a = tmp_copy(a)
-            cmd += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
-        cmd += '-- %s/%s %s ' % (self.repository, self.add_suffix(repo), cid)
+            cmd += '--mount type=bind,src=%s,dst=%s ' % (a,b)
+        cmd += '--name %s %s/%s ' % (cid, self.repository, self.add_suffix(repo))
         if runargs.stdin_sh:
             cmd += runargs.stdin_sh # e.g., sh -c
 
@@ -280,7 +261,7 @@ class BenchRunner:
         rc = os.system(cmd)
         createtime = time.time() - startcreate
         assert(rc == 0)
-        cmd = '%s t start %s' % (self.docker, cid)
+        cmd = '%s start -a %s' % (self.docker, cid)
         print cmd
         startrun = time.time()
 
@@ -296,8 +277,8 @@ class BenchRunner:
         name = bench.name
         print "Pulling the image..."
         startpull = time.time()
-        cmd = ('%s images %s %s/%s' %
-               (self.docker_pullbin(), self.pull_subcmd(), self.repository, self.add_suffix(name)))
+        cmd = ('%s pull %s/%s' %
+               (self.docker, self.repository, self.add_suffix(name)))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -319,56 +300,6 @@ class BenchRunner:
 
         return pulltime, createtime, runtime
 
-    def convert_echo_hello(self, repo):
-        self.mode = ESTARGZ_MODE
-        period=10
-        cmd = ('%s -cni -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s/%s %s/%s' %
-               (self.optimizer, period, self.srcrepository, repo, self.repository, self.add_suffix(repo)))
-        print cmd
-        rc = os.system(cmd)
-        assert(rc == 0)
-
-    def convert_cmd_arg(self, repo, runargs):
-        self.mode = ESTARGZ_MODE
-        period = 30
-        assert(len(runargs.mount) == 0)
-        entry = ""
-        if runargs.arg != "": # FIXME: this is naive...
-            entry = '-entrypoint \'["/bin/sh", "-c"]\''
-        cmd = ('%s -cni -period %s %s %s %s/%s %s/%s' %
-               (self.optimizer, period, entry, genargs(runargs.arg), self.srcrepository, repo, self.repository, self.add_suffix(repo)))
-        print cmd
-        rc = os.system(cmd)
-        assert(rc == 0)
-
-    def convert_cmd_arg_wait(self, repo, runargs):
-        self.mode = ESTARGZ_MODE
-        period = 90
-        env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s -cni -period %s %s %s %s/%s %s/%s' %
-               (self.optimizer, period, env, genargs(runargs.arg), self.srcrepository, repo, self.repository, self.add_suffix(repo)))
-        print cmd
-        rc = os.system(cmd)
-        assert(rc == 0)
-
-    def convert_cmd_stdin(self, repo, runargs):
-        self.mode = ESTARGZ_MODE
-        mounts = ''
-        for a,b in runargs.mount:
-            a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
-            a = tmp_copy(a)
-            mounts += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
-        period = 60
-        cmd = ('%s -i -cni -period %s %s -entrypoint \'["/bin/sh", "-c"]\' %s %s/%s %s/%s' %
-               (self.optimizer, period, mounts, genargs(runargs.stdin_sh), self.srcrepository, repo, self.repository, self.add_suffix(repo)))
-        print cmd
-        p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        print runargs.stdin
-        out,_ = p.communicate(runargs.stdin)
-        print out
-        p.wait()
-        assert(p.returncode == 0)
-
     def copy_img(self, repo):
         self.mode = LEGACY_MODE
         cmd = 'crane copy %s/%s %s/%s' % (self.srcrepository, repo, self.repository, self.add_suffix(repo))
@@ -377,29 +308,13 @@ class BenchRunner:
         assert(rc == 0)
 
     def convert_and_push_img(self, repo):
-        self.mode = ESTARGZ_NOOPT_MODE
+        self.mode = ZSTDCHUNKED_MODE
         self.pull_img(repo)
-        cmd = '%s --no-optimize %s/%s %s/%s' % (self.optimizer, self.srcrepository, repo, self.repository, self.add_suffix(repo))
+        cmd = '%s %s/%s %s/%s' % (self.optimizer, self.srcrepository, repo, self.repository, self.add_suffix(repo))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
         self.push_img(repo)
-
-    def optimize_img(self, name):
-        self.mode = ESTARGZ_MODE
-        self.pull_img(name)
-        if name in BenchRunner.ECHO_HELLO:
-            self.convert_echo_hello(repo=name)
-        elif name in BenchRunner.CMD_ARG:
-            self.convert_cmd_arg(repo=name, runargs=BenchRunner.CMD_ARG[name])
-        elif name in BenchRunner.CMD_ARG_WAIT:
-            self.convert_cmd_arg_wait(repo=name, runargs=BenchRunner.CMD_ARG_WAIT[name])
-        elif name in BenchRunner.CMD_STDIN:
-            self.convert_cmd_stdin(repo=name, runargs=BenchRunner.CMD_STDIN[name])
-        else:
-            print 'Unknown bench: '+name
-            exit(1)
-        self.push_img(name)
 
     def push_img(self, repo):
         cmd = '%s %s/%s' % (self.pusher, self.repository, self.add_suffix(repo))
@@ -415,7 +330,6 @@ class BenchRunner:
 
     def prepare(self, bench):
         name = bench.name
-        self.optimize_img(name)
         self.copy_img(name)
         self.convert_and_push_img(name)
 

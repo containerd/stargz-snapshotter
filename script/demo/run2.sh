@@ -72,7 +72,7 @@ cleanup
 
 echo "preparing commands..."
 ( cd "${REPO}" && PREFIX=/tmp/out/ make clean && \
-      PREFIX=/tmp/out/ make -j2 && \
+      PREFIX=/tmp/out/ make -j4 && \
       PREFIX=/tmp/out/ make install )
 
 echo "running storage..."

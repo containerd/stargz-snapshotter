@@ -36,13 +36,13 @@ build: $(CMD)
 FORCE:
 
 containerd-stargz-grpc: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/containerd-stargz-grpc
+	CGO_ENABLED=0 GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/containerd-stargz-grpc
 
 ctr-remote: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/ctr-remote
+	CGO_ENABLED=0 GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/ctr-remote
 
 registry-storage: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/registry-storage
+	CGO_ENABLED=0 GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/registry-storage
 
 check:
 	@echo "$@"
@@ -82,8 +82,11 @@ integration:
 test-optimize:
 	@./script/optimize/test.sh
 
-benchmark:
+benchmark-containerd:
 	@./script/benchmark/test.sh
+
+benchmark-podman:
+	@./script/benchmark2/test.sh
 
 test-pullsecrets:
 	@./script/pullsecrets/test.sh

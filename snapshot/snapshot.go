@@ -31,8 +31,8 @@ import (
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
-	"github.com/moby/sys/mountinfo"
 	"github.com/containerd/stargz-snapshotter/snapshot/types"
+	"github.com/moby/sys/mountinfo"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )

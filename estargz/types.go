@@ -81,7 +81,14 @@ const (
 	NoPrefetchLandmark = ".no.prefetch.landmark"
 
 	landmarkContents = 0xf
+
+	zstdFooterSize = 40
+
+	ZstdChunkedManifestChecksumAnnotation = "io.containers.zstd-chunked.manifest-checksum"
+	ZstdChunkedManifestInfoAnnotation     = "io.containers.zstd-chunked.manifest-position"
 )
+
+var zstdChunkedFrameMagic = []byte{0x47, 0x6e, 0x55, 0x6c, 0x49, 0x6e, 0x55, 0x78}
 
 // jtoc is the JSON-serialized table of contents index of the files in the stargz file.
 type jtoc struct {

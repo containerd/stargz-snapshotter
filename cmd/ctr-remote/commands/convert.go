@@ -28,6 +28,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
+	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -65,6 +66,11 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			Name:  "estargz-chunk-size",
 			Usage: "eStargz chunk size",
 			Value: 0,
+		},
+		// zstd:chunked flags
+		cli.BoolFlag{
+			Name:  "zstdchunked",
+			Usage: "convert legacy tar(.gz) layers to zstd:chunked for lazy pulling. Must be used in conjunction with '--oci'",
 		},
 		// generic flags
 		cli.BoolFlag{
@@ -123,6 +129,19 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			}
 			if context.Bool("uncompress") {
 				return errors.New("option --estargz conflicts with --uncompress")
+			}
+			if context.Bool("zstdchunked") {
+				return errors.New("option --estargz conflicts with --zstdchunked")
+			}
+		}
+
+		if context.Bool("zstdchunked") {
+			convertOpts = append(convertOpts, converter.WithLayerConvertFunc(zstdchunkedconvert.LayerConvertFunc()))
+			if !context.Bool("oci") {
+				return errors.New("option --zstdchunked must be used in conjunction with --oci")
+			}
+			if context.Bool("uncompress") {
+				return errors.New("option --zstdchunked conflicts with --uncompress")
 			}
 		}
 

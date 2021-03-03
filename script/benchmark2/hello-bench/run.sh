@@ -30,12 +30,11 @@ REPO="${CONTEXT}../../../"
 #       expecting and relying on volumes.
 source "${REPO}/script/util/utils.sh"
 
-MEASURING_SCRIPT="${REPO}/script/benchmark/hello-bench/src/hello.py"
-REBOOT_CONTAINERD_SCRIPT="${REPO}/script/benchmark/hello-bench/reboot_containerd.sh"
-REPO_CONFIG_DIR="${REPO}/script/benchmark/hello-bench/config/"
-CONTAINERD_CONFIG_DIR=/etc/containerd/
-REMOTE_SNAPSHOTTER_CONFIG_DIR=/etc/containerd-stargz-grpc/
+MEASURING_SCRIPT="${REPO}/script/benchmark2/hello-bench/src/hello.py"
+REBOOT_STORE_SCRIPT="${REPO}/script/benchmark2/hello-bench/reboot_store.sh"
+REPO_CONFIG_DIR="${REPO}/script/benchmark2/hello-bench/config/"
 BENCHMARKOUT_MARK_OUTPUT="BENCHMARK_OUTPUT: "
+REGISTRY_STORAGE_CONFIG_DIR=/etc/registry-storage/
 
 if [ $# -lt 1 ] ; then
     echo "Specify benchmark target."
@@ -63,9 +62,8 @@ function output {
 
 function set_noprefetch {
     local NOPREFETCH="${1}"
-    sed -i 's/noprefetch = .*/noprefetch = '"${NOPREFETCH}"'/g' "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml"
+    sed -i 's/noprefetch = .*/noprefetch = '"${NOPREFETCH}"'/g' "${REGISTRY_STORAGE_CONFIG_DIR}config.toml"
 }
-
 function measure {
     local OPTION="${1}"
     local REPOSITORY="${2}"
@@ -110,14 +108,14 @@ for SAMPLE_NO in $(seq ${NUM_OF_SAMPLES}) ; do
         echo "===== Measuring [${SAMPLE_NO}] ${IMAGE} (${MODE}) ====="
 
         if [ "${MODE}" == "${LEGACY_MODE}" ] ; then
-            NO_STARGZ_SNAPSHOTTER="true" "${REBOOT_CONTAINERD_SCRIPT}"
+            NO_ADDITIONAL_STORAGE="true" "${REBOOT_STORE_SCRIPT}"
             measure "--mode=legacy" ${TARGET_REPOSITORY} ${IMAGE}
         fi
 
         if [ "${MODE}" == "${ESTARGZ_NOOPT_MODE}" ] ; then
             echo -n "" > "${TMP_LOG_FILE}"
             set_noprefetch "true" # disable prefetch
-            LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
+            LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_STORE_SCRIPT}"
             measure "--mode=estargz-noopt" ${TARGET_REPOSITORY} ${IMAGE}
             check_remote_snapshots "${TMP_LOG_FILE}"
         fi
@@ -125,17 +123,17 @@ for SAMPLE_NO in $(seq ${NUM_OF_SAMPLES}) ; do
         if [ "${MODE}" == "${ESTARGZ_MODE}" ] ; then
             echo -n "" > "${TMP_LOG_FILE}"
             set_noprefetch "false" # enable prefetch
-            LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
+            LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_STORE_SCRIPT}"
             measure "--mode=estargz" ${TARGET_REPOSITORY} ${IMAGE}
             check_remote_snapshots "${TMP_LOG_FILE}"
         fi
 
         if [ "${MODE}" == "${ZSTDCHUNKED_MODE}" ] ; then
             echo -n "" > "${TMP_LOG_FILE}"
-            set_noprefetch "true" # disable prefetch (zstd:chunked doesn't support landmarks yet)
-            LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_CONTAINERD_SCRIPT}"
+            set_noprefetch "true" # disable prefetch
+            LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_STORE_SCRIPT}"
             measure "--mode=zstdchunked" ${TARGET_REPOSITORY} ${IMAGE}
-            check_remote_snapshots "${TMP_LOG_FILE}"
+            check_remote_snapshots "${TMP_LOG_FILE}" # TODO
         fi
     done
 done

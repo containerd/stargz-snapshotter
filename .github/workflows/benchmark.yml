@@ -12,11 +12,16 @@ jobs:
       BENCHMARK_LOG_DIR: ${{ github.workspace }}/log/
       BENCHMARK_RESULT_DIR: ${{ github.workspace }}/benchmark/
       BENCHMARK_REGISTRY: ghcr.io
-      BENCHMARK_USER: stargz-containers
+      BENCHMARK_USER: ktock
       BENCHMARK_TARGETS: python:3.9 gcc:10.2.0 postgres:13.1 tomcat:10.0.0-jdk15-openjdk-buster
       BENCHMARK_SAMPLES_NUM: 5
       BENCHMARK_PERCENTILE: 95
       BENCHMARK_PERCENTILES_GRANULARITY: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        runtime: ["podman", "containerd"]
     steps:
     - name: Install tools
       run: |
@@ -31,9 +36,9 @@ jobs:
           jq '{ location : .compute.location, vmSize : .compute.vmSize }' | \
           tee ${{ env.BENCHMARK_RESULT_DIR }}/instance.json
     - name: Run benchmark
-      run: make benchmark
+      run: make benchmark-${{ matrix.runtime }}
     - uses: actions/upload-artifact@v1
       if: ${{ always() }}
       with:
-        name: benchmarking-result
+        name: benchmarking-result-${{ matrix.runtime }}
         path: ${{ env.BENCHMARK_RESULT_DIR }}

@@ -16,4 +16,6 @@
 
 set -euo pipefail
 
-echo "/tmp/storage/$(echo -n "${1}" | base64 -w 0)/${2}/diff"
+OUTPUT_MARK="BENCHMARK_OUTPUT: "
+
+grep "${OUTPUT_MARK}" | sed -e 's/^'"${OUTPUT_MARK}"'//g' | sed -e ':begin;$!N;s/,\n\(\(}\|]\),*\)/\n\1/g;tbegin;P;D'

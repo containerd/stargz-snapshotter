@@ -36,6 +36,7 @@ const (
 	defaultLinkMode = syscall.S_IFLNK | 0400 // -r--------
 	defaultDirMode  = syscall.S_IFDIR | 0500 // dr-x------
 
+	poolLink          = "pool"
 	chainLink         = "chain"
 	layerLink         = "diff"
 	debugManifestLink = "manifest"
@@ -57,6 +58,11 @@ var _ = (fusefs.NodeLookuper)((*rootnode)(nil))
 // Lookup loads manifest and config of specified name (imgae reference)
 // and returns refnode of the specified name
 func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
+	switch name {
+	case poolLink:
+		return n.NewInode(ctx,
+			&linknode{linkname: n.pool.root()}, defaultLinkAttr(&out.Attr)), 0
+	}
 	refBytes, err := base64.StdEncoding.DecodeString(name)
 	if err != nil {
 		log.G(ctx).WithError(err).Debugf("failed to decode ref base64 %q", name)
@@ -132,6 +138,7 @@ func (n *refnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 		pool:    n.pool,
 		layer:   chain[len(chain)-1],
 		chain:   chain,
+		layers:  n.manifest.Layers,
 		refnode: n,
 	}, defaultDirAttr(&out.Attr)), 0
 }
@@ -157,7 +164,7 @@ func (n *refnode) Rmdir(ctx context.Context, name string) syscall.Errno {
 
 	}
 	log.G(ctx).WithField("refcounter", current).Warnf("layer %v / %v is marked as RELEASE", n.ref, targetDigest)
-	return syscall.EROFS
+	return syscall.ENOENT
 }
 
 // node is a filesystem inode abstraction.
@@ -165,8 +172,9 @@ type layernode struct {
 	fusefs.Inode
 	pool *pool
 
-	layer ocispec.Descriptor
-	chain []ocispec.Descriptor
+	layer  ocispec.Descriptor
+	chain  []ocispec.Descriptor
+	layers []ocispec.Descriptor
 
 	refnode *refnode
 }
@@ -184,7 +192,7 @@ func (n *layernode) Create(ctx context.Context, name string, flags uint32, mode 
 	}
 
 	// TODO: implement cleanup
-	return nil, nil, 0, syscall.EROFS
+	return nil, nil, 0, syscall.ENOENT
 }
 
 var _ = (fusefs.NodeLookuper)((*layernode)(nil))
@@ -204,7 +212,7 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 		}
 	case layerLink:
 		var layers []string
-		for _, l := range n.chain {
+		for _, l := range n.layers {
 			if images.IsLayerType(l.MediaType) {
 				layers = append(layers, l.Digest.String())
 			}
