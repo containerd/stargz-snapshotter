@@ -42,6 +42,8 @@ import (
 	"github.com/urfave/cli"
 )
 
+const netnsMountDir = "/var/run/netns"
+
 var samplerFlags = []cli.Flag{
 	cli.BoolFlag{
 		Name:  "terminal,t",
@@ -250,7 +252,7 @@ func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, 
 	}()
 
 	// Create a new network namespace for configuring it with CNI plugins
-	ns, err := netns.NewNetNS()
+	ns, err := netns.NewNetNS(netnsMountDir)
 	if err != nil {
 		rErr = errors.Wrapf(err, "failed to prepare netns")
 		return
