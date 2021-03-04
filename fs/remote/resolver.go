@@ -32,7 +32,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -111,7 +110,7 @@ func newFetcher(ctx context.Context, hosts docker.RegistryHosts, refspec referen
 		return nil, 0, fmt.Errorf("Digest is mandatory in layer descriptor")
 	}
 	digest := desc.Digest
-	u, err := url.Parse("dummy://" + refspec.Locator)
+	pullScope, err := docker.RepositoryScope(refspec, false)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -132,9 +131,7 @@ func newFetcher(ctx context.Context, hosts docker.RegistryHosts, refspec referen
 			tr = &transport{
 				inner: tr,
 				auth:  host.Authorizer,
-				// Specify pull scope
-				// TODO: The scope generator function in containerd (github.com/containerd/containerd/remotes/docker/scope.go) should be exported and used here.
-				scope: "repository:" + strings.TrimPrefix(u.Path, "/") + ":pull",
+				scope: pullScope,
 			}
 		}
 
