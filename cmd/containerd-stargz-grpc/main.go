@@ -84,6 +84,10 @@ func main() {
 		log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
 	}
 
+	if err := service.Supported(*rootDir); err != nil {
+		log.G(ctx).WithError(err).Fatalf("snapshotter is not supported")
+	}
+
 	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
