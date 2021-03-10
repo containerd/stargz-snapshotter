@@ -22,6 +22,7 @@ import (
 	"fmt"
 	golog "log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -34,6 +35,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/version"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
+	metrics "github.com/docker/go-metrics"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -55,6 +57,13 @@ var (
 	printVersion = flag.Bool("version", false, "print the version")
 )
 
+type snapshotterConfig struct {
+	service.Config
+
+	// MetricsAddress is address for the metrics API
+	MetricsAddress string `toml:"metrics_address"`
+}
+
 func main() {
 	flag.Parse()
 	lvl, err := logrus.ParseLevel(*logLevel)
@@ -72,7 +81,7 @@ func main() {
 
 	var (
 		ctx    = log.WithLogger(context.Background(), log.L)
-		config service.Config
+		config snapshotterConfig
 	)
 	// Streams log of standard lib (go-fuse uses this) into debug log
 	// Snapshotter should use "github.com/containerd/containerd/log" otherwize
@@ -88,12 +97,12 @@ func main() {
 		log.G(ctx).WithError(err).Fatalf("snapshotter is not supported")
 	}
 
-	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config)
+	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config.Config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
 	}
 
-	cleanup, err := serve(ctx, *address, rs)
+	cleanup, err := serve(ctx, *address, rs, config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to serve snapshotter")
 	}
@@ -105,7 +114,7 @@ func main() {
 	log.G(ctx).Info("Exiting")
 }
 
-func serve(ctx context.Context, addr string, rs snapshots.Snapshotter) (bool, error) {
+func serve(ctx context.Context, addr string, rs snapshots.Snapshotter, config snapshotterConfig) (bool, error) {
 	// Create a gRPC server
 	rpc := grpc.NewServer()
 
@@ -125,12 +134,27 @@ func serve(ctx context.Context, addr string, rs snapshots.Snapshotter) (bool, er
 		return false, errors.Wrapf(err, "failed to remove %q", addr)
 	}
 
+	errCh := make(chan error, 1)
+
+	if config.MetricsAddress != "" {
+		l, err := net.Listen("tcp", config.MetricsAddress)
+		if err != nil {
+			return false, errors.Wrapf(err, "failed to get listener for metrics endpoint")
+		}
+		m := http.NewServeMux()
+		m.Handle("/metrics", metrics.Handler())
+		go func() {
+			if err := http.Serve(l, m); err != nil {
+				errCh <- errors.Wrapf(err, "error on serving metrics via socket %q", addr)
+			}
+		}()
+	}
+
 	// Listen and serve
 	l, err := net.Listen("unix", addr)
 	if err != nil {
 		return false, errors.Wrapf(err, "error on listen socket %q", addr)
 	}
-	errCh := make(chan error, 1)
 	go func() {
 		if err := rpc.Serve(l); err != nil {
 			errCh <- errors.Wrapf(err, "error on serving via socket %q", addr)
