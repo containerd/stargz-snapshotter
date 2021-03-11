@@ -38,7 +38,7 @@ COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
 RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     git clone -b ${CONTAINERD_VERSION} --depth 1 \
               https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
-    echo 'require github.com/containerd/stargz-snapshotter v0.0.0\nreplace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' \
+    echo 'require github.com/containerd/stargz-snapshotter v0.0.0\nreplace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter\nreplace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' \
       >> $GOPATH/src/github.com/containerd/containerd/go.mod && \
     echo 'package main \nimport _ "github.com/containerd/stargz-snapshotter/service/plugin"' \
       > $GOPATH/src/github.com/containerd/containerd/cmd/containerd/builtins_stargz_snapshotter.go && \
