@@ -32,10 +32,12 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 var allowedPrefix = [4]string{"", "./", "/", "../"}
@@ -285,6 +287,30 @@ func TestWriteAndOpen(t *testing.T) {
 				lookupMatch("b", &TOCEntry{Name: "b", Type: "block", DevMajor: 123, DevMinor: 456, NumLink: 1}),
 				lookupMatch("c", &TOCEntry{Name: "c", Type: "char", DevMajor: 111, DevMinor: 222, NumLink: 1}),
 				lookupMatch("f", &TOCEntry{Name: "f", Type: "fifo", NumLink: 1}),
+			),
+		},
+		{
+			name: "modes",
+			in: tarOf(
+				dir("foo1/", 0755|os.ModeDir|os.ModeSetgid),
+				file("foo1/bar1", content, 0700|os.ModeSetuid),
+				file("foo1/bar2", content, 0755|os.ModeSetgid),
+				dir("foo2/", 0755|os.ModeDir|os.ModeSticky),
+				file("foo2/bar3", content, 0755|os.ModeSticky),
+				dir("foo3/", 0755|os.ModeDir),
+				file("foo3/bar4", content, os.FileMode(0700)),
+				file("foo3/bar5", content, os.FileMode(0755)),
+			),
+			wantNumGz: 8, // dir, bar1 alone, bar2 alone + dir, bar3 alone + dir, bar4 alone, bar5 alone, TOC, footer
+			want: checks(
+				hasMode("foo1/", 0755|os.ModeDir|os.ModeSetgid),
+				hasMode("foo1/bar1", 0700|os.ModeSetuid),
+				hasMode("foo1/bar2", 0755|os.ModeSetgid),
+				hasMode("foo2/", 0755|os.ModeDir|os.ModeSticky),
+				hasMode("foo2/bar3", 0755|os.ModeSticky),
+				hasMode("foo3/", 0755|os.ModeDir),
+				hasMode("foo3/bar4", os.FileMode(0700)),
+				hasMode("foo3/bar5", os.FileMode(0755)),
 			),
 		},
 	}
@@ -614,6 +640,21 @@ func hasDirLinkCount(file string, count int) stargzCheck {
 	})
 }
 
+func hasMode(file string, mode os.FileMode) stargzCheck {
+	return stargzCheckFn(func(t *testing.T, r *Reader) {
+		for _, ent := range r.toc.Entries {
+			if ent.Name == cleanEntryName(file) {
+				if ent.Stat().Mode() != mode {
+					t.Errorf("invalid mode: got %v; want %v", ent.Stat().Mode(), mode)
+					return
+				}
+				return
+			}
+		}
+		t.Errorf("file %q not found", file)
+	})
+}
+
 func hasSymlink(file, target string) stargzCheck {
 	return stargzCheckFn(func(t *testing.T, r *Reader) {
 		for _, ent := range r.toc.Entries {
@@ -702,20 +743,28 @@ func buildTarStatic(t *testing.T, ents []tarEntry, prefix string) *io.SectionRea
 func dir(name string, opts ...interface{}) tarEntry {
 	return tarEntryFunc(func(tw *tar.Writer, prefix string) error {
 		var o owner
+		mode := os.FileMode(0755)
 		for _, opt := range opts {
-			if v, ok := opt.(owner); ok {
+			switch v := opt.(type) {
+			case owner:
 				o = v
-			} else {
+			case os.FileMode:
+				mode = v
+			default:
 				return errors.New("unsupported opt")
 			}
 		}
 		if !strings.HasSuffix(name, "/") {
 			panic(fmt.Sprintf("missing trailing slash in dir %q ", name))
 		}
+		tm, err := fileModeToTarMode(mode)
+		if err != nil {
+			return err
+		}
 		return tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeDir,
 			Name:     prefix + name,
-			Mode:     0755,
+			Mode:     tm,
 			Uid:      o.uid,
 			Gid:      o.gid,
 		})
@@ -735,12 +784,15 @@ func file(name, contents string, opts ...interface{}) tarEntry {
 	return tarEntryFunc(func(tw *tar.Writer, prefix string) error {
 		var xattrs xAttr
 		var o owner
+		mode := os.FileMode(0644)
 		for _, opt := range opts {
 			switch v := opt.(type) {
 			case xAttr:
 				xattrs = v
 			case owner:
 				o = v
+			case os.FileMode:
+				mode = v
 			default:
 				return errors.New("unsupported opt")
 			}
@@ -748,10 +800,14 @@ func file(name, contents string, opts ...interface{}) tarEntry {
 		if strings.HasSuffix(name, "/") {
 			return fmt.Errorf("bogus trailing slash in file %q", name)
 		}
+		tm, err := fileModeToTarMode(mode)
+		if err != nil {
+			return err
+		}
 		if err := tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeReg,
 			Name:     prefix + name,
-			Mode:     0644,
+			Mode:     tm,
 			Xattrs:   xattrs,
 			Size:     int64(len(contents)),
 			Uid:      o.uid,
@@ -759,7 +815,7 @@ func file(name, contents string, opts ...interface{}) tarEntry {
 		}); err != nil {
 			return err
 		}
-		_, err := io.WriteString(tw, contents)
+		_, err = io.WriteString(tw, contents)
 		return err
 	})
 }
@@ -774,6 +830,24 @@ func symlink(name, target string) tarEntry {
 		})
 	})
 }
+
+func fileModeToTarMode(mode os.FileMode) (int64, error) {
+	h, err := tar.FileInfoHeader(fileInfoOnlyMode(mode), "")
+	if err != nil {
+		return 0, err
+	}
+	return h.Mode, nil
+}
+
+// fileInfoOnlyMode is os.FileMode that populates only file mode.
+type fileInfoOnlyMode os.FileMode
+
+func (f fileInfoOnlyMode) Name() string       { return "" }
+func (f fileInfoOnlyMode) Size() int64        { return 0 }
+func (f fileInfoOnlyMode) Mode() os.FileMode  { return os.FileMode(f) }
+func (f fileInfoOnlyMode) ModTime() time.Time { return time.Now() }
+func (f fileInfoOnlyMode) IsDir() bool        { return os.FileMode(f).IsDir() }
+func (f fileInfoOnlyMode) Sys() interface{}   { return nil }
 
 // Tests *Reader.ChunkEntryForOffset about offset and size calculation.
 func TestChunkEntryForOffset(t *testing.T) {

@@ -37,7 +37,6 @@
 package fs
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -902,11 +901,13 @@ func statFileToAttr(sf *statFile, size uint64, out *fuse.Attr) fusefs.StableAttr
 
 // modeOfEntry gets system's mode bits from TOCEntry
 func modeOfEntry(e *estargz.TOCEntry) uint32 {
+	m := e.Stat().Mode()
+
 	// Permission bits
-	res := uint32(e.Stat().Mode() & os.ModePerm)
+	res := uint32(m & os.ModePerm)
 
 	// File type bits
-	switch e.Stat().Mode() & os.ModeType {
+	switch m & os.ModeType {
 	case os.ModeDevice:
 		res |= syscall.S_IFBLK
 	case os.ModeDevice | os.ModeCharDevice:
@@ -923,20 +924,14 @@ func modeOfEntry(e *estargz.TOCEntry) uint32 {
 		res |= syscall.S_IFREG
 	}
 
-	// SUID, SGID, Sticky bits
-	// Stargz package doesn't provide these bits so let's calculate them manually
-	// here. TOCEntry.Mode is a copy of tar.Header.Mode so we can understand the
-	// mode using that package.
-	// See also:
-	// - https://github.com/google/crfs/blob/71d77da419c90be7b05d12e59945ac7a8c94a543/stargz/stargz.go#L706
-	hm := (&tar.Header{Mode: e.Mode}).FileInfo().Mode()
-	if hm&os.ModeSetuid != 0 {
+	// suid, sgid, sticky bits
+	if m&os.ModeSetuid != 0 {
 		res |= syscall.S_ISUID
 	}
-	if hm&os.ModeSetgid != 0 {
+	if m&os.ModeSetgid != 0 {
 		res |= syscall.S_ISGID
 	}
-	if hm&os.ModeSticky != 0 {
+	if m&os.ModeSticky != 0 {
 		res |= syscall.S_ISVTX
 	}
 
