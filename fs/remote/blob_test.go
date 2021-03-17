@@ -34,7 +34,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -160,12 +159,12 @@ func TestReadAt(t *testing.T) {
 
 							// Check ReadAt method
 							bb1 := makeBlob(t, blobsize, sampleChunkSize, tr)
-							cacheAll(bb1, cacheChunks)
+							cacheAll(t, bb1, cacheChunks)
 							checkRead(t, wantData, bb1, offset, size)
 
 							// Check Cache method
 							bb2 := makeBlob(t, blobsize, sampleChunkSize, tr)
-							cacheAll(bb2, cacheChunks)
+							cacheAll(t, bb2, cacheChunks)
 							checkCache(t, bb2, offset, size)
 						})
 					}
@@ -175,9 +174,23 @@ func TestReadAt(t *testing.T) {
 	}
 }
 
-func cacheAll(b *blob, chunks []region) {
+func cacheAll(t *testing.T, b *blob, chunks []region) {
 	for _, reg := range chunks {
-		b.cache.Add(b.fetcher.genID(reg), []byte(sampleData1[reg.b:reg.e+1]))
+		id := b.fetcher.genID(reg)
+		w, err := b.cache.Add(id)
+		if err != nil {
+			w.Close()
+			t.Fatalf("failed to add cache %v: %v", id, err)
+		}
+		if _, err := w.Write([]byte(sampleData1[reg.b : reg.e+1])); err != nil {
+			w.Close()
+			t.Fatalf("failed to write cache %v: %v", id, err)
+		}
+		if err := w.Commit(); err != nil {
+			w.Close()
+			t.Fatalf("failed to commit cache %v: %v", id, err)
+		}
+		w.Close()
 	}
 }
 
@@ -216,10 +229,15 @@ func checkAllCached(t *testing.T, r *blob, offset, size int64) {
 	whole := region{floor(offset, r.chunkSize), ceil(offset+size-1, r.chunkSize) - 1}
 	if err := r.walkChunks(whole, func(reg region) error {
 		data := make([]byte, reg.size())
-		n, err := r.cache.FetchAt(r.fetcher.genID(reg), 0, data)
-		if err != nil || int64(n) != reg.size() {
-			return fmt.Errorf("missed cache of region={%d,%d}(size=%d): %v",
-				reg.b, reg.e, reg.size(), err)
+		id := r.fetcher.genID(reg)
+
+		r, err := r.cache.Get(id)
+		if err != nil {
+			return fmt.Errorf("missed cache of region={%d,%d}(size=%d): %v", reg.b, reg.e, reg.size(), err)
+		}
+		defer r.Close()
+		if n, err := r.ReadAt(data, 0); (err != nil && err != io.EOF) || int64(n) != reg.size() {
+			return fmt.Errorf("failed to read cache of region={%d,%d}(size=%d): %v", reg.b, reg.e, reg.size(), err)
 		}
 		cn++
 		return nil
@@ -279,42 +297,12 @@ func makeBlob(t *testing.T, size int64, chunkSize int64, fn RoundTripFunc) *blob
 			url: testURL,
 			tr:  fn,
 		},
-		size:      size,
-		chunkSize: chunkSize,
-		cache:     &testCache{membuf: map[string]string{}, t: t},
-		resolver: &Resolver{
-			bufPool: sync.Pool{
-				New: func() interface{} {
-					return new(bytes.Buffer)
-				},
-			},
-		},
+		size:         size,
+		chunkSize:    chunkSize,
+		cache:        cache.NewMemoryCache(),
+		resolver:     &Resolver{},
 		fetchTimeout: time.Duration(defaultFetchTimeoutSec) * time.Second,
 	}
-}
-
-type testCache struct {
-	membuf map[string]string
-	t      *testing.T
-	mu     sync.Mutex
-}
-
-func (tc *testCache) FetchAt(key string, offset int64, p []byte, opts ...cache.Option) (int, error) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-
-	cache, ok := tc.membuf[key]
-	if !ok {
-		return 0, fmt.Errorf("Missed cache: %q", key)
-	}
-	return copy(p, cache[offset:]), nil
-}
-
-func (tc *testCache) Add(key string, p []byte, opts ...cache.Option) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	tc.membuf[key] = string(p)
-	tc.t.Logf("  cached [%s...]: %q", key[:8], string(p))
 }
 
 func TestCheckInterval(t *testing.T) {

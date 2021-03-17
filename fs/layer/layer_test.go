@@ -25,11 +25,9 @@ package layer
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
-	"sync"
 	"testing"
 	"time"
 
@@ -128,8 +126,8 @@ func TestPrefetch(t *testing.T) {
 				prioritizedFilesInfo(tt.prioritizedFiles),
 				stargzOnlyInfo(tt.stargz))
 			blob := newBlob(sr)
-			cache := &testCache{membuf: map[string]string{}, t: t}
-			vr, _, err := reader.NewReader(sr, cache)
+			mcache := cache.NewMemoryCache()
+			vr, _, err := reader.NewReader(sr, mcache)
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
@@ -164,8 +162,8 @@ func TestPrefetch(t *testing.T) {
 				t.Errorf("invalid prefetch size %d; want %d",
 					blob.calledPrefetchSize, prefetchSize)
 			}
-			if tt.wantNum != len(cache.membuf) {
-				t.Errorf("number of chunks in the cache %d; want %d: %v", len(cache.membuf), tt.wantNum, err)
+			if cLen := len(mcache.(*cache.MemoryCache).Membuf); tt.wantNum != cLen {
+				t.Errorf("number of chunks in the cache %d; want %d: %v", cLen, tt.wantNum, err)
 				return
 			}
 
@@ -227,30 +225,6 @@ func (sb *sampleBlob) Cache(offset int64, size int64, option ...remote.Option) e
 }
 func (sb *sampleBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	return nil
-}
-
-type testCache struct {
-	membuf map[string]string
-	t      *testing.T
-	mu     sync.Mutex
-}
-
-func (tc *testCache) FetchAt(key string, offset int64, p []byte, opts ...cache.Option) (int, error) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-
-	cache, ok := tc.membuf[key]
-	if !ok {
-		return 0, fmt.Errorf("Missed cache: %q", key)
-	}
-	return copy(p, cache[offset:]), nil
-}
-
-func (tc *testCache) Add(key string, p []byte, opts ...cache.Option) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	tc.membuf[key] = string(p)
-	tc.t.Logf("  cached [%s...]: %q", key[:8], string(p))
 }
 
 func TestWaiter(t *testing.T) {

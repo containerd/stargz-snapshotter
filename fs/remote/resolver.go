@@ -23,7 +23,6 @@
 package remote
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -68,11 +67,6 @@ func NewResolver(blobCache cache.BlobCache, cfg config.BlobConfig) *Resolver {
 	}
 
 	return &Resolver{
-		bufPool: sync.Pool{
-			New: func() interface{} {
-				return new(bytes.Buffer)
-			},
-		},
 		blobCache:  blobCache,
 		blobConfig: cfg,
 	}
@@ -81,7 +75,6 @@ func NewResolver(blobCache cache.BlobCache, cfg config.BlobConfig) *Resolver {
 type Resolver struct {
 	blobCache  cache.BlobCache
 	blobConfig config.BlobConfig
-	bufPool    sync.Pool
 }
 
 func (r *Resolver) Resolve(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (Blob, error) {
