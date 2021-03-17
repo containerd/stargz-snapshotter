@@ -13,6 +13,7 @@ require (
 	github.com/docker/cli v0.0.0-20191017083524-a8ff7f821017
 	github.com/docker/docker v17.12.0-ce-rc1.0.20200730172259-9f28837c1d93+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.6.3 // indirect
+	github.com/docker/go-metrics v0.0.1
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
 	github.com/hanwen/go-fuse/v2 v2.0.4-0.20201208195215-4a458845028b
 	github.com/hashicorp/go-multierror v1.1.0
@@ -26,6 +27,7 @@ require (
 	github.com/opencontainers/image-spec v1.0.1
 	github.com/opencontainers/runtime-spec v1.0.3-0.20200929063507-e6143ca7d51d
 	github.com/pkg/errors v0.9.1
+	github.com/prometheus/client_golang v1.7.1
 	github.com/rs/xid v1.2.1
 	github.com/sirupsen/logrus v1.7.0
 	github.com/urfave/cli v1.22.2

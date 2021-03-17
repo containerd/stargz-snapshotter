@@ -56,9 +56,11 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
+	fsmetrics "github.com/containerd/stargz-snapshotter/fs/metrics"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/task"
+	metrics "github.com/docker/go-metrics"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
@@ -110,6 +112,16 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.Fil
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to setup resolver")
 	}
+
+	var ns *metrics.Namespace
+	if !cfg.NoPrometheus {
+		ns = metrics.NewNamespace("stargz", "fs", nil)
+	}
+	c := fsmetrics.NewLayerMetrics(ns)
+	if ns != nil {
+		metrics.Register(ns)
+	}
+
 	return &filesystem{
 		resolver:              r,
 		getSources:            getSources,
@@ -121,6 +133,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snbase.Fil
 		backgroundTaskManager: tm,
 		allowNoVerification:   cfg.AllowNoVerification,
 		disableVerification:   cfg.DisableVerification,
+		metricsController:     c,
 	}, nil
 }
 
@@ -136,6 +149,7 @@ type filesystem struct {
 	allowNoVerification   bool
 	disableVerification   bool
 	getSources            source.GetSources
+	metricsController     *fsmetrics.Controller
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) (retErr error) {
@@ -232,6 +246,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	fs.layerMu.Lock()
 	fs.layer[mountpoint] = l
 	fs.layerMu.Unlock()
+	fs.metricsController.Add(mountpoint, l)
 
 	// Prefetch this layer. We prefetch several layers in parallel. The first
 	// Check() for this layer waits for the prefetch completion.
@@ -371,6 +386,7 @@ func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
 	}
 	delete(fs.layer, mountpoint) // unregisters the corresponding layer
 	fs.layerMu.Unlock()
+	fs.metricsController.Remove(mountpoint)
 	// The goroutine which serving the mountpoint possibly becomes not responding.
 	// In case of such situations, we use MNT_FORCE here and abort the connection.
 	// In the future, we might be able to consider to kill that specific hanging
