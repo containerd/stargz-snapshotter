@@ -74,7 +74,7 @@ FROM golang-base AS containerd-base
 ARG TARGETARCH
 ARG NERDCTL_VERSION
 RUN apt-get update -y && apt-get --no-install-recommends install -y fuse && \
-    curl -sSL --output /tmp/nerdctl.tgz https://github.com/AkihiroSuda/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${TARGETARCH:-amd64}.tar.gz && \
+    curl -sSL --output /tmp/nerdctl.tgz https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${TARGETARCH:-amd64}.tar.gz && \
     tar zxvf /tmp/nerdctl.tgz -C /usr/local/bin && \
     rm -f /tmp/nerdctl.tgz
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
@@ -90,7 +90,7 @@ FROM golang-base AS containerd-snapshotter-base
 ARG TARGETARCH
 ARG NERDCTL_VERSION
 RUN apt-get update -y && apt-get --no-install-recommends install -y fuse && \
-    curl -sSL --output /tmp/nerdctl.tgz https://github.com/AkihiroSuda/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${TARGETARCH:-amd64}.tar.gz && \
+    curl -sSL --output /tmp/nerdctl.tgz https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${TARGETARCH:-amd64}.tar.gz && \
     tar zxvf /tmp/nerdctl.tgz -C /usr/local/bin && \
     rm -f /tmp/nerdctl.tgz
 COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
