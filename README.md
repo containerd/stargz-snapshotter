@@ -1,3 +1,8 @@
+[[⬇️ **Download**]](https://github.com/containerd/stargz-snapshotter/releases)
+[[📔**Browse images**]](./docs/pre-converted-images.md)
+[[☸**Quick Start (Kubernetes)**]](#quick-start-with-kubernetes)
+[[🤓**Quick Start (nerdctl)**]](https://github.com/containerd/nerdctl/blob/master/docs/stargz.md)
+
 # Stargz Snapshotter
 
 [![Tests Status](https://github.com/containerd/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ATests+branch%3Amaster)
