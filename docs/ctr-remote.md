@@ -7,7 +7,7 @@ This command works on containerd so containerd needs to run on your environment.
 So this converts an image stored in containerd and stores the resulting image to containerd.
 
 Because the resulting image is stored to containerd, you can use `ctr-remote image pull` and `ctr-remote image push` commands for pulling/pushing images from/to regstries.
-[nerdctl](https://github.com/AkihiroSuda/nerdctl), Docker-compatible CLI for containerd, allows you to pull/push images using `~/.docker/config.json`.
+[nerdctl](https://github.com/containerd/nerdctl), Docker-compatible CLI for containerd, allows you to pull/push images using `~/.docker/config.json`.
 Various other containerd-based commands like `ctr-remote content get`, `ctr-remote images export` and other `ctr-remote` and `nerdctl` commands can also be used for debugging and inspecting the resulting eStargz image.
 
 The converted eStargz image can be lazily pulled by Stargz Snapshotter which can speed up the container startup.

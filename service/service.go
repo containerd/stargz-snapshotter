@@ -25,7 +25,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/overlay"
+	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/service/keychain"
@@ -133,5 +133,5 @@ func Supported(root string) error {
 		return errors.Wrapf(err, "%s not installed", fusermountBin)
 	}
 	// Remote snapshotter is implemented based on overlayfs snapshotter.
-	return overlay.Supported(snapshotterRoot(root))
+	return overlayutils.Supported(snapshotterRoot(root))
 }

@@ -109,7 +109,7 @@ Instead, this supports authentication in the following methods,
 - Using Kubernetes secrets (type = `kubernetes.io/dockerconfigjson`)
 
 By default, This snapshotter tries to get creds from `$DOCKER_CONFIG` or `~/.docker/config.json`.
-Following example enables stargz snapshotter to access to private registries using `docker login` command. [`nerdctl login`](https://github.com/AkihiroSuda/nerdctl) can also be used for this.
+Following example enables stargz snapshotter to access to private registries using `docker login` command. [`nerdctl login`](https://github.com/containerd/nerdctl) can also be used for this.
 Stargz snapshotter doesn't share credentials with containerd so credentials specified by `ctr-remote`'s `--user` option in the example is just for containerd.
 
 ```console

@@ -40,7 +40,7 @@ if ! which ctr-remote ; then
 fi
 
 if ! which nerdctl ; then
-    wget -O /tmp/nerdctl.tar.gz "https://github.com/AkihiroSuda/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-amd64.tar.gz"
+    wget -O /tmp/nerdctl.tar.gz "https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-amd64.tar.gz"
     tar zxvf /tmp/nerdctl.tar.gz -C /usr/local/bin/
 fi
 
