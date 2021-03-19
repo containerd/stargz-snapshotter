@@ -238,7 +238,8 @@ func TestExistence(t *testing.T) {
 				testutil.File("foo/.wh..wh..opq", ""),
 			},
 			want: []check{
-				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
+				hasNodeXattrs("foo/", opaqueXattrs[0], opaqueXattrValue),
+				hasNodeXattrs("foo/", opaqueXattrs[1], opaqueXattrValue),
 				fileNotExist("foo/.wh..wh..opq"),
 			},
 		},
@@ -250,7 +251,8 @@ func TestExistence(t *testing.T) {
 				testutil.File("foo/bar.txt", "test"),
 			},
 			want: []check{
-				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
+				hasNodeXattrs("foo/", opaqueXattrs[0], opaqueXattrValue),
+				hasNodeXattrs("foo/", opaqueXattrs[1], opaqueXattrValue),
 				hasFileDigest("foo/bar.txt", digestFor("test")),
 				fileNotExist("foo/.wh..wh..opq"),
 			},
@@ -262,7 +264,8 @@ func TestExistence(t *testing.T) {
 				testutil.File("foo/.wh..wh..opq", ""),
 			},
 			want: []check{
-				hasNodeXattrs("foo/", opaqueXattr, opaqueXattrValue),
+				hasNodeXattrs("foo/", opaqueXattrs[0], opaqueXattrValue),
+				hasNodeXattrs("foo/", opaqueXattrs[1], opaqueXattrValue),
 				hasNodeXattrs("foo/", "foo", "bar"),
 				fileNotExist("foo/.wh..wh..opq"),
 			},

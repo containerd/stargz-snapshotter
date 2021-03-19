@@ -69,11 +69,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var opaqueXattrs = []string{"trusted.overlay.opaque", "user.overlay.opaque"}
+
 const (
 	blockSize             = 4096
 	whiteoutPrefix        = ".wh."
 	whiteoutOpaqueDir     = whiteoutPrefix + whiteoutPrefix + ".opq"
-	opaqueXattr           = "trusted.overlay.opaque"
 	opaqueXattrValue      = "y"
 	stateDirName          = ".stargz-snapshotter"
 	defaultMaxConcurrency = 2
@@ -545,12 +546,14 @@ func (n *node) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.AttrO
 var _ = (fusefs.NodeGetxattrer)((*node)(nil))
 
 func (n *node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
-	if attr == opaqueXattr && n.opaque {
-		// This node is an opaque directory so give overlayfs-compliant indicator.
-		if len(dest) < len(opaqueXattrValue) {
-			return uint32(len(opaqueXattrValue)), syscall.ERANGE
+	for _, opaqueXattr := range opaqueXattrs {
+		if attr == opaqueXattr && n.opaque {
+			// This node is an opaque directory so give overlayfs-compliant indicator.
+			if len(dest) < len(opaqueXattrValue) {
+				return uint32(len(opaqueXattrValue)), syscall.ERANGE
+			}
+			return uint32(copy(dest, opaqueXattrValue)), 0
 		}
-		return uint32(copy(dest, opaqueXattrValue)), 0
 	}
 	if v, ok := n.e.Xattrs[attr]; ok {
 		if len(dest) < len(v) {
@@ -567,7 +570,9 @@ func (n *node) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errn
 	var attrs []byte
 	if n.opaque {
 		// This node is an opaque directory so add overlayfs-compliant indicator.
-		attrs = append(attrs, []byte(opaqueXattr+"\x00")...)
+		for _, opaqueXattr := range opaqueXattrs {
+			attrs = append(attrs, []byte(opaqueXattr+"\x00")...)
+		}
 	}
 	for k := range n.e.Xattrs {
 		attrs = append(attrs, []byte(k+"\x00")...)
