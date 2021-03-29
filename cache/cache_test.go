@@ -25,6 +25,7 @@ package cache
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -132,7 +133,19 @@ func testCache(t *testing.T, name string, newCache func() (BlobCache, cleanFunc)
 			defer clean()
 			for _, blob := range tt.blobs {
 				d := digestFor(blob)
-				c.Add(d, []byte(blob))
+				w, err := c.Add(d)
+				if err != nil {
+					t.Fatalf("failed to add %v: %v", d, err)
+				}
+				if n, err := w.Write([]byte(blob)); err != nil || n != len(blob) {
+					w.Close()
+					t.Fatalf("failed to write %v (len:%d): %v", d, len(blob), err)
+				}
+				if err := w.Commit(); err != nil {
+					w.Close()
+					t.Fatalf("failed to commit %v (len:%d): %v", d, len(blob), err)
+				}
+				w.Close()
 			}
 			for _, check := range tt.checks {
 				check(t, c)
@@ -162,7 +175,12 @@ func hit(sample string) check {
 
 func testChunk(t *testing.T, c BlobCache, key string, offset int64, sample string) {
 	p := make([]byte, len(sample))
-	if n, err := c.FetchAt(key, offset, p); err != nil {
+	r, err := c.Get(key)
+	if err != nil {
+		t.Errorf("missed %v", key)
+		return
+	}
+	if n, err := r.ReadAt(p, offset); err != nil && err != io.EOF {
 		t.Errorf("failed to fetch blob %q: %v", key, err)
 		return
 	} else if n != len(sample) {
@@ -177,9 +195,7 @@ func testChunk(t *testing.T, c BlobCache, key string, offset int64, sample strin
 func miss(sample string) check {
 	return func(t *testing.T, c BlobCache) {
 		d := digestFor(sample)
-		p := make([]byte, len(sample))
-		_, err := c.FetchAt(d, 0, p)
-		if err == nil {
+		if _, err := c.Get(d); err == nil {
 			t.Errorf("hit blob %q but must be missed: %v", d, err)
 			return
 		}
