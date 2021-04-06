@@ -98,16 +98,6 @@ COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
 
-# Image which can be used as all-in-one single node demo environment
-FROM snapshotter-base AS cind
-COPY ./script/config/ /
-COPY ./script/cind/ /
-VOLUME /var/lib/containerd
-VOLUME /var/lib/containerd-stargz-grpc
-VOLUME /run/containerd-stargz-grpc
-ENV CONTAINERD_SNAPSHOTTER=stargz
-ENTRYPOINT [ "/entrypoint.sh" ]
-
 # Image which can be used for interactive demo environment
 FROM containerd-base AS demo
 ARG CNI_PLUGINS_VERSION
