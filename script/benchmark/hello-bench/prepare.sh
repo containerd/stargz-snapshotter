@@ -20,7 +20,7 @@ CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../../"
 MEASURING_SCRIPT="${REPO}/script/benchmark/hello-bench/src/hello.py"
 REBOOT_CONTAINERD_SCRIPT="${REPO}/script/benchmark/hello-bench/reboot_containerd.sh"
-NERDCTL_VERSION="0.5.0"
+NERDCTL_VERSION="0.7.3"
 
 if [ $# -lt 1 ] ; then
     echo "Specify benchmark target."
