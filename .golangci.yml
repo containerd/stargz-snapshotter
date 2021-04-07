@@ -1,3 +1,6 @@
+# This is applied to `estargz` submodule as well.
+# https://golangci-lint.run/usage/configuration#config-file
+
 linters:
   enable:
     - structcheck
@@ -17,7 +20,7 @@ linters:
 run:
   deadline: 4m
   skip-dirs:
+    - docs
     - images
     - out
     - script
-    - vendor
