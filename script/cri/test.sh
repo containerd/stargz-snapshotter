@@ -18,6 +18,7 @@ set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
+CRI_TOOLS_VERSION=53ad8bb7f97e1b1d1c0c0634e43a3c2b8b07b718
 
 source "${CONTEXT}/const.sh"
 
@@ -78,10 +79,11 @@ RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
     curl https://dl.google.com/go/go1.15.6.linux-\${TARGETARCH:-amd64}.tar.gz \
     | tar -C /usr/local -xz && \
     go get -u github.com/onsi/ginkgo/ginkgo && \
-    git clone -b v1.19.0 https://github.com/kubernetes-sigs/cri-tools \
+    git clone https://github.com/kubernetes-sigs/cri-tools \
               \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
     cd \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
-    make critest && make install-critest -e BINDIR=\${GOPATH}/bin && \
+    git checkout ${CRI_TOOLS_VERSION} && \
+    make && make install -e BINDIR=\${GOPATH}/bin && \
     git clone -b v1.11.1 https://github.com/containerd/cri \
               \${GOPATH}/src/github.com/containerd/cri && \
     cd \${GOPATH}/src/github.com/containerd/cri && \
