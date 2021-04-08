@@ -158,7 +158,7 @@ done
 
 # Rebuild cri testing tool
 docker exec "${TEST_NODE_NAME}" /bin/bash -c \
-       "cd /go/src/github.com/kubernetes-sigs/cri-tools && make critest && make install-critest -e BINDIR=/go/bin"
+       "cd /go/src/github.com/kubernetes-sigs/cri-tools && make && make install -e BINDIR=/go/bin"
 
 # Varidate the runtime through CRI
 if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then
