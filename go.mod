@@ -5,7 +5,7 @@ go 1.15
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/containerd/console v1.0.1
-	github.com/containerd/containerd v1.5.0-beta.4
+	github.com/containerd/containerd v1.5.0-rc.0
 	github.com/containerd/continuity v0.0.0-20210208174643-50096c924a4e
 	github.com/containerd/go-cni v1.0.1
 	github.com/containerd/stargz-snapshotter/estargz v0.5.0
@@ -36,9 +36,9 @@ require (
 	google.golang.org/appengine v1.6.6 // indirect
 	google.golang.org/grpc v1.35.0
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
-	k8s.io/api v0.20.1
-	k8s.io/apimachinery v0.20.1
-	k8s.io/client-go v0.20.1
+	k8s.io/api v0.20.4
+	k8s.io/apimachinery v0.20.4
+	k8s.io/client-go v0.20.4
 )
 
 replace (
