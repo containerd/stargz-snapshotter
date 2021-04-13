@@ -99,6 +99,9 @@ class BenchRunner:
                     'tomcat:10.0.0-jdk15-openjdk-buster': RunArgs(waitline='Server startup'),
                     'postgres:13.1': RunArgs(waitline='database system is ready to accept connections',
                                              env={'POSTGRES_PASSWORD': 'abc'}),
+                    'mariadb:10.5': RunArgs(waitline='mysqld: ready for connections',
+                                            env={'MYSQL_ROOT_PASSWORD': 'abc'}),
+                    'wordpress:5.7': RunArgs(waitline='apache2 -D FOREGROUND'),
     }
 
     CMD_STDIN = {'php:7.3.8':  RunArgs(stdin='php -r "echo \\\"hello\\n\\\";"; exit\n'),
@@ -123,6 +126,7 @@ class BenchRunner:
                  Bench('rethinkdb:2.3.6', 'database'),
                  Bench('postgres:13.1', 'database'),
                  Bench('redis:5.0.5', 'database'),
+                 Bench('mariadb:10.5', 'database'),
                  Bench('python:3.9', 'language'),
                  Bench('golang:1.12.9', 'language'),
                  Bench('gcc:10.2.0', 'language'),
@@ -135,6 +139,7 @@ class BenchRunner:
                  Bench('jenkins:2.60.3'),
                  Bench('node:13.13.0'),
                  Bench('tomcat:10.0.0-jdk15-openjdk-buster', 'web-server'),
+                 Bench('wordpress:5.7', 'web-server'),
              ]])
 
     def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER):
