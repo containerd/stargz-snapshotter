@@ -1,10 +1,12 @@
-[plugins.stargz]
+version = 2
+
+[plugins."io.containerd.snapshotter.v1.stargz"]
 root_path = "/var/lib/containerd-stargz-grpc/"
 disable_verification = false
 
-[plugins.stargz.blob]
+[plugins."io.containerd.snapshotter.v1.stargz".blob]
 check_always = true
 
-[[plugins.stargz.resolver.host."registry-integration.test".mirrors]]
+[[plugins."io.containerd.snapshotter.v1.stargz".resolver.host."registry-integration.test".mirrors]]
 host = "registry-alt.test:5000"
 insecure = true

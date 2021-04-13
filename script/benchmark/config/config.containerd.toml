@@ -1,3 +1,5 @@
+version = 2
+
 [proxy_plugins]
   [proxy_plugins.stargz]
     type = "snapshot"
