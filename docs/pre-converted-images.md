@@ -53,3 +53,7 @@ Additionally, image names listed in `Image Name` contain the following suffixes 
 |`ghcr.io/stargz-containers/tomcat:10.0.0-jdk15-openjdk-buster-esgz`|Code execution until up and ready message (`Server startup`) is printed|
 |`ghcr.io/stargz-containers/postgres:13.1-org`|Code execution until up and ready message (`database system is ready to accept connections`) is printed|
 |`ghcr.io/stargz-containers/postgres:13.1-esgz`|Code execution until up and ready message (`database system is ready to accept connections`) is printed|
+|`ghcr.io/stargz-containers/wordpress:5.7-org`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/wordpress:5.7-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/mariadb:10.5-org`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
+|`ghcr.io/stargz-containers/mariadb:10.5-esgz`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
