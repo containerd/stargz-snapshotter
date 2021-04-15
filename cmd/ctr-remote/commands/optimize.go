@@ -39,6 +39,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
+	"golang.org/x/sync/singleflight"
 )
 
 const defaultPeriod = 10
@@ -129,11 +130,11 @@ var OptimizeCommand = cli.Command{
 				return errors.Wrapf(err, "failed output record file")
 			}
 		}
-		f := estargzconvert.LayerConvertWithLayerOptsFunc(esgzOptsPerLayer)
+		f := flightWrapper(logWrapper(estargzconvert.LayerConvertWithLayerOptsFunc(esgzOptsPerLayer)))
 		if wrapper != nil {
 			f = wrapper(f)
 		}
-		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(logWrapper(f)))
+		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(f))
 
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
@@ -312,5 +313,19 @@ func logWrapper(convertFunc converter.ConvertFunc) converter.ConvertFunc {
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
 		logrus.WithField("digest", desc.Digest).Infof("converting...")
 		return convertFunc(ctx, cs, desc)
+	}
+}
+
+func flightWrapper(convertFunc converter.ConvertFunc) converter.ConvertFunc {
+	var convertG singleflight.Group
+	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		resultChan := convertG.DoChan(desc.Digest.String(), func() (interface{}, error) {
+			return convertFunc(ctx, cs, desc)
+		})
+		res := <-resultChan
+		if res.Err != nil || res.Val == nil {
+			return nil, res.Err
+		}
+		return res.Val.(*ocispec.Descriptor), nil
 	}
 }

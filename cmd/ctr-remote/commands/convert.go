@@ -117,7 +117,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			if err != nil {
 				return err
 			}
-			convertOpts = append(convertOpts, converter.WithLayerConvertFunc(estargzconvert.LayerConvertFunc(esgzOpts...)))
+			convertOpts = append(convertOpts, converter.WithLayerConvertFunc(flightWrapper(estargzconvert.LayerConvertFunc(esgzOpts...))))
 			if !context.Bool("oci") {
 				logrus.Warn("option --estargz should be used in conjunction with --oci")
 			}
@@ -127,7 +127,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		}
 
 		if context.Bool("uncompress") {
-			convertOpts = append(convertOpts, converter.WithLayerConvertFunc(uncompress.LayerConvertFunc))
+			convertOpts = append(convertOpts, converter.WithLayerConvertFunc(flightWrapper(uncompress.LayerConvertFunc)))
 		}
 
 		if context.Bool("oci") {
