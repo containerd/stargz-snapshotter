@@ -260,7 +260,7 @@ func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, 
 	cleanups = append(cleanups, ns.Remove)
 
 	// Configure the namespace with CNI plugins
-	var cniopts []gocni.CNIOpt
+	var cniopts []gocni.Opt
 	if cdir := clicontext.String("cni-plugin-conf-dir"); cdir != "" {
 		cniopts = append(cniopts, gocni.WithPluginConfDir(cdir))
 	}
