@@ -4,10 +4,10 @@ go 1.15
 
 require (
 	github.com/BurntSushi/toml v0.3.1
-	github.com/containerd/console v1.0.1
-	github.com/containerd/containerd v1.5.0-rc.0
-	github.com/containerd/continuity v0.0.0-20210208174643-50096c924a4e
-	github.com/containerd/go-cni v1.0.1
+	github.com/containerd/console v1.0.2
+	github.com/containerd/containerd v1.5.0-rc.2
+	github.com/containerd/continuity v0.1.0
+	github.com/containerd/go-cni v1.0.2
 	github.com/containerd/stargz-snapshotter/estargz v0.5.0
 	github.com/coreos/go-systemd/v22 v22.1.0
 	github.com/docker/cli v0.0.0-20191017083524-a8ff7f821017
@@ -21,8 +21,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/moby/sys/mountinfo v0.4.1
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
-	github.com/onsi/ginkgo v1.12.0 // indirect
-	github.com/onsi/gomega v1.9.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
 	github.com/opencontainers/runtime-spec v1.0.3-0.20200929063507-e6143ca7d51d
@@ -32,13 +30,13 @@ require (
 	github.com/sirupsen/logrus v1.7.0
 	github.com/urfave/cli v1.22.2
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
-	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c
+	golang.org/x/sys v0.0.0-20210324051608-47abb6519492
 	google.golang.org/appengine v1.6.6 // indirect
 	google.golang.org/grpc v1.35.0
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
-	k8s.io/api v0.20.4
-	k8s.io/apimachinery v0.20.4
-	k8s.io/client-go v0.20.4
+	k8s.io/api v0.20.6
+	k8s.io/apimachinery v0.20.6
+	k8s.io/client-go v0.20.6
 )
 
 replace (

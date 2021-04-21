@@ -30,8 +30,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 // LayerConvertWithLayerOptsFunc converts legacy tar.gz layers into eStargz tar.gz layers.
@@ -62,25 +60,6 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			// No conversion. No need to return an error here.
 			return nil, nil
 		}
-		uncompressedDesc := &desc
-		// We need to uncompress the archive first to call estargz.Build.
-		if !uncompress.IsUncompressedType(desc.MediaType) {
-			var err error
-			uncompressedDesc, err = uncompress.LayerConvertFunc(ctx, cs, desc)
-			if err != nil {
-				return nil, err
-			}
-			if uncompressedDesc == nil {
-				return nil, errors.Errorf("unexpectedly got the same blob aftr compression (%s, %q)", desc.Digest, desc.MediaType)
-			}
-			defer func() {
-				if err := cs.Delete(ctx, uncompressedDesc.Digest); err != nil {
-					logrus.WithError(err).WithField("uncompressedDesc", uncompressedDesc).Warn("failed to remove tmp uncompressed layer")
-				}
-			}()
-			logrus.Debugf("estargz: uncompressed %s into %s", desc.Digest, uncompressedDesc.Digest)
-		}
-
 		info, err := cs.Info(ctx, desc.Digest)
 		if err != nil {
 			return nil, err
@@ -90,19 +69,19 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			labelz = make(map[string]string)
 		}
 
-		uncompressedReaderAt, err := cs.ReaderAt(ctx, *uncompressedDesc)
+		ra, err := cs.ReaderAt(ctx, desc)
 		if err != nil {
 			return nil, err
 		}
-		defer uncompressedReaderAt.Close()
-		uncompressedSR := io.NewSectionReader(uncompressedReaderAt, 0, uncompressedDesc.Size)
-		blob, err := estargz.Build(uncompressedSR, opts...)
+		defer ra.Close()
+		sr := io.NewSectionReader(ra, 0, desc.Size)
+		blob, err := estargz.Build(sr, opts...)
 		if err != nil {
 			return nil, err
 		}
 		defer blob.Close()
 		ref := fmt.Sprintf("convert-estargz-from-%s", desc.Digest)
-		w, err := cs.Writer(ctx, content.WithRef(ref))
+		w, err := content.OpenWriter(ctx, cs, content.WithRef(ref))
 		if err != nil {
 			return nil, err
 		}
