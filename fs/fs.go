@@ -196,7 +196,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			// Avoids to get canceled by client.
 			ctx := log.WithLogger(context.Background(),
 				log.G(ctx).WithField("mountpoint", mountpoint))
-			_, err := fs.resolver.Resolve(ctx, preResolve.Hosts, preResolve.Name, desc)
+			err := fs.resolver.Cache(ctx, preResolve.Hosts, preResolve.Name, desc)
 			if err != nil {
 				log.G(ctx).WithError(err).Debug("failed to pre-resolve")
 			}
@@ -214,6 +214,11 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		log.G(ctx).Debug("failed to resolve layer (timeout)")
 		return fmt.Errorf("failed to resolve layer (timeout)")
 	}
+	defer func() {
+		if retErr != nil {
+			l.Done() // don't use this layer.
+		}
+	}()
 
 	// Verify layer's content
 	if fs.disableVerification {
@@ -381,11 +386,13 @@ func (fs *filesystem) check(ctx context.Context, l layer.Layer, labels map[strin
 
 func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
 	fs.layerMu.Lock()
-	if _, ok := fs.layer[mountpoint]; !ok {
+	l, ok := fs.layer[mountpoint]
+	if !ok {
 		fs.layerMu.Unlock()
 		return fmt.Errorf("specified path %q isn't a mountpoint", mountpoint)
 	}
 	delete(fs.layer, mountpoint) // unregisters the corresponding layer
+	l.Done()
 	fs.layerMu.Unlock()
 	fs.metricsController.Remove(mountpoint)
 	// The goroutine which serving the mountpoint possibly becomes not responding.

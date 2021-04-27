@@ -71,6 +71,9 @@ type BlobCache interface {
 	// Get returns a reader to read the specified contents
 	// from cache
 	Get(key string, opts ...Option) (Reader, error)
+
+	// Close closes the cache
+	Close() error
 }
 
 // Reader provides the data cached.
@@ -169,9 +172,16 @@ type directoryCache struct {
 	bufPool *sync.Pool
 
 	syncAdd bool
+
+	closed   bool
+	closedMu sync.Mutex
 }
 
 func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
+	if dc.isClosed() {
+		return nil, fmt.Errorf("cache is already closed")
+	}
+
 	opt := &cacheOpt{}
 	for _, o := range opts {
 		opt = o(opt)
@@ -236,6 +246,10 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 }
 
 func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
+	if dc.isClosed() {
+		return nil, fmt.Errorf("cache is already closed")
+	}
+
 	opt := &cacheOpt{}
 	for _, o := range opts {
 		opt = o(opt)
@@ -248,6 +262,9 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 	w := &writer{
 		WriteCloser: wip,
 		commitFunc: func() error {
+			if dc.isClosed() {
+				return fmt.Errorf("cache is already closed")
+			}
 			// Commit the cache contents
 			c := dc.cachePath(key)
 			if err := os.MkdirAll(filepath.Dir(c), os.ModePerm); err != nil {
@@ -277,6 +294,10 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 	memW := &writer{
 		WriteCloser: nopWriteCloser(io.Writer(b)),
 		commitFunc: func() error {
+			if dc.isClosed() {
+				w.Close()
+				return fmt.Errorf("cache is already closed")
+			}
 			cached, done, added := dc.cache.Add(key, b)
 			if !added {
 				dc.bufPool.Put(b) // already exists in the cache. abort it.
@@ -310,6 +331,26 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 	}
 
 	return memW, nil
+}
+
+func (dc *directoryCache) Close() error {
+	dc.closedMu.Lock()
+	defer dc.closedMu.Unlock()
+	if dc.closed {
+		return nil
+	}
+	dc.closed = true
+	if err := os.RemoveAll(dc.directory); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (dc *directoryCache) isClosed() bool {
+	dc.closedMu.Lock()
+	closed := dc.closed
+	dc.closedMu.Unlock()
+	return closed
 }
 
 func (dc *directoryCache) cachePath(key string) string {
@@ -354,6 +395,10 @@ func (mc *MemoryCache) Add(key string, opts ...Option) (Writer, error) {
 		},
 		abortFunc: func() error { return nil },
 	}, nil
+}
+
+func (mc *MemoryCache) Close() error {
+	return nil
 }
 
 type reader struct {

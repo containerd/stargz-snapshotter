@@ -47,6 +47,7 @@ type Blob interface {
 	ReadAt(p []byte, offset int64, opts ...Option) (int, error)
 	Cache(offset int64, size int64, opts ...Option) error
 	Refresh(ctx context.Context, host docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error
+	Close() error
 }
 
 type blob struct {
@@ -65,9 +66,33 @@ type blob struct {
 	fetchedRegionSetMu sync.Mutex
 
 	resolver *Resolver
+
+	closed   bool
+	closedMu sync.Mutex
+}
+
+func (b *blob) Close() error {
+	b.closedMu.Lock()
+	defer b.closedMu.Unlock()
+	if b.closed {
+		return nil
+	}
+	b.closed = true
+	return b.cache.Close()
+}
+
+func (b *blob) isClosed() bool {
+	b.closedMu.Lock()
+	closed := b.closed
+	b.closedMu.Unlock()
+	return closed
 }
 
 func (b *blob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+	if b.isClosed() {
+		return fmt.Errorf("blob is already closed")
+	}
+
 	// refresh the fetcher
 	new, newSize, err := newFetcher(ctx, hosts, refspec, desc)
 	if err != nil {
@@ -88,6 +113,10 @@ func (b *blob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec 
 }
 
 func (b *blob) Check() error {
+	if b.isClosed() {
+		return fmt.Errorf("blob is already closed")
+	}
+
 	now := time.Now()
 	b.lastCheckMu.Lock()
 	lastCheck := b.lastCheck
@@ -123,6 +152,10 @@ func (b *blob) FetchedSize() int64 {
 }
 
 func (b *blob) Cache(offset int64, size int64, opts ...Option) error {
+	if b.isClosed() {
+		return fmt.Errorf("blob is already closed")
+	}
+
 	var cacheOpts options
 	for _, o := range opts {
 		o(&cacheOpts)
@@ -152,6 +185,10 @@ func (b *blob) Cache(offset int64, size int64, opts ...Option) error {
 // It tries to fetch as many chunks as possible from local cache.
 // We can configure this function with options.
 func (b *blob) ReadAt(p []byte, offset int64, opts ...Option) (int, error) {
+	if b.isClosed() {
+		return 0, fmt.Errorf("blob is already closed")
+	}
+
 	if len(p) == 0 || offset > b.size {
 		return 0, nil
 	}
