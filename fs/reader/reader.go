@@ -47,6 +47,7 @@ type Reader interface {
 	OpenFile(name string) (io.ReaderAt, error)
 	Lookup(name string) (*estargz.TOCEntry, bool)
 	Cache(opts ...CacheOption) error
+	Close() error
 }
 
 // VerifiableReader produces a Reader with a given verifier.
@@ -66,6 +67,10 @@ func (vr *VerifiableReader) VerifyTOC(tocDigest digest.Digest) (Reader, error) {
 	}
 	vr.r.verifier = v
 	return vr.r, nil
+}
+
+func (vr *VerifiableReader) Close() error {
+	return vr.r.Close()
 }
 
 type nopTOCEntryVerifier struct{}
@@ -118,9 +123,16 @@ type reader struct {
 	cache    cache.BlobCache
 	bufPool  sync.Pool
 	verifier estargz.TOCEntryVerifier
+
+	closed   bool
+	closedMu sync.Mutex
 }
 
 func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
+	if gr.isClosed() {
+		return nil, fmt.Errorf("reader is already closed")
+	}
+
 	sr, err := gr.r.OpenFile(name)
 	if err != nil {
 		return nil, err
@@ -144,6 +156,10 @@ func (gr *reader) Lookup(name string) (*estargz.TOCEntry, bool) {
 }
 
 func (gr *reader) Cache(opts ...CacheOption) (err error) {
+	if gr.isClosed() {
+		return fmt.Errorf("reader is already closed")
+	}
+
 	var cacheOpts cacheOptions
 	for _, o := range opts {
 		o(&cacheOpts)
@@ -174,6 +190,23 @@ func (gr *reader) Cache(opts ...CacheOption) (err error) {
 			root, r, filter, cacheOpts.cacheOpts...)
 	})
 	return eg.Wait()
+}
+
+func (gr *reader) Close() error {
+	gr.closedMu.Lock()
+	defer gr.closedMu.Unlock()
+	if gr.closed {
+		return nil
+	}
+	gr.closed = true
+	return gr.cache.Close()
+}
+
+func (gr *reader) isClosed() bool {
+	gr.closedMu.Lock()
+	closed := gr.closed
+	gr.closedMu.Unlock()
+	return closed
 }
 
 func (gr *reader) cacheWithReader(ctx context.Context, currentDepth int, eg *errgroup.Group, sem *semaphore.Weighted, dir *estargz.TOCEntry, r *estargz.Reader, filter func(*estargz.TOCEntry) bool, opts ...cache.Option) (rErr error) {

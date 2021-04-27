@@ -103,6 +103,7 @@ func (l *breakableLayer) Refresh(ctx context.Context, hosts docker.RegistryHosts
 	}
 	return nil
 }
+func (l *breakableLayer) Done() {}
 
 // Tests Read method of each file node.
 func TestNodeRead(t *testing.T) {
@@ -389,6 +390,7 @@ func (tl *testLayer) Check() error                         { return nil }
 func (tl *testLayer) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	return nil
 }
+func (tl *testLayer) Done() {}
 
 type chunkSizeInfo int
 

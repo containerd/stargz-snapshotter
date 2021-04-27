@@ -136,7 +136,7 @@ func TestPrefetch(t *testing.T) {
 					prefetchTimeout: time.Second,
 				},
 				ocispec.Descriptor{Digest: testStateLayerDigest},
-				blob,
+				&blobRef{blob, func() {}},
 				vr,
 				nil,
 			)
@@ -226,6 +226,7 @@ func (sb *sampleBlob) Cache(offset int64, size int64, option ...remote.Option) e
 func (sb *sampleBlob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	return nil
 }
+func (sb *sampleBlob) Close() error { return nil }
 
 func TestWaiter(t *testing.T) {
 	var (
