@@ -38,14 +38,14 @@ type Option func(opts *analyzerOpts)
 // SpecOpts returns runtime configuration based on the passed image and rootfs path.
 type SpecOpts func(image containerd.Image, rootfs string) (opts []oci.SpecOpts, done func() error, err error)
 
-// WithSpecGenerator is the runtime configuration
+// WithSpecOpts is the runtime configuration
 func WithSpecOpts(specOpts SpecOpts) Option {
 	return func(opts *analyzerOpts) {
 		opts.specOpts = specOpts
 	}
 }
 
-// WIthTerminal enable terminal for the container. This must be specified with WithStdin().
+// WithTerminal enable terminal for the container. This must be specified with WithStdin().
 func WithTerminal() Option {
 	return func(opts *analyzerOpts) {
 		opts.terminal = true

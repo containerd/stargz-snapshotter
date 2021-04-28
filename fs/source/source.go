@@ -30,7 +30,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// GetSource is a function for converting snapshot labels into typed blob sources
+// GetSources is a function for converting snapshot labels into typed blob sources
 // information. This package defines a default converter which provides source
 // information based on some labels but implementations aren't required to use labels.
 // Implementations are allowed to return several sources (registry config + image refs)
