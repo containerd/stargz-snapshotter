@@ -32,14 +32,14 @@ type TarEntry interface {
 	AppendTar(tw *tar.Writer, opts Options) error
 }
 
-// Option is a set of options used during building blob.
+// Options is a set of options used during building blob.
 type Options struct {
 
 	// Prefix is the prefix string need to be added to each file name (e.g. "./", "/", etc.)
 	Prefix string
 }
 
-// Options is an option used during building blob.
+// Option is an option used during building blob.
 type Option func(o *Options)
 
 // WithPrefix is an option to add a prefix string to each file name (e.g. "./", "/", etc.)
@@ -77,7 +77,7 @@ type tarEntryFunc func(*tar.Writer, Options) error
 
 func (f tarEntryFunc) AppendTar(tw *tar.Writer, opts Options) error { return f(tw, opts) }
 
-// DirecoryOption is an option for a directory entry.
+// DirectoryOption is an option for a directory entry.
 type DirectoryOption func(o *dirOpts)
 
 type dirOpts struct {
@@ -102,7 +102,7 @@ func WithDirXattrs(xattrs map[string]string) DirectoryOption {
 	}
 }
 
-// WithFileMode specifies the mode of the directory.
+// WithDirMode specifies the mode of the directory.
 func WithDirMode(mode os.FileMode) DirectoryOption {
 	return func(o *dirOpts) {
 		o.mode = &mode
