@@ -19,6 +19,7 @@ set -euo pipefail
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
 CRI_TOOLS_VERSION=53ad8bb7f97e1b1d1c0c0634e43a3c2b8b07b718
+CNI_VERSION="v0.9.1"
 
 source "${CONTEXT}/const.sh"
 
@@ -65,6 +66,37 @@ EOF
     BUILTIN_HACK_INST="COPY containerd.hack.toml /etc/containerd/config.toml"
 fi
 
+cat <<EOF > "${TMP_CONTEXT}/test.conflist"
+{
+  "cniVersion": "0.4.0",
+  "name": "containerd-net",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "cni0",
+      "isGateway": true,
+      "ipMasq": true,
+      "promiscMode": true,
+      "ipam": {
+        "type": "host-local",
+        "ranges": [
+          [{
+            "subnet": "10.88.0.0/16"
+          }]
+        ],
+        "routes": [
+          { "dst": "0.0.0.0/0" }
+        ]
+      }
+    },
+    {
+      "type": "portmap",
+      "capabilities": {"portMappings": true}
+    }
+  ]
+}
+EOF
+
 # Prepare the testing node
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
@@ -76,7 +108,7 @@ ARG TARGETARCH
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
 RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
-    curl https://dl.google.com/go/go1.15.6.linux-\${TARGETARCH:-amd64}.tar.gz \
+    curl https://dl.google.com/go/go1.16.4.linux-\${TARGETARCH:-amd64}.tar.gz \
     | tar -C /usr/local -xz && \
     go get -u github.com/onsi/ginkgo/ginkgo && \
     git clone https://github.com/kubernetes-sigs/cri-tools \
@@ -84,12 +116,10 @@ RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
     cd \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
     git checkout ${CRI_TOOLS_VERSION} && \
     make && make install -e BINDIR=\${GOPATH}/bin && \
-    git clone -b v1.11.1 https://github.com/containerd/cri \
-              \${GOPATH}/src/github.com/containerd/cri && \
-    cd \${GOPATH}/src/github.com/containerd/cri && \
-    NOSUDO=true ./hack/install/install-cni.sh && \
-    NOSUDO=true ./hack/install/install-cni-config.sh && \
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-${CNI_VERSION}.tgz | tar xzv -C /opt/cni/bin && \
     systemctl disable kubelet
+
+COPY ./test.conflist /etc/cni/net.d/test.conflist
 
 ${BUILTIN_HACK_INST}
 
