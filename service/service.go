@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/remotes/docker"
@@ -34,7 +35,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-const fusermountBin = "fusermount"
+const (
+	fusermountBin            = "fusermount"
+	defaultRequestTimeoutSec = 30
+)
 
 // NewStargzSnapshotterService returns stargz snapshotter.
 func NewStargzSnapshotterService(ctx context.Context, root string, config *Config) (snapshots.Snapshotter, error) {
@@ -80,6 +84,13 @@ func hostsFromConfig(cfg ResolverConfig, credsFuncs ...func(string) (string, str
 			Host: host,
 		}) {
 			tr := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+			if h.RequestTimeoutSec >= 0 {
+				if h.RequestTimeoutSec == 0 {
+					tr.Timeout = defaultRequestTimeoutSec * time.Second
+				} else {
+					tr.Timeout = time.Duration(h.RequestTimeoutSec) * time.Second
+				}
+			} // h.RequestTimeoutSec < 0 means "no timeout"
 			config := docker.RegistryHost{
 				Client:       tr,
 				Host:         h.Host,
