@@ -24,8 +24,9 @@ REVISION=$(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet 
 GO_LD_FLAGS=-ldflags '-s -w -X $(PKG)/version.Version=$(VERSION) -X $(PKG)/version.Revision=$(REVISION) $(GO_EXTRA_LDFLAGS)'
 
 CMD=containerd-stargz-grpc ctr-remote
-
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
+
+OUT_POSIX=out-posix
 
 .PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-pullsecrets test-cri
 
@@ -61,6 +62,7 @@ uninstall:
 clean:
 	@echo "$@"
 	@rm -f $(CMD_BINARIES)
+	@rm -f $(OUT_POSIX)
 
 test:
 	@echo "$@"
@@ -87,3 +89,6 @@ test-pullsecrets:
 
 test-cri:
 	@./script/cri/test.sh
+
+test-posix:
+	@./script/posix/test.sh
