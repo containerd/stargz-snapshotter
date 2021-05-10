@@ -309,7 +309,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		Debug:      fs.debug,
 	})
 	if err != nil {
-		log.G(ctx).WithError(err).Debug("failed to make filesstem server")
+		log.G(ctx).WithError(err).Debug("failed to make filesystem server")
 		return err
 	}
 
@@ -664,7 +664,7 @@ func newState(layer layer.Layer) *state {
 	}
 }
 
-// state is a directory which contain a "state file" of this layer aming to
+// state is a directory which contain a "state file" of this layer aiming to
 // observability. This filesystem uses it to report something(e.g. error) to
 // the clients(e.g. Kubernetes's livenessProbe).
 // This directory has mode "dr-x------ root root".
@@ -802,8 +802,8 @@ func (sf *statFile) updateStatUnlocked() ([]byte, error) {
 	return j, nil
 }
 
-// inodeOfEnt calculates the inode number which is one-to-one conresspondence
-// with the TOCEntry insntance.
+// inodeOfEnt calculates the inode number which is one-to-one correspondence
+// with the TOCEntry instance.
 func inodeOfEnt(e *estargz.TOCEntry) uint64 {
 	return uint64(uintptr(unsafe.Pointer(e)))
 }
@@ -831,7 +831,7 @@ func entryToAttr(e *estargz.TOCEntry, out *fuse.Attr) fusefs.StableAttr {
 	return fusefs.StableAttr{
 		Mode: out.Mode,
 		Ino:  out.Ino,
-		// NOTE: The inode number is unique throughout the lifettime of
+		// NOTE: The inode number is unique throughout the lifetime of
 		// this filesystem so we don't consider about generation at this
 		// moment.
 	}
@@ -855,14 +855,14 @@ func entryToWhAttr(e *estargz.TOCEntry, out *fuse.Attr) fusefs.StableAttr {
 	return fusefs.StableAttr{
 		Mode: out.Mode,
 		Ino:  out.Ino,
-		// NOTE: The inode number is unique throughout the lifettime of
+		// NOTE: The inode number is unique throughout the lifetime of
 		// this filesystem so we don't consider about generation at this
 		// moment.
 	}
 }
 
-// inodeOfState calculates the inode number which is one-to-one conresspondence
-// with the state directory insntance which was created on mount.
+// inodeOfState calculates the inode number which is one-to-one correspondence
+// with the state directory instance which was created on mount.
 func inodeOfState(s *state) uint64 {
 	return uint64(uintptr(unsafe.Pointer(s)))
 }
@@ -888,14 +888,14 @@ func stateToAttr(s *state, out *fuse.Attr) fusefs.StableAttr {
 	return fusefs.StableAttr{
 		Mode: out.Mode,
 		Ino:  out.Ino,
-		// NOTE: The inode number is unique throughout the lifettime of
+		// NOTE: The inode number is unique throughout the lifetime of
 		// this filesystem so we don't consider about generation at this
 		// moment.
 	}
 }
 
-// inodeOfStatFile calculates the inode number which is one-to-one conresspondence
-// with the stat file insntance which was created on mount.
+// inodeOfStatFile calculates the inode number which is one-to-one correspondence
+// with the stat file instance which was created on mount.
 func inodeOfStatFile(s *statFile) uint64 {
 	return uint64(uintptr(unsafe.Pointer(s)))
 }
@@ -921,7 +921,7 @@ func statFileToAttr(sf *statFile, size uint64, out *fuse.Attr) fusefs.StableAttr
 	return fusefs.StableAttr{
 		Mode: out.Mode,
 		Ino:  out.Ino,
-		// NOTE: The inode number is unique throughout the lifettime of
+		// NOTE: The inode number is unique throughout the lifetime of
 		// this filesystem so we don't consider about generation at this
 		// moment.
 	}
