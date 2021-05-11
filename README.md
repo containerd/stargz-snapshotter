@@ -44,6 +44,7 @@ Stargz Snapshotter is a **non-core** sub-project of containerd.
 ## Quick Start with Kubernetes
 
 - For more details about stargz snapshotter plugin and its configuration, refer to [Containerd Stargz Snapshotter Plugin Overview](/docs/overview.md).
+- For more details about setup lazy pulling of eStargz with containerd, CRI-O, Podman, systemd, etc., refer to [Install Stargz Snapshotter and Stargz Store](./docs/INSTALL.md).
 
 For using stargz snapshotter on kubernetes nodes, you need the following configuration to containerd as well as run stargz snapshotter daemon on the node.
 We assume that you are using containerd (> v1.4.2) as a CRI runtime.
@@ -109,8 +110,6 @@ Hello World!
 ```
 
 Stargz snapshotter also supports [further configuration](/docs/overview.md) including private registry authentication, mirror registries, etc.
-
-- For more details about installing Stargz Snapshotter, refer to [Install Stargz Snapshotter](./docs/INSTALL.md).
 
 ## Creating eStargz images with optimization
 
