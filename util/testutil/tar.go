@@ -29,29 +29,29 @@ import (
 
 // TarEntry is an entry of tar.
 type TarEntry interface {
-	AppendTar(tw *tar.Writer, opts Options) error
+	AppendTar(tw *tar.Writer, opts BuildTarOptions) error
 }
 
-// Options is a set of options used during building blob.
-type Options struct {
+// BuildTarOptions is a set of options used during building blob.
+type BuildTarOptions struct {
 
 	// Prefix is the prefix string need to be added to each file name (e.g. "./", "/", etc.)
 	Prefix string
 }
 
-// Option is an option used during building blob.
-type Option func(o *Options)
+// BuildTarOption is an option used during building blob.
+type BuildTarOption func(o *BuildTarOptions)
 
 // WithPrefix is an option to add a prefix string to each file name (e.g. "./", "/", etc.)
-func WithPrefix(prefix string) Option {
-	return func(o *Options) {
+func WithPrefix(prefix string) BuildTarOption {
+	return func(o *BuildTarOptions) {
 		o.Prefix = prefix
 	}
 }
 
 // BuildTar builds a tar blob
-func BuildTar(ents []TarEntry, opts ...Option) io.Reader {
-	var bo Options
+func BuildTar(ents []TarEntry, opts ...BuildTarOption) io.Reader {
+	var bo BuildTarOptions
 	for _, o := range opts {
 		o(&bo)
 	}
@@ -73,12 +73,12 @@ func BuildTar(ents []TarEntry, opts ...Option) io.Reader {
 	return pr
 }
 
-type tarEntryFunc func(*tar.Writer, Options) error
+type tarEntryFunc func(*tar.Writer, BuildTarOptions) error
 
-func (f tarEntryFunc) AppendTar(tw *tar.Writer, opts Options) error { return f(tw, opts) }
+func (f tarEntryFunc) AppendTar(tw *tar.Writer, opts BuildTarOptions) error { return f(tw, opts) }
 
-// DirectoryOption is an option for a directory entry.
-type DirectoryOption func(o *dirOpts)
+// DirecoryBuildTarOption is an option for a directory entry.
+type DirectoryBuildTarOption func(o *dirOpts)
 
 type dirOpts struct {
 	uid    int
@@ -88,7 +88,7 @@ type dirOpts struct {
 }
 
 // WithDirOwner specifies the owner of the directory.
-func WithDirOwner(uid, gid int) DirectoryOption {
+func WithDirOwner(uid, gid int) DirectoryBuildTarOption {
 	return func(o *dirOpts) {
 		o.uid = uid
 		o.gid = gid
@@ -96,22 +96,22 @@ func WithDirOwner(uid, gid int) DirectoryOption {
 }
 
 // WithDirXattrs specifies the extended attributes of the directory.
-func WithDirXattrs(xattrs map[string]string) DirectoryOption {
+func WithDirXattrs(xattrs map[string]string) DirectoryBuildTarOption {
 	return func(o *dirOpts) {
 		o.xattrs = xattrs
 	}
 }
 
-// WithDirMode specifies the mode of the directory.
-func WithDirMode(mode os.FileMode) DirectoryOption {
+// WithdirMode specifies the mode of the directory.
+func WithDirMode(mode os.FileMode) DirectoryBuildTarOption {
 	return func(o *dirOpts) {
 		o.mode = &mode
 	}
 }
 
 // Dir is a directory entry
-func Dir(name string, opts ...DirectoryOption) TarEntry {
-	return tarEntryFunc(func(tw *tar.Writer, buildOpts Options) error {
+func Dir(name string, opts ...DirectoryBuildTarOption) TarEntry {
+	return tarEntryFunc(func(tw *tar.Writer, buildOpts BuildTarOptions) error {
 		var dOpts dirOpts
 		for _, o := range opts {
 			o(&dOpts)
@@ -134,8 +134,8 @@ func Dir(name string, opts ...DirectoryOption) TarEntry {
 	})
 }
 
-// FileOption is an option for a file entry.
-type FileOption func(o *fileOpts)
+// FileBuildTarOption is an option for a file entry.
+type FileBuildTarOption func(o *fileOpts)
 
 type fileOpts struct {
 	uid    int
@@ -145,7 +145,7 @@ type fileOpts struct {
 }
 
 // WithFileOwner specifies the owner of the file.
-func WithFileOwner(uid, gid int) FileOption {
+func WithFileOwner(uid, gid int) FileBuildTarOption {
 	return func(o *fileOpts) {
 		o.uid = uid
 		o.gid = gid
@@ -153,22 +153,22 @@ func WithFileOwner(uid, gid int) FileOption {
 }
 
 // WithFileXattrs specifies the extended attributes of the file.
-func WithFileXattrs(xattrs map[string]string) FileOption {
+func WithFileXattrs(xattrs map[string]string) FileBuildTarOption {
 	return func(o *fileOpts) {
 		o.xattrs = xattrs
 	}
 }
 
 // WithFileMode specifies the mode of the file.
-func WithFileMode(mode os.FileMode) FileOption {
+func WithFileMode(mode os.FileMode) FileBuildTarOption {
 	return func(o *fileOpts) {
 		o.mode = &mode
 	}
 }
 
 // File is a regilar file entry
-func File(name, contents string, opts ...FileOption) TarEntry {
-	return tarEntryFunc(func(tw *tar.Writer, buildOpts Options) error {
+func File(name, contents string, opts ...FileBuildTarOption) TarEntry {
+	return tarEntryFunc(func(tw *tar.Writer, buildOpts BuildTarOptions) error {
 		var fOpts fileOpts
 		for _, o := range opts {
 			o(&fOpts)
@@ -198,7 +198,7 @@ func File(name, contents string, opts ...FileOption) TarEntry {
 
 // Symlink is a symlink entry
 func Symlink(name, target string) TarEntry {
-	return tarEntryFunc(func(tw *tar.Writer, buildOpts Options) error {
+	return tarEntryFunc(func(tw *tar.Writer, buildOpts BuildTarOptions) error {
 		return tw.WriteHeader(&tar.Header{
 			Typeflag: tar.TypeSymlink,
 			Name:     buildOpts.Prefix + name,
@@ -211,7 +211,7 @@ func Symlink(name, target string) TarEntry {
 // Link is a hard-link entry
 func Link(name, linkname string) TarEntry {
 	now := time.Now()
-	return tarEntryFunc(func(w *tar.Writer, buildOpts Options) error {
+	return tarEntryFunc(func(w *tar.Writer, buildOpts BuildTarOptions) error {
 		return w.WriteHeader(&tar.Header{
 			Typeflag:   tar.TypeLink,
 			Name:       buildOpts.Prefix + name,
@@ -226,7 +226,7 @@ func Link(name, linkname string) TarEntry {
 // Chardev is a character device entry
 func Chardev(name string, major, minor int64) TarEntry {
 	now := time.Now()
-	return tarEntryFunc(func(w *tar.Writer, buildOpts Options) error {
+	return tarEntryFunc(func(w *tar.Writer, buildOpts BuildTarOptions) error {
 		return w.WriteHeader(&tar.Header{
 			Typeflag:   tar.TypeChar,
 			Name:       buildOpts.Prefix + name,
@@ -242,7 +242,7 @@ func Chardev(name string, major, minor int64) TarEntry {
 // Blockdev is a block device entry
 func Blockdev(name string, major, minor int64) TarEntry {
 	now := time.Now()
-	return tarEntryFunc(func(w *tar.Writer, buildOpts Options) error {
+	return tarEntryFunc(func(w *tar.Writer, buildOpts BuildTarOptions) error {
 		return w.WriteHeader(&tar.Header{
 			Typeflag:   tar.TypeBlock,
 			Name:       buildOpts.Prefix + name,
@@ -258,7 +258,7 @@ func Blockdev(name string, major, minor int64) TarEntry {
 // Fifo is a fifo entry
 func Fifo(name string) TarEntry {
 	now := time.Now()
-	return tarEntryFunc(func(w *tar.Writer, buildOpts Options) error {
+	return tarEntryFunc(func(w *tar.Writer, buildOpts BuildTarOptions) error {
 		return w.WriteHeader(&tar.Header{
 			Typeflag:   tar.TypeFifo,
 			Name:       buildOpts.Prefix + name,

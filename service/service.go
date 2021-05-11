@@ -18,27 +18,22 @@ package service
 
 import (
 	"context"
-	"net/http"
 	"os/exec"
 	"path/filepath"
-	"time"
 
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/service/keychain"
+	"github.com/containerd/stargz-snapshotter/service/resolver"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 )
 
-const (
-	fusermountBin            = "fusermount"
-	defaultRequestTimeoutSec = 30
-)
+const fusermountBin = "fusermount"
 
 // NewStargzSnapshotterService returns stargz snapshotter.
 func NewStargzSnapshotterService(ctx context.Context, root string, config *Config) (snapshots.Snapshotter, error) {
@@ -53,7 +48,7 @@ func NewStargzSnapshotterService(ctx context.Context, root string, config *Confi
 	}
 
 	// Use RegistryHosts based on ResolverConfig and keychain
-	hosts := hostsFromConfig(config.ResolverConfig, credsFuncs...)
+	hosts := resolver.RegistryHostsFromConfig(resolver.Config(config.ResolverConfig), credsFuncs...)
 
 	// Configure filesystem and snapshotter
 	fs, err := stargzfs.NewFilesystem(fsRoot(root),
@@ -76,50 +71,6 @@ func snapshotterRoot(root string) string {
 
 func fsRoot(root string) string {
 	return filepath.Join(root, "stargz")
-}
-
-func hostsFromConfig(cfg ResolverConfig, credsFuncs ...func(string) (string, string, error)) docker.RegistryHosts {
-	return func(host string) (hosts []docker.RegistryHost, _ error) {
-		for _, h := range append(cfg.Host[host].Mirrors, MirrorConfig{
-			Host: host,
-		}) {
-			tr := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
-			if h.RequestTimeoutSec >= 0 {
-				if h.RequestTimeoutSec == 0 {
-					tr.Timeout = defaultRequestTimeoutSec * time.Second
-				} else {
-					tr.Timeout = time.Duration(h.RequestTimeoutSec) * time.Second
-				}
-			} // h.RequestTimeoutSec < 0 means "no timeout"
-			config := docker.RegistryHost{
-				Client:       tr,
-				Host:         h.Host,
-				Scheme:       "https",
-				Path:         "/v2",
-				Capabilities: docker.HostCapabilityPull,
-				Authorizer: docker.NewDockerAuthorizer(
-					docker.WithAuthClient(tr),
-					docker.WithAuthCreds(func(host string) (string, string, error) {
-						for _, f := range credsFuncs {
-							if username, secret, err := f(host); err != nil {
-								return "", "", err
-							} else if !(username == "" && secret == "") {
-								return username, secret, nil
-							}
-						}
-						return "", "", nil
-					})),
-			}
-			if localhost, _ := docker.MatchLocalhost(config.Host); localhost || h.Insecure {
-				config.Scheme = "http"
-			}
-			if config.Host == "docker.io" {
-				config.Host = "registry-1.docker.io"
-			}
-			hosts = append(hosts, config)
-		}
-		return
-	}
 }
 
 func sources(ps ...source.GetSources) source.GetSources {

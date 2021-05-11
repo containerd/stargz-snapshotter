@@ -45,6 +45,7 @@ function retry {
 function kill_all {
     if [ "${1}" != "" ] ; then
         ps aux | grep "${1}" \
+            | grep -v "benchmark" \
             | grep -v grep \
             | grep -v "hello.py" \
             | grep -v $(basename ${0}) \
@@ -68,7 +69,14 @@ echo "cleaning up the environment..."
 kill_all "containerd"
 kill_all "containerd-stargz-grpc"
 cleanup
-if [ "${NO_STARGZ_SNAPSHOTTER:-}" == "true" ] ; then
+
+if [ "${DISABLE_PREFETCH:-}" == "true" ] ; then
+    sed -i 's/noprefetch = .*/noprefetch = true/g' "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml"
+else
+    sed -i 's/noprefetch = .*/noprefetch = false/g' "${REMOTE_SNAPSHOTTER_CONFIG_DIR}config.toml"
+fi
+
+if [ "${DISABLE_ESTARGZ:-}" == "true" ] ; then
     echo "DO NOT RUN remote snapshotter"
 else
     echo "running remote snaphsotter..."

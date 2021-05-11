@@ -1,0 +1,43 @@
+version: "3.4"
+services:
+  store_demo:
+    build:
+      context: ../../
+      target: podman-base
+      args:
+        NO_PROXY: "${NO_PROXY}"
+        HTTP_PROXY: "${HTTP_PROXY}"
+        HTTPS_PROXY: "${HTTPS_PROXY}"
+        http_proxy: "${http_proxy}"
+        https_proxy: "${https_proxy}"
+    container_name: store_demo
+    privileged: true
+    stdin_open: true
+    tty: true
+    working_dir: /go/src/github.com/containerd/stargz-snapshotter
+    entrypoint: /bin/bash
+    environment:
+    - NO_PROXY=127.0.0.1,localhost,registry2-store:5000
+    - HTTP_PROXY=${HTTP_PROXY}
+    - HTTPS_PROXY=${HTTPS_PROXY}
+    - http_proxy=${http_proxy}
+    - https_proxy=${https_proxy}
+    - GOPATH=/go
+    tmpfs:
+    - /tmp:exec,mode=777
+    volumes:
+    - /dev/fuse:/dev/fuse
+    - "${GOPATH}/src/github.com/containerd/stargz-snapshotter:/go/src/github.com/containerd/stargz-snapshotter:ro"
+    - "containers-data:/var/lib/containers"
+    - "additional-store-data:/var/lib/stargz-store"
+  registry2:
+    image: registry:2
+    container_name: registry2-store
+    environment:
+    - HTTP_PROXY=${HTTP_PROXY}
+    - HTTPS_PROXY=${HTTPS_PROXY}
+    - http_proxy=${http_proxy}
+    - https_proxy=${https_proxy}
+volumes:
+  containers-data:
+  additional-store-data:

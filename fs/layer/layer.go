@@ -44,6 +44,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/lrucache"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
+	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -60,12 +61,11 @@ const (
 
 // Layer represents a layer.
 type Layer interface {
-
 	// Info returns the information of this layer.
 	Info() Info
 
-	// Root returns the root node of this layer.
-	Root() *estargz.TOCEntry
+	// RootNode returns the root node of this layer.
+	RootNode() (fusefs.InodeEmbedder, error)
 
 	// Check checks if the layer is still connectable.
 	Check() error
@@ -78,10 +78,6 @@ type Layer interface {
 
 	// SkipVerify skips verification for this layer.
 	SkipVerify()
-
-	// OpenFile opens a file.
-	// Calling this function before calling Verify or SkipVerify will fail.
-	OpenFile(name string) (io.ReaderAt, error)
 
 	// Prefetch prefetches the specified size. If the layer is eStargz and contains landmark files,
 	// the range indicated by these files is respected.
@@ -273,13 +269,13 @@ func (r *Resolver) Resolve(ctx context.Context, hosts docker.RegistryHosts, refs
 		defer r.backgroundTaskManager.DonePrioritizedTask()
 		return blobR.ReadAt(p, offset)
 	}), 0, blobR.Size())
-	vr, root, err := reader.NewReader(sr, fsCache)
+	vr, err := reader.NewReader(sr, fsCache)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read layer")
 	}
 
 	// Combine layer information together and cache it.
-	l := newLayer(r, desc, blobR, vr, root)
+	l := newLayer(r, desc, blobR, vr)
 	r.layerCacheMu.Lock()
 	cachedL, done2, added := r.layerCache.Add(name, l)
 	r.layerCacheMu.Unlock()
@@ -351,14 +347,12 @@ func newLayer(
 	desc ocispec.Descriptor,
 	blob *blobRef,
 	vr *reader.VerifiableReader,
-	root *estargz.TOCEntry,
 ) *layer {
 	return &layer{
 		resolver:         resolver,
 		desc:             desc,
 		blob:             blob,
 		verifiableReader: vr,
-		root:             root,
 		prefetchWaiter:   newWaiter(),
 	}
 }
@@ -368,7 +362,6 @@ type layer struct {
 	desc             ocispec.Descriptor
 	blob             *blobRef
 	verifiableReader *reader.VerifiableReader
-	root             *estargz.TOCEntry
 	prefetchWaiter   *waiter
 
 	r reader.Reader
@@ -383,10 +376,6 @@ func (l *layer) Info() Info {
 		Size:        l.blob.Size(),
 		FetchedSize: l.blob.FetchedSize(),
 	}
-}
-
-func (l *layer) Root() *estargz.TOCEntry {
-	return l.root
 }
 
 func (l *layer) Check() error {
@@ -413,16 +402,6 @@ func (l *layer) Verify(tocDigest digest.Digest) (err error) {
 
 func (l *layer) SkipVerify() {
 	l.r = l.verifiableReader.SkipVerify()
-}
-
-func (l *layer) OpenFile(name string) (io.ReaderAt, error) {
-	if l.isClosed() {
-		return nil, fmt.Errorf("layer is already closed")
-	}
-	if l.r == nil {
-		return nil, fmt.Errorf("layer hasn't been verified yet")
-	}
-	return l.r.OpenFile(name)
 }
 
 func (l *layer) Prefetch(prefetchSize int64) error {
@@ -493,6 +472,20 @@ func (l *layer) BackgroundFetch() error {
 	)
 }
 
+func (l *layerRef) Done() {
+	l.done()
+}
+
+func (l *layer) RootNode() (fusefs.InodeEmbedder, error) {
+	if l.isClosed() {
+		return nil, fmt.Errorf("layer is already closed")
+	}
+	if l.r == nil {
+		return nil, fmt.Errorf("layer hasn't been verified yet")
+	}
+	return newNode(l.desc.Digest, l.r, l.blob)
+}
+
 func (l *layer) close() error {
 	l.closedMu.Lock()
 	defer l.closedMu.Unlock()
@@ -529,10 +522,6 @@ type blobRef struct {
 type layerRef struct {
 	*layer
 	done func()
-}
-
-func (l *layerRef) Done() {
-	l.done()
 }
 
 func newWaiter() *waiter {
