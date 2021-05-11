@@ -118,6 +118,7 @@ func newFetcher(ctx context.Context, hosts docker.RegistryHosts, refspec referen
 
 		// Prepare transport with authorization functionality
 		tr := host.Client.Transport
+		timeout := host.Client.Timeout
 		if host.Authorizer != nil {
 			tr = &transport{
 				inner: tr,
@@ -132,7 +133,7 @@ func newFetcher(ctx context.Context, hosts docker.RegistryHosts, refspec referen
 			path.Join(host.Host, host.Path),
 			strings.TrimPrefix(refspec.Locator, refspec.Hostname()+"/"),
 			digest)
-		url, err := redirect(ctx, blobURL, tr)
+		url, err := redirect(ctx, blobURL, tr, timeout)
 		if err != nil {
 			rErr = errors.Wrapf(rErr, "failed to redirect (host %q, ref:%q, digest:%q): %v",
 				host.Host, refspec, digest, err)
@@ -141,7 +142,7 @@ func newFetcher(ctx context.Context, hosts docker.RegistryHosts, refspec referen
 
 		// Get size information
 		// TODO: we should try to use the Size field in the descriptor here.
-		size, err := getSize(ctx, url, tr)
+		size, err := getSize(ctx, url, tr, timeout)
 		if err != nil {
 			rErr = errors.Wrapf(rErr, "failed to get size (host %q, ref:%q, digest:%q): %v",
 				host.Host, refspec, digest, err)
@@ -153,6 +154,7 @@ func newFetcher(ctx context.Context, hosts docker.RegistryHosts, refspec referen
 			url:     url,
 			tr:      tr,
 			blobURL: blobURL,
+			timeout: timeout,
 		}, size, nil
 	}
 
@@ -200,10 +202,12 @@ func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func redirect(ctx context.Context, blobURL string, tr http.RoundTripper) (url string, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
+func redirect(ctx context.Context, blobURL string, tr http.RoundTripper, timeout time.Duration) (url string, err error) {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	// We use GET request for redirect.
 	// gcr.io returns 200 on HEAD without Location header (2020).
 	// ghcr.io returns 200 on HEAD without Location header (2020).
@@ -234,9 +238,12 @@ func redirect(ctx context.Context, blobURL string, tr http.RoundTripper) (url st
 	return
 }
 
-func getSize(ctx context.Context, url string, tr http.RoundTripper) (int64, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+func getSize(ctx context.Context, url string, tr http.RoundTripper, timeout time.Duration) (int64, error) {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 	if err != nil {
 		return 0, err
@@ -288,6 +295,7 @@ type fetcher struct {
 	blobURL       string
 	singleRange   bool
 	singleRangeMu sync.Mutex
+	timeout       time.Duration
 }
 
 type multipartReadCloser interface {
@@ -384,8 +392,12 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *opti
 }
 
 func (f *fetcher) check() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := context.Background()
+	if f.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, f.timeout)
+		defer cancel()
+	}
 	f.urlMu.Lock()
 	url := f.url
 	f.urlMu.Unlock()
@@ -407,8 +419,12 @@ func (f *fetcher) check() error {
 		return nil
 	} else if res.StatusCode == http.StatusForbidden {
 		// Try to re-redirect this blob
-		rCtx, rCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer rCancel()
+		rCtx := context.Background()
+		if f.timeout > 0 {
+			var rCancel context.CancelFunc
+			rCtx, rCancel = context.WithTimeout(rCtx, f.timeout)
+			defer rCancel()
+		}
 		if err := f.refreshURL(rCtx); err == nil {
 			return nil
 		}
@@ -419,7 +435,7 @@ func (f *fetcher) check() error {
 }
 
 func (f *fetcher) refreshURL(ctx context.Context) error {
-	newURL, err := redirect(ctx, f.blobURL, f.tr)
+	newURL, err := redirect(ctx, f.blobURL, f.tr, f.timeout)
 	if err != nil {
 		return err
 	}

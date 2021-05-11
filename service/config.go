@@ -42,6 +42,15 @@ type HostConfig struct {
 }
 
 type MirrorConfig struct {
-	Host     string `toml:"host"`
-	Insecure bool   `toml:"insecure"`
+
+	// Host is the hostname of the host.
+	Host string `toml:"host"`
+
+	// Insecure is true means use http scheme instead of https.
+	Insecure bool `toml:"insecure"`
+
+	// RequestTimeoutSec is timeout seconds of each request to the registry.
+	// RequestTimeoutSec == 0 indicates the default timeout (defaultRequestTimeoutSec).
+	// RequestTimeoutSec < 0 indicates no timeout.
+	RequestTimeoutSec int `toml:"request_timeout_sec"`
 }
