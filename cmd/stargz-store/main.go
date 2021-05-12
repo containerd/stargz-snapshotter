@@ -35,12 +35,13 @@ import (
 
 const (
 	defaultLogLevel       = logrus.InfoLevel
+	defaultConfigPath     = "/etc/stargz-store/config.toml"
 	defaultRootDir        = "/var/lib/stargz-store"
 	defaultMaxConcurrency = 2
 )
 
 var (
-	configPath = flag.String("config", "", "path to the configuration file")
+	configPath = flag.String("config", defaultConfigPath, "path to the configuration file")
 	logLevel   = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
 	rootDir    = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
 )
@@ -88,7 +89,7 @@ func main() {
 
 	// Get configuration from specified file
 	if *configPath != "" {
-		if _, err := toml.DecodeFile(*configPath, &config); err != nil {
+		if _, err := toml.DecodeFile(*configPath, &config); err != nil && !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
 			log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
 		}
 	}
