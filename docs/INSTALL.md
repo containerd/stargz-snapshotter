@@ -68,7 +68,7 @@ We assume that you are using containerd (> v1.4.2) as a CRI runtime.
 
 - Start stargz-snapshotter and restart containerd
   ```
-  tar -xvf stargz-snapshotter-${version}-linux-${arch}.tar.gz containerd-stargz-grpc ctr-remote -C /usr/local/bin
+  tar -C /usr/local/bin -xvf stargz-snapshotter-${version}-linux-${arch}.tar.gz containerd-stargz-grpc ctr-remote
   wget -O /etc/systemd/system/stargz-snapshotter.service https://raw.githubusercontent.com/containerd/stargz-snapshotter/master/script/config/etc/systemd/system/stargz-snapshotter.service
   systemctl enable --now stargz-snapshotter
   systemctl restart containerd
@@ -114,7 +114,7 @@ We assume that you are using CRI-O newer than https://github.com/cri-o/cri-o/pul
 
 - Start stargz-store (CRI-O also needs to be restarted if you are using)
   ```
-  tar -xvf stargz-snapshotter-${version}-linux-${arch}.tar.gz stargz-store -C /usr/local/bin
+  tar -C /usr/local/bin -xvf stargz-snapshotter-${version}-linux-${arch}.tar.gz stargz-store
   wget -O /etc/systemd/system/stargz-store.service https://raw.githubusercontent.com/containerd/stargz-snapshotter/master/script/config-cri-o/etc/systemd/system/stargz-store.service
   systemctl enable --now stargz-store
   systemctl restart cri-o # if you are using CRI-O
