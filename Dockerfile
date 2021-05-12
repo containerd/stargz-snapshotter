@@ -119,6 +119,7 @@ RUN git clone https://github.com/containers/common $GOPATH/src/github.com/contai
 # Binaries for release
 FROM scratch AS release-binaries
 COPY --from=snapshotter-dev /out/* /
+COPY --from=stargz-store-dev /out/* /
 
 # Base image which contains containerd with default snapshotter
 FROM golang-base AS containerd-base
