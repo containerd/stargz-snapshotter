@@ -84,6 +84,9 @@ type Layer interface {
 	// Calling this function before calling Verify or SkipVerify will fail.
 	Prefetch(prefetchSize int64) error
 
+	// ReadAt reads this layer.
+	ReadAt([]byte, int64, ...remote.Option) (int, error)
+
 	// WaitForPrefetchCompletion waits untils Prefetch completes.
 	WaitForPrefetchCompletion() error
 
@@ -484,6 +487,10 @@ func (l *layer) RootNode() (fusefs.InodeEmbedder, error) {
 		return nil, fmt.Errorf("layer hasn't been verified yet")
 	}
 	return newNode(l.desc.Digest, l.r, l.blob)
+}
+
+func (l *layer) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
+	return l.blob.ReadAt(p, offset, opts...)
 }
 
 func (l *layer) close() error {

@@ -29,16 +29,16 @@ import (
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
 	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
+	"github.com/containerd/stargz-snapshotter/store"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/pelletier/go-toml"
 	"github.com/sirupsen/logrus"
 )
 
 const (
-	defaultLogLevel       = logrus.InfoLevel
-	defaultConfigPath     = "/etc/stargz-store/config.toml"
-	defaultRootDir        = "/var/lib/stargz-store"
-	defaultMaxConcurrency = 2
+	defaultLogLevel   = logrus.InfoLevel
+	defaultConfigPath = "/etc/stargz-store/config.toml"
+	defaultRootDir    = "/var/lib/stargz-store"
 )
 
 var (
@@ -119,11 +119,11 @@ func main() {
 				Fatalf("failed to prepare mountpoint %q", mountPoint)
 		}
 	}
-	pool, err := newPool(*rootDir, hosts, config.Config)
+	pool, err := store.NewPool(*rootDir, hosts, config.Config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to prepare pool")
 	}
-	if err := mount(mountPoint, pool, config.Config.Debug); err != nil {
+	if err := store.Mount(mountPoint, pool, config.Config.Debug); err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to mount fs at %q", mountPoint)
 	}
 	defer func() {

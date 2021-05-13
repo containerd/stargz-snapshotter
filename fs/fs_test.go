@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
+	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/task"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
@@ -64,13 +65,14 @@ type breakableLayer struct {
 	success bool
 }
 
-func (l *breakableLayer) Info() layer.Info                        { return layer.Info{} }
-func (l *breakableLayer) RootNode() (fusefs.InodeEmbedder, error) { return nil, nil }
-func (l *breakableLayer) Verify(tocDigest digest.Digest) error    { return nil }
-func (l *breakableLayer) SkipVerify()                             {}
-func (l *breakableLayer) Prefetch(prefetchSize int64) error       { return fmt.Errorf("fail") }
-func (l *breakableLayer) WaitForPrefetchCompletion() error        { return fmt.Errorf("fail") }
-func (l *breakableLayer) BackgroundFetch() error                  { return fmt.Errorf("fail") }
+func (l *breakableLayer) Info() layer.Info                                    { return layer.Info{} }
+func (l *breakableLayer) RootNode() (fusefs.InodeEmbedder, error)             { return nil, nil }
+func (l *breakableLayer) Verify(tocDigest digest.Digest) error                { return nil }
+func (l *breakableLayer) SkipVerify()                                         {}
+func (l *breakableLayer) Prefetch(prefetchSize int64) error                   { return fmt.Errorf("fail") }
+func (l *breakableLayer) ReadAt([]byte, int64, ...remote.Option) (int, error) { return 0, nil }
+func (l *breakableLayer) WaitForPrefetchCompletion() error                    { return fmt.Errorf("fail") }
+func (l *breakableLayer) BackgroundFetch() error                              { return fmt.Errorf("fail") }
 func (l *breakableLayer) Check() error {
 	if !l.success {
 		return fmt.Errorf("failed")

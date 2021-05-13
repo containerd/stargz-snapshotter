@@ -14,16 +14,20 @@
    limitations under the License.
 */
 
-package main
+package store
 
 import (
 	"context"
 	"encoding/base64"
+	"io"
 	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
+	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/containerd/stargz-snapshotter/fs/layer"
+	"github.com/containerd/stargz-snapshotter/fs/remote"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
@@ -34,16 +38,19 @@ import (
 const (
 	defaultLinkMode = syscall.S_IFLNK | 0400 // -r--------
 	defaultDirMode  = syscall.S_IFDIR | 0500 // dr-x------
+	layerFileMode   = 0400                   // -r--------
+	blockSize       = 4096
 
 	poolLink          = "pool"
 	layerLink         = "diff"
+	blobLink          = "blob"
 	debugManifestLink = "manifest"
 	debugConfigLink   = "config"
 	layerInfoLink     = "info"
 	layerUseFile      = "use"
 )
 
-func mount(mountpoint string, pool *pool, debug bool) error {
+func Mount(mountpoint string, pool *Pool, debug bool) error {
 	timeSec := time.Second
 	rawFS := fusefs.NewNodeFS(&rootnode{pool: pool}, &fusefs.Options{
 		AttrTimeout:     &timeSec,
@@ -65,7 +72,7 @@ func mount(mountpoint string, pool *pool, debug bool) error {
 // rootnode is the mountpoint node of stargz-store.w
 type rootnode struct {
 	fusefs.Inode
-	pool *pool
+	pool *Pool
 }
 
 var _ = (fusefs.InodeEmbedder)((*rootnode)(nil))
@@ -110,7 +117,7 @@ func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 // refnode is the node at <mountpoint>/<imageref>.
 type refnode struct {
 	fusefs.Inode
-	pool *pool
+	pool *Pool
 
 	ref          reference.Spec
 	manifest     ocispec.Manifest
@@ -184,7 +191,7 @@ func (n *refnode) Rmdir(ctx context.Context, name string) syscall.Errno {
 // layernode is the node at <mountpoint>/<imageref>/<layerdigest>.
 type layernode struct {
 	fusefs.Inode
-	pool *pool
+	pool *Pool
 
 	layer  ocispec.Descriptor
 	layers []ocispec.Descriptor
@@ -223,7 +230,7 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 			return nil, syscall.EIO
 		}
 		return n.NewInode(ctx, &linknode{linkname: infopath}, defaultLinkAttr(&out.Attr)), 0
-	case layerLink:
+	case layerLink, blobLink:
 		l, err := n.pool.loadLayer(ctx, n.refnode.ref, n.layer, n.layers)
 		if err != nil {
 			cErr := ctx.Err()
@@ -242,6 +249,9 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 			log.G(ctx).WithError(err).Warnf("failed to mount layer %q: %q",
 				name, n.layer.Digest)
 			return nil, syscall.EIO
+		}
+		if name == blobLink {
+			return n.NewInode(ctx, &blobnode{l: l}, layerToAttr(l, &out.Attr)), 0
 		}
 		root, err := l.RootNode()
 		if err != nil {
@@ -273,6 +283,45 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 	}
 }
 
+// blobnode is a regular file node that contains raw blob data
+type blobnode struct {
+	fusefs.Inode
+	l layer.Layer
+}
+
+var _ = (fusefs.InodeEmbedder)((*blobnode)(nil))
+
+var _ = (fusefs.NodeOpener)((*blobnode)(nil))
+
+func (n *blobnode) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
+	return &blobfile{l: n.l}, 0, 0
+}
+
+// blob file is the file handle of blob contents.
+type blobfile struct {
+	l layer.Layer
+}
+
+var _ = (fusefs.FileReader)((*blobfile)(nil))
+
+func (f *blobfile) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	s, err := f.l.ReadAt(dest, off,
+		remote.WithContext(ctx),              // Make cancellable
+		remote.WithCacheOpts(cache.Direct()), // Do not pollute mem cache
+	)
+	if err != nil && err != io.EOF {
+		return nil, syscall.EIO
+	}
+	return fuse.ReadResultData(dest[:s]), 0
+}
+
+var _ = (fusefs.FileGetattrer)((*blobfile)(nil))
+
+func (f *blobfile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Errno {
+	layerToAttr(f.l, &out.Attr)
+	return 0
+}
+
 type linknode struct {
 	fusefs.Inode
 	linkname string
@@ -302,6 +351,27 @@ func copyAttr(dest, src *fuse.Attr) {
 	dest.Rdev = src.Rdev
 	dest.Blksize = src.Blksize
 	dest.Padding = src.Padding
+}
+
+func layerToAttr(l layer.Layer, out *fuse.Attr) fusefs.StableAttr {
+	// out.Ino
+	out.Size = uint64(l.Info().Size)
+	out.Blksize = blockSize
+	out.Blocks = out.Size / uint64(out.Blksize)
+	if out.Size%uint64(out.Blksize) > 0 {
+		out.Blocks++
+	}
+	out.Nlink = 1
+	out.Mode = layerFileMode
+	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
+	// out.Mtime
+	// out.Mtimensec
+	// out.Rdev
+	// out.Padding
+
+	return fusefs.StableAttr{
+		Mode: out.Mode,
+	}
 }
 
 func defaultDirAttr(out *fuse.Attr) fusefs.StableAttr {
