@@ -38,10 +38,10 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -337,7 +337,7 @@ func (tb *testBlobState) ReadAt(p []byte, offset int64, opts ...remote.Option) (
 	return 0, nil
 }
 func (tb *testBlobState) Cache(offset int64, size int64, opts ...remote.Option) error { return nil }
-func (tb *testBlobState) Refresh(ctx context.Context, host docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+func (tb *testBlobState) Refresh(ctx context.Context, host source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	return nil
 }
 func (tb *testBlobState) Close() error { return nil }

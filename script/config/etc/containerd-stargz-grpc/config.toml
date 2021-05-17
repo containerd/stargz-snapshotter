@@ -1,1 +1,10 @@
 # Append configurations for Stargz Snapshotter in TOML format.
+
+# Enables CRI-based keychain
+# Stargz Snapshotter works as a proxy of CRI.
+# kubelet MUST listen stargz snapshotter's socket (unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock)
+# instead of containerd for image service.
+# i.e. add `--image-service-endpoint=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock` option to kubelet.
+[cri_keychain]
+enable_keychain = true
+image_service_path = "/run/containerd/containerd.sock"

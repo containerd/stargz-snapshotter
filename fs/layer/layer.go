@@ -35,12 +35,12 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/lrucache"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
@@ -71,7 +71,7 @@ type Layer interface {
 	Check() error
 
 	// Refresh refreshes the layer connection.
-	Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error
+	Refresh(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error
 
 	// Verify verifies this layer using the passed TOC Digest.
 	Verify(tocDigest digest.Digest) (err error)
@@ -211,7 +211,7 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 }
 
 // Resolve resolves a layer based on the passed layer blob information.
-func (r *Resolver) Resolve(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (_ Layer, retErr error) {
+func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (_ Layer, retErr error) {
 	name := refspec.String() + "/" + desc.Digest.String()
 
 	// Wait if resolving this layer is already running. The result
@@ -288,7 +288,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts docker.RegistryHosts, refs
 }
 
 // resolveBlob resolves a blob based on the passed layer blob information.
-func (r *Resolver) resolveBlob(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (_ *blobRef, retErr error) {
+func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (_ *blobRef, retErr error) {
 	name := refspec.String() + "/" + desc.Digest.String()
 
 	// Try to retrieve the blob from the underlying LRU cache.
@@ -331,7 +331,7 @@ func (r *Resolver) resolveBlob(ctx context.Context, hosts docker.RegistryHosts, 
 }
 
 // Cache is similar to Resolve but the result isn't returned. Instead, it'll be stored in the cache.
-func (r *Resolver) Cache(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+func (r *Resolver) Cache(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	l, err := r.Resolve(ctx, hosts, refspec, desc)
 	if err != nil {
 		return err
@@ -385,7 +385,7 @@ func (l *layer) Check() error {
 	return l.blob.Check()
 }
 
-func (l *layer) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+func (l *layer) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	if l.isClosed() {
 		return fmt.Errorf("layer is already closed")
 	}

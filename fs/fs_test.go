@@ -45,8 +45,9 @@ func TestCheck(t *testing.T) {
 			"test": bl,
 		},
 		backgroundTaskManager: task.NewBackgroundTaskManager(1, time.Millisecond),
-		getSources: source.FromDefaultLabels(
-			docker.ConfigureDefaultRegistries(docker.WithPlainHTTP(docker.MatchLocalhost))),
+		getSources: source.FromDefaultLabels(func(refspec reference.Spec) (hosts []docker.RegistryHost, _ error) {
+			return docker.ConfigureDefaultRegistries(docker.WithPlainHTTP(docker.MatchLocalhost))(refspec.Hostname())
+		}),
 	}
 	bl.success = true
 	if err := fs.Check(context.TODO(), "test", nil); err != nil {
@@ -76,7 +77,7 @@ func (l *breakableLayer) Check() error {
 	}
 	return nil
 }
-func (l *breakableLayer) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+func (l *breakableLayer) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	if !l.success {
 		return fmt.Errorf("failed")
 	}

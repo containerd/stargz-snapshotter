@@ -37,12 +37,15 @@ import (
 // about the blob.
 type GetSources func(labels map[string]string) (source []Source, err error)
 
+// RegistryHosts returns a list of registries that provides the specified image.
+type RegistryHosts func(reference.Spec) ([]docker.RegistryHost, error)
+
 // Source is a typed blob source information. This contains information about
 // a blob stored in registries and some contexts of the blob.
 type Source struct {
 
 	// Hosts is a registry configuration where this blob is stored.
-	Hosts docker.RegistryHosts
+	Hosts RegistryHosts
 
 	// Name is an image reference which contains this blob.
 	Name reference.Spec
@@ -71,7 +74,7 @@ const (
 
 // FromDefaultLabels returns a function for converting snapshot labels to
 // source information based on labels.
-func FromDefaultLabels(hosts docker.RegistryHosts) GetSources {
+func FromDefaultLabels(hosts RegistryHosts) GetSources {
 	return func(labels map[string]string) ([]Source, error) {
 		refStr, ok := labels[targetRefLabel]
 		if !ok {

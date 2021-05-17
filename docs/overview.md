@@ -106,7 +106,10 @@ Stargz snapshotter doesn't share private registries creds with containerd.
 Instead, this supports authentication in the following methods,
 
 - Using `$DOCKER_CONFIG` or `~/.docker/config.json`
+- Proxying and scanning CRI Image Service API
 - Using Kubernetes secrets (type = `kubernetes.io/dockerconfigjson`)
+
+#### dockerconfig-based authentication
 
 By default, This snapshotter tries to get creds from `$DOCKER_CONFIG` or `~/.docker/config.json`.
 Following example enables stargz snapshotter to access to private registries using `docker login` command. [`nerdctl login`](https://github.com/containerd/nerdctl) can also be used for this.
@@ -117,6 +120,25 @@ Stargz snapshotter doesn't share credentials with containerd so credentials spec
 (Enter username and password)
 # ctr-remote image rpull --user <username>:<password> docker.io/<your-repository>/ubuntu:18.04
 ```
+
+#### CRI-based authentication
+
+Following configuration enables stargz snapshotter to pull private images on Kubernetes.
+The snapshotter works as a proxy of CRI Image Service and exposes CRI Image Service API on the snapshotter's unix socket (i.e. `/run/containerd-stargz-grpc/containerd-stargz-grpc.sock`).
+The snapshotter acquires registry creds by scanning requests.
+
+You must specify `--image-service-endpoint=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock` option to kubelet.
+
+```toml
+# Stargz Snapshotter proxies CRI Image Service into containerd socket.
+[cri_keychain]
+enable_keychain = true
+image_service_path = "/run/containerd/containerd.sock"
+```
+
+#### kubeconfig-based authentication
+
+This is another way to enable lazy pulling of private images on Kubernetes.
 
 Following configuration enables stargz snapshotter to access to private registries using kubernetes secrets (type = `kubernetes.io/dockerconfigjson`) in the cluster using kubeconfig files.
 You can specify the path of kubeconfig file using `kubeconfig_path` option.
@@ -132,7 +154,8 @@ enable_keychain = true
 kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
 ```
 
-The config file can be passed to stargz snapshotter using `containerd-stargz-grpc`'s `--config` option.
+Please note that kubeconfig-based authentication requires additional privilege (i.e. kubeconfig to list/watch secrets) to the node.
+And this doesn't work if kubelet retrieve creds from somewhere not API server (e.g. [credential provider](https://kubernetes.io/docs/tasks/kubelet-credential-provider/kubelet-credential-provider/)).
 
 ### Registry mirrors and insecure connection
 

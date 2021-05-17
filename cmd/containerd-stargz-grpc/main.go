@@ -26,13 +26,20 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
+	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/stargz-snapshotter/service"
+	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
+	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
+	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
+	"github.com/containerd/stargz-snapshotter/service/resolver"
 	"github.com/containerd/stargz-snapshotter/version"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	metrics "github.com/docker/go-metrics"
@@ -40,13 +47,16 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
 
 const (
-	defaultAddress    = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
-	defaultConfigPath = "/etc/containerd-stargz-grpc/config.toml"
-	defaultLogLevel   = logrus.InfoLevel
-	defaultRootDir    = "/var/lib/containerd-stargz-grpc"
+	defaultAddress             = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+	defaultConfigPath          = "/etc/containerd-stargz-grpc/config.toml"
+	defaultLogLevel            = logrus.InfoLevel
+	defaultRootDir             = "/var/lib/containerd-stargz-grpc"
+	defaultImageServiceAddress = "/run/containerd/containerd.sock"
 )
 
 var (
@@ -97,12 +107,54 @@ func main() {
 		log.G(ctx).WithError(err).Fatalf("snapshotter is not supported")
 	}
 
-	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config.Config)
+	// Create a gRPC server
+	rpc := grpc.NewServer()
+
+	// Configure keychain
+	credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
+	if config.Config.KubeconfigKeychainConfig.EnableKeychain {
+		var opts []kubeconfig.Option
+		if kcp := config.Config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
+			opts = append(opts, kubeconfig.WithKubeconfigPath(kcp))
+		}
+		credsFuncs = append(credsFuncs, kubeconfig.NewKubeconfigKeychain(ctx, opts...))
+	}
+	if config.Config.CRIKeychainConfig.EnableKeychain {
+		// connects to the backend CRI service (defaults to containerd socket)
+		criAddr := defaultImageServiceAddress
+		if cp := config.CRIKeychainConfig.ImageServicePath; cp != "" {
+			criAddr = cp
+		}
+		connectCRI := func() (runtime.ImageServiceClient, error) {
+			// TODO: make gRPC options configurable from config.toml
+			backoffConfig := backoff.DefaultConfig
+			backoffConfig.MaxDelay = 3 * time.Second
+			connParams := grpc.ConnectParams{
+				Backoff: backoffConfig,
+			}
+			gopts := []grpc.DialOption{
+				grpc.WithInsecure(),
+				grpc.WithConnectParams(connParams),
+				grpc.WithContextDialer(dialer.ContextDialer),
+				grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
+				grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
+			}
+			conn, err := grpc.Dial(dialer.DialAddress(criAddr), gopts...)
+			if err != nil {
+				return nil, err
+			}
+			return runtime.NewImageServiceClient(conn), nil
+		}
+		f, criServer := cri.NewCRIKeychain(ctx, connectCRI)
+		runtime.RegisterImageServiceServer(rpc, criServer)
+		credsFuncs = append(credsFuncs, f)
+	}
+	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config.Config, service.WithCredsFuncs(credsFuncs...))
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
 	}
 
-	cleanup, err := serve(ctx, *address, rs, config)
+	cleanup, err := serve(ctx, rpc, *address, rs, config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to serve snapshotter")
 	}
@@ -114,10 +166,7 @@ func main() {
 	log.G(ctx).Info("Exiting")
 }
 
-func serve(ctx context.Context, addr string, rs snapshots.Snapshotter, config snapshotterConfig) (bool, error) {
-	// Create a gRPC server
-	rpc := grpc.NewServer()
-
+func serve(ctx context.Context, rpc *grpc.Server, addr string, rs snapshots.Snapshotter, config snapshotterConfig) (bool, error) {
 	// Convert the snapshotter to a gRPC service,
 	snsvc := snapshotservice.FromSnapshotter(rs)
 

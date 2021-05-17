@@ -1,0 +1,1 @@
+KUBELET_EXTRA_ARGS=--fail-swap-on=false --image-service-endpoint=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock

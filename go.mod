@@ -18,7 +18,6 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.1.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/moby/sys/mountinfo v0.4.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.1
@@ -35,6 +34,7 @@ require (
 	k8s.io/api v0.20.6
 	k8s.io/apimachinery v0.20.6
 	k8s.io/client-go v0.20.6
+	k8s.io/cri-api v0.20.6
 )
 
 replace (

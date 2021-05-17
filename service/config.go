@@ -27,13 +27,31 @@ type Config struct {
 	// KubeconfigKeychainConfig is config for kubeconfig-based keychain.
 	KubeconfigKeychainConfig `toml:"kubeconfig_keychain"`
 
+	// CRIKeychainConfig is config for CRI-based keychain.
+	CRIKeychainConfig `toml:"cri_keychain"`
+
 	// ResolverConfig is config for resolving registries.
 	ResolverConfig `toml:"resolver"`
 }
 
+// KubeconfigKeychainConfig is config for kubeconfig-based keychain.
 type KubeconfigKeychainConfig struct {
-	EnableKeychain bool   `toml:"enable_keychain"`
+	// EnableKeychain enables kubeconfig-based keychain
+	EnableKeychain bool `toml:"enable_keychain"`
+
+	// KubeconfigPath is the path to kubeconfig which can be used to sync
+	// secrets on the cluster into this snapshotter.
 	KubeconfigPath string `toml:"kubeconfig_path"`
 }
 
+// CRIKeychainConfig is config for CRI-based keychain.
+type CRIKeychainConfig struct {
+	// EnableKeychain enables CRI-based keychain
+	EnableKeychain bool `toml:"enable_keychain"`
+
+	// ImageServicePath is the path to the unix socket of backing CRI Image Service (e.g. containerd CRI plugin)
+	ImageServicePath string `toml:"image_service_path"`
+}
+
+// ResolverConfig is config for resolving registries.
 type ResolverConfig resolver.Config

@@ -20,6 +20,7 @@ CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
 CRI_TOOLS_VERSION=53ad8bb7f97e1b1d1c0c0634e43a3c2b8b07b718
 CNI_VERSION="v0.9.1"
+SNAPSHOTTER_SOCK_PATH=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
 source "${CONTEXT}/const.sh"
 
@@ -62,6 +63,10 @@ version = 2
   runtime_type = "io.containerd.runc.v2"
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.test-handler]
   runtime_type = "io.containerd.runc.v2"
+[plugins."io.containerd.snapshotter.v1.stargz"]
+cri_keychain_image_service_path = "${SNAPSHOTTER_SOCK_PATH}"
+[plugins."io.containerd.snapshotter.v1.stargz".cri_keychain]
+enable_keychain = true
 EOF
     BUILTIN_HACK_INST="COPY containerd.hack.toml /etc/containerd/config.toml"
 fi

@@ -14,24 +14,27 @@
    limitations under the License.
 */
 
-package keychain
+package dockerconfig
 
 import (
 	"context"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/reference"
+	"github.com/containerd/stargz-snapshotter/service/resolver"
 	"github.com/docker/cli/cli/config"
 )
 
-func NewDockerconfigKeychain(ctx context.Context) func(host string) (string, string, error) {
+func NewDockerconfigKeychain(ctx context.Context) resolver.Credential {
 	cf, err := config.Load("")
 	if err != nil {
 		log.G(ctx).WithError(err).Warnf("failed to load docker config file")
-		return func(host string) (string, string, error) {
+		return func(reference.Spec) (string, string, error) {
 			return "", "", nil
 		}
 	}
-	return func(host string) (string, string, error) {
+	return func(refspec reference.Spec) (string, string, error) {
+		host := refspec.Hostname()
 		if host == "docker.io" || host == "registry-1.docker.io" {
 			// Creds of docker.io is stored keyed by "https://index.docker.io/v1/".
 			host = "https://index.docker.io/v1/"

@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/fs/config"
@@ -86,8 +87,9 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 	}
 	getSources := fsOpts.getSources
 	if getSources == nil {
-		getSources = source.FromDefaultLabels(
-			docker.ConfigureDefaultRegistries(docker.WithPlainHTTP(docker.MatchLocalhost)))
+		getSources = source.FromDefaultLabels(func(refspec reference.Spec) (hosts []docker.RegistryHost, _ error) {
+			return docker.ConfigureDefaultRegistries(docker.WithPlainHTTP(docker.MatchLocalhost))(refspec.Hostname())
+		})
 	}
 	tm := task.NewBackgroundTaskManager(maxConcurrency, 5*time.Second)
 	r, err := layer.NewResolver(root, tm, cfg)

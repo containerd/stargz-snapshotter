@@ -50,10 +50,28 @@ jobs:
     - name: Run test for pulling image from private registry on Kubernetes
       run: make test-pullsecrets
 
-  test-cri:
+  test-criauth:
     runs-on: ubuntu-20.04
-    name: CRIValidation
+    name: CRIAuth
+    steps:
+    - name: Install htpasswd for setting up private registry
+      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
+    - uses: actions/checkout@v2
+    - name: Run test for pulling image from private registry on Kubernetes
+      run: make test-criauth
+
+  test-cri-containerd:
+    runs-on: ubuntu-20.04
+    name: CRIValidationContainerd
     steps:
     - uses: actions/checkout@v2
-    - name: Varidate the runtime through CRI
-      run: make test-cri
+    - name: Varidate the runtime through CRI with containerd
+      run: make test-cri-containerd
+
+  test-cri-o:
+    runs-on: ubuntu-20.04
+    name: CRIValidationCRIO
+    steps:
+    - uses: actions/checkout@v2
+    - name: Varidate the runtime through CRI with CRI-O
+      run: make test-cri-o

@@ -27,7 +27,8 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/fs/config"
-	"github.com/containerd/stargz-snapshotter/service/keychain"
+	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
+	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/sirupsen/logrus"
@@ -95,13 +96,13 @@ func main() {
 	}
 
 	// Prepare kubeconfig-based keychain if required
-	credsFuncs := []func(string) (string, string, error){keychain.NewDockerconfigKeychain(ctx)}
+	credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
 	if config.KubeconfigKeychainConfig.EnableKeychain {
-		var opts []keychain.KubeconfigOption
+		var opts []kubeconfig.Option
 		if kcp := config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
-			opts = append(opts, keychain.WithKubeconfigPath(kcp))
+			opts = append(opts, kubeconfig.WithKubeconfigPath(kcp))
 		}
-		credsFuncs = append(credsFuncs, keychain.NewKubeconfigKeychain(ctx, opts...))
+		credsFuncs = append(credsFuncs, kubeconfig.NewKubeconfigKeychain(ctx, opts...))
 	}
 
 	// Use RegistryHosts based on ResolverConfig and keychain

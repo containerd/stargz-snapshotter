@@ -42,6 +42,7 @@ import (
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/fs/config"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
@@ -75,7 +76,7 @@ type Resolver struct {
 	blobConfig config.BlobConfig
 }
 
-func (r *Resolver) Resolve(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, blobCache cache.BlobCache) (Blob, error) {
+func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, blobCache cache.BlobCache) (Blob, error) {
 	fetcher, size, err := newFetcher(ctx, hosts, refspec, desc)
 	if err != nil {
 		return nil, err
@@ -92,8 +93,8 @@ func (r *Resolver) Resolve(ctx context.Context, hosts docker.RegistryHosts, refs
 	}, nil
 }
 
-func newFetcher(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (*fetcher, int64, error) {
-	reghosts, err := hosts(refspec.Hostname())
+func newFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (*fetcher, int64, error) {
+	reghosts, err := hosts(refspec)
 	if err != nil {
 		return nil, 0, err
 	}

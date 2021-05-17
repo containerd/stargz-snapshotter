@@ -32,8 +32,8 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
@@ -46,7 +46,7 @@ type Blob interface {
 	FetchedSize() int64
 	ReadAt(p []byte, offset int64, opts ...Option) (int, error)
 	Cache(offset int64, size int64, opts ...Option) error
-	Refresh(ctx context.Context, host docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error
+	Refresh(ctx context.Context, host source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error
 	Close() error
 }
 
@@ -88,7 +88,7 @@ func (b *blob) isClosed() bool {
 	return closed
 }
 
-func (b *blob) Refresh(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+func (b *blob) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
 	if b.isClosed() {
 		return fmt.Errorf("blob is already closed")
 	}
