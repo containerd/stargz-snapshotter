@@ -5,10 +5,10 @@ go 1.16
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/containerd/console v1.0.2
-	github.com/containerd/containerd v1.5.0
+	github.com/containerd/containerd v1.5.2
 	github.com/containerd/continuity v0.1.0
 	github.com/containerd/go-cni v1.0.2
-	github.com/containerd/stargz-snapshotter/estargz v0.6.0
+	github.com/containerd/stargz-snapshotter/estargz v0.6.1
 	github.com/coreos/go-systemd/v22 v22.3.1
 	github.com/docker/cli v20.10.6+incompatible
 	github.com/docker/docker v20.10.6+incompatible // indirect
