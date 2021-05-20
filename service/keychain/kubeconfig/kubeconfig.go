@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package keychain
+package kubeconfig
 
 import (
 	"bytes"
@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/reference"
+	"github.com/containerd/stargz-snapshotter/service/resolver"
 	dcfile "github.com/docker/cli/cli/config/configfile"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,9 +46,9 @@ type options struct {
 	kubeconfigPath string
 }
 
-type KubeconfigOption func(*options)
+type Option func(*options)
 
-func WithKubeconfigPath(path string) KubeconfigOption {
+func WithKubeconfigPath(path string) Option {
 	return func(opts *options) {
 		opts.kubeconfigPath = path
 	}
@@ -63,7 +65,7 @@ func WithKubeconfigPath(path string) KubeconfigOption {
 // everything, including booting containerd/kubelet/apiserver and configuring
 // users/roles.
 // TODO: support update of kubeconfig file
-func NewKubeconfigKeychain(ctx context.Context, opts ...KubeconfigOption) func(string) (string, string, error) {
+func NewKubeconfigKeychain(ctx context.Context, opts ...Option) resolver.Credential {
 	var kcOpts options
 	for _, o := range opts {
 		o(&kcOpts)
@@ -133,7 +135,8 @@ type keychain struct {
 	informer cache.SharedIndexInformer
 }
 
-func (kc *keychain) credentials(host string) (string, string, error) {
+func (kc *keychain) credentials(refspec reference.Spec) (string, string, error) {
+	host := refspec.Hostname()
 	if host == "docker.io" || host == "registry-1.docker.io" {
 		// Creds of "docker.io" is stored keyed by "https://index.docker.io/v1/".
 		host = "https://index.docker.io/v1/"

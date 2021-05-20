@@ -89,6 +89,27 @@ jobs:
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
       run: make test-pullsecrets
 
+  test-criauth:
+    runs-on: ubuntu-20.04
+    name: CRIAuth
+    strategy:
+      fail-fast: false
+      matrix:
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        builtin: ["true", "false"]
+        exclude:
+        - buildargs: ""
+          builtin: "true"
+    steps:
+    - name: Install htpasswd for setting up private registry
+      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
+    - uses: actions/checkout@v2
+    - name: Run test for pulling image from private registry on Kubernetes with CRI keychain mode
+      env:
+        DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
+        BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
+      run: make test-criauth
+
   test-cri-containerd:
     runs-on: ubuntu-20.04
     name: CRIValidationContainerd

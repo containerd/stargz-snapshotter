@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -39,7 +38,7 @@ const (
 	targetImageLayersLabel = "containerd.io/snapshot/cri.image-layers"
 )
 
-func sourceFromCRILabels(hosts docker.RegistryHosts) source.GetSources {
+func sourceFromCRILabels(hosts source.RegistryHosts) source.GetSources {
 	return func(labels map[string]string) ([]source.Source, error) {
 		refStr, ok := labels[targetRefLabel]
 		if !ok {
@@ -77,7 +76,6 @@ func sourceFromCRILabels(hosts docker.RegistryHosts) source.GetSources {
 		for _, dgst := range append([]digest.Digest{target}, layersDgst...) {
 			layers = append(layers, ocispec.Descriptor{Digest: dgst})
 		}
-
 		return []source.Source{
 			{
 				Hosts:    hosts,

@@ -18,6 +18,7 @@ set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
+SNAPSHOTTER_SOCK=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
 source "${CONTEXT}/const.sh"
 
@@ -57,7 +58,7 @@ if [ "${FAIL}" == "" ] ; then
                 docker exec "${TEST_NODE_ID}" runc --version && \
                 docker exec "${TEST_NODE_ID}" containerd --version && \
                 echo "===============================" && \
-                docker exec -i "${TEST_NODE_ID}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK}
+                docker exec -i "${TEST_NODE_ID}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${SNAPSHOTTER_SOCK}
         ) ; then
         FAIL=true
     fi

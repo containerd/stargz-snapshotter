@@ -36,6 +36,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	fsmetrics "github.com/containerd/stargz-snapshotter/fs/metrics"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
 	"github.com/docker/go-metrics"
@@ -58,7 +59,7 @@ const (
 	prepareFailed        = "false"
 )
 
-func newPool(root string, hosts docker.RegistryHosts, cfg config.Config) (*pool, error) {
+func newPool(root string, hosts source.RegistryHosts, cfg config.Config) (*pool, error) {
 	var poolroot = filepath.Join(root, "pool")
 	if err := os.MkdirAll(poolroot, 0700); err != nil {
 		return nil, err
@@ -103,7 +104,7 @@ type pool struct {
 	path         string
 	layer        map[string]layer.Layer
 	layerMu      sync.Mutex
-	hosts        docker.RegistryHosts
+	hosts        source.RegistryHosts
 	refcounter   map[string]map[string]int
 	refcounterMu sync.Mutex
 
@@ -409,9 +410,14 @@ func (p *pool) writeManifestAndConfig(refspec reference.Spec, manifest ocispec.M
 	return mPath, cPath, nil
 }
 
-func fetchManifestAndConfig(ctx context.Context, hosts docker.RegistryHosts, refspec reference.Spec) (ocispec.Manifest, ocispec.Image, error) {
+func fetchManifestAndConfig(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec) (ocispec.Manifest, ocispec.Image, error) {
 	resolver := docker.NewResolver(docker.ResolverOptions{
-		Hosts: hosts,
+		Hosts: func(host string) ([]docker.RegistryHost, error) {
+			if host != refspec.Hostname() {
+				return nil, fmt.Errorf("unexpected host %q for image ref %q", host, refspec.String())
+			}
+			return hosts(refspec)
+		},
 	})
 	_, img, err := resolver.Resolve(ctx, refspec.String())
 	if err != nil {

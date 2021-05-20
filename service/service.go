@@ -26,7 +26,6 @@ import (
 	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
-	"github.com/containerd/stargz-snapshotter/service/keychain"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/hashicorp/go-multierror"
@@ -35,20 +34,27 @@ import (
 
 const fusermountBin = "fusermount"
 
+type Option func(*options)
+
+type options struct {
+	credsFuncs []resolver.Credential
+}
+
+func WithCredsFuncs(creds ...resolver.Credential) Option {
+	return func(o *options) {
+		o.credsFuncs = append(o.credsFuncs, creds...)
+	}
+}
+
 // NewStargzSnapshotterService returns stargz snapshotter.
-func NewStargzSnapshotterService(ctx context.Context, root string, config *Config) (snapshots.Snapshotter, error) {
-	// Prepare kubeconfig-based keychain if required
-	credsFuncs := []func(string) (string, string, error){keychain.NewDockerconfigKeychain(ctx)}
-	if config.KubeconfigKeychainConfig.EnableKeychain {
-		var opts []keychain.KubeconfigOption
-		if kcp := config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
-			opts = append(opts, keychain.WithKubeconfigPath(kcp))
-		}
-		credsFuncs = append(credsFuncs, keychain.NewKubeconfigKeychain(ctx, opts...))
+func NewStargzSnapshotterService(ctx context.Context, root string, config *Config, opts ...Option) (snapshots.Snapshotter, error) {
+	var sOpts options
+	for _, o := range opts {
+		o(&sOpts)
 	}
 
 	// Use RegistryHosts based on ResolverConfig and keychain
-	hosts := resolver.RegistryHostsFromConfig(resolver.Config(config.ResolverConfig), credsFuncs...)
+	hosts := resolver.RegistryHostsFromConfig(resolver.Config(config.ResolverConfig), sOpts.credsFuncs...)
 
 	// Configure filesystem and snapshotter
 	fs, err := stargzfs.NewFilesystem(fsRoot(root),

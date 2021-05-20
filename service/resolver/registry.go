@@ -20,7 +20,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 )
 
 const defaultRequestTimeoutSec = 30
@@ -48,9 +50,12 @@ type MirrorConfig struct {
 	RequestTimeoutSec int `toml:"request_timeout_sec"`
 }
 
+type Credential func(reference.Spec) (string, string, error)
+
 // RegistryHostsFromConfig creates RegistryHosts (a set of registry configuration) from Config.
-func RegistryHostsFromConfig(cfg Config, credsFuncs ...func(string) (string, string, error)) docker.RegistryHosts {
-	return func(host string) (hosts []docker.RegistryHost, _ error) {
+func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.RegistryHosts {
+	return func(ref reference.Spec) (hosts []docker.RegistryHost, _ error) {
+		host := ref.Hostname()
 		for _, h := range append(cfg.Host[host].Mirrors, MirrorConfig{
 			Host: host,
 		}) {
@@ -72,7 +77,7 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...func(string) (string, str
 					docker.WithAuthClient(tr),
 					docker.WithAuthCreds(func(host string) (string, string, error) {
 						for _, f := range credsFuncs {
-							if username, secret, err := f(host); err != nil {
+							if username, secret, err := f(ref); err != nil {
 								return "", "", err
 							} else if !(username == "" && secret == "") {
 								return username, secret, nil

@@ -27,7 +27,7 @@ CMD=containerd-stargz-grpc ctr-remote stargz-store
 
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
 
-.PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-pullsecrets test-cri
+.PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-pullsecrets test-cri-containerd test-cri-o test-criauth
 
 all: build
 
@@ -93,3 +93,6 @@ test-cri-containerd:
 
 test-cri-o:
 	@./script/cri-o/test.sh
+
+test-criauth:
+	@./script/criauth/test.sh
