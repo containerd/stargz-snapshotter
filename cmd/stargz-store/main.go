@@ -24,13 +24,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/BurntSushi/toml"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
 	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
+	"github.com/pelletier/go-toml"
 	"github.com/sirupsen/logrus"
 )
 
@@ -90,8 +90,12 @@ func main() {
 
 	// Get configuration from specified file
 	if *configPath != "" {
-		if _, err := toml.DecodeFile(*configPath, &config); err != nil && !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
+		tree, err := toml.LoadFile(*configPath)
+		if err != nil && !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
 			log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
+		}
+		if err := tree.Unmarshal(&config); err != nil {
+			log.G(ctx).WithError(err).Fatalf("failed to unmarshal config file %q", *configPath)
 		}
 	}
 

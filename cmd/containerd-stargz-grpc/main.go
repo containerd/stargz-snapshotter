@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/defaults"
@@ -43,6 +42,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/version"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	metrics "github.com/docker/go-metrics"
+	"github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -99,8 +99,12 @@ func main() {
 	golog.SetOutput(log.G(ctx).WriterLevel(logrus.DebugLevel))
 
 	// Get configuration from specified file
-	if _, err := toml.DecodeFile(*configPath, &config); err != nil && !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
+	tree, err := toml.LoadFile(*configPath)
+	if err != nil && !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
 		log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
+	}
+	if err := tree.Unmarshal(&config); err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to unmarshal config file %q", *configPath)
 	}
 
 	if err := service.Supported(*rootDir); err != nil {
