@@ -123,7 +123,7 @@ func main() {
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to prepare pool")
 	}
-	if err := store.Mount(mountPoint, pool, config.Config.Debug); err != nil {
+	if err := store.Mount(ctx, mountPoint, pool, config.Config.Debug); err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to mount fs at %q", mountPoint)
 	}
 	defer func() {

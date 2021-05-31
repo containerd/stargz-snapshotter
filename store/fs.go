@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"os/exec"
 	"syscall"
 	"time"
 
@@ -48,20 +49,29 @@ const (
 	debugConfigLink   = "config"
 	layerInfoLink     = "info"
 	layerUseFile      = "use"
+
+	fusermountBin = "fusermount"
 )
 
-func Mount(mountpoint string, pool *Pool, debug bool) error {
+func Mount(ctx context.Context, mountpoint string, pool *Pool, debug bool) error {
 	timeSec := time.Second
 	rawFS := fusefs.NewNodeFS(&rootnode{pool: pool}, &fusefs.Options{
 		AttrTimeout:     &timeSec,
 		EntryTimeout:    &timeSec,
 		NullPermissions: true,
 	})
-	server, err := fuse.NewServer(rawFS, mountpoint, &fuse.MountOptions{
-		AllowOther: true,             // allow users other than root&mounter to access fs
-		Options:    []string{"suid"}, // allow setuid inside container
+	mountOpts := &fuse.MountOptions{
+		AllowOther: true, // allow users other than root&mounter to access fs
+		FsName:     "stargzstore",
 		Debug:      debug,
-	})
+	}
+	if _, err := exec.LookPath(fusermountBin); err == nil {
+		mountOpts.Options = []string{"suid"} // option for fusermount; allow setuid inside container
+	} else {
+		log.G(ctx).WithError(err).Debugf("%s not installed; trying direct mount", fusermountBin)
+		mountOpts.DirectMount = true
+	}
+	server, err := fuse.NewServer(rawFS, mountpoint, mountOpts)
 	if err != nil {
 		return err
 	}

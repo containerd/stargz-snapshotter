@@ -80,6 +80,8 @@ ca_file = "${NODE_TEST_CERT_FILE}"
 cri_keychain_image_service_path = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
 [plugins."io.containerd.snapshotter.v1.stargz".cri_keychain]
 enable_keychain = true
+[plugins."io.containerd.snapshotter.v1.stargz".registry.configs."${REGISTRY_HOST}:5000".tls]
+ca_file = "${NODE_TEST_CERT_FILE}"
 EOF
     BUILTIN_HACK_INST="COPY containerd.hack.toml /etc/containerd/config.toml"
 fi

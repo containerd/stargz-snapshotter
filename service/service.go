@@ -18,31 +18,36 @@ package service
 
 import (
 	"context"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
+	"github.com/containerd/stargz-snapshotter/snapshot/overlayutils"
 	"github.com/hashicorp/go-multierror"
-	"github.com/pkg/errors"
 )
-
-const fusermountBin = "fusermount"
 
 type Option func(*options)
 
 type options struct {
-	credsFuncs []resolver.Credential
+	credsFuncs    []resolver.Credential
+	registryHosts source.RegistryHosts
 }
 
+// WithCredsFuncs specifies credsFuncs to be used for connecting to the registries.
 func WithCredsFuncs(creds ...resolver.Credential) Option {
 	return func(o *options) {
 		o.credsFuncs = append(o.credsFuncs, creds...)
+	}
+}
+
+// WithCustomRegistryHosts is registry hosts to use instead.
+func WithCustomRegistryHosts(hosts source.RegistryHosts) Option {
+	return func(o *options) {
+		o.registryHosts = hosts
 	}
 }
 
@@ -53,8 +58,11 @@ func NewStargzSnapshotterService(ctx context.Context, root string, config *Confi
 		o(&sOpts)
 	}
 
-	// Use RegistryHosts based on ResolverConfig and keychain
-	hosts := resolver.RegistryHostsFromConfig(resolver.Config(config.ResolverConfig), sOpts.credsFuncs...)
+	hosts := sOpts.registryHosts
+	if hosts == nil {
+		// Use RegistryHosts based on ResolverConfig and keychain
+		hosts = resolver.RegistryHostsFromConfig(resolver.Config(config.ResolverConfig), sOpts.credsFuncs...)
+	}
 
 	// Configure filesystem and snapshotter
 	fs, err := stargzfs.NewFilesystem(fsRoot(root),
@@ -96,10 +104,6 @@ func sources(ps ...source.GetSources) source.GetSources {
 // Supported is not called during plugin initialization, but exposed for downstream projects which uses
 // this snapshotter as a library.
 func Supported(root string) error {
-	// Stargz Snapshotter requires fusermount helper binary.
-	if _, err := exec.LookPath(fusermountBin); err != nil {
-		return errors.Wrapf(err, "%s not installed", fusermountBin)
-	}
 	// Remote snapshotter is implemented based on overlayfs snapshotter.
 	return overlayutils.Supported(snapshotterRoot(root))
 }

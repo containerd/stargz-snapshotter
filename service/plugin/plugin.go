@@ -47,6 +47,9 @@ type Config struct {
 
 	// CRIKeychainImageServicePath is the path to expose CRI service wrapped by CRI keychain
 	CRIKeychainImageServicePath string `toml:"cri_keychain_image_service_path"`
+
+	// Registry is CRI-plugin-compatible registry configuration
+	Registry resolver.Registry `toml:"registry"`
 }
 
 func init() {
@@ -132,7 +135,10 @@ func init() {
 				credsFuncs = append(credsFuncs, criCreds)
 			}
 
-			return service.NewStargzSnapshotterService(ctx, root, &config.Config, service.WithCredsFuncs(credsFuncs...))
+			// TODO(ktock): print warn if old configuration is specified.
+			// TODO(ktock): should we respect old configuration?
+			return service.NewStargzSnapshotterService(ctx, root, &config.Config,
+				service.WithCustomRegistryHosts(resolver.RegistryHostsFromCRIConfig(ctx, config.Registry, credsFuncs...)))
 		},
 	})
 }

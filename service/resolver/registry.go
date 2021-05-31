@@ -50,7 +50,7 @@ type MirrorConfig struct {
 	RequestTimeoutSec int `toml:"request_timeout_sec"`
 }
 
-type Credential func(reference.Spec) (string, string, error)
+type Credential func(string, reference.Spec) (string, string, error)
 
 // RegistryHostsFromConfig creates RegistryHosts (a set of registry configuration) from Config.
 func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.RegistryHosts {
@@ -75,16 +75,7 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.Regist
 				Capabilities: docker.HostCapabilityPull | docker.HostCapabilityResolve,
 				Authorizer: docker.NewDockerAuthorizer(
 					docker.WithAuthClient(tr),
-					docker.WithAuthCreds(func(host string) (string, string, error) {
-						for _, f := range credsFuncs {
-							if username, secret, err := f(ref); err != nil {
-								return "", "", err
-							} else if !(username == "" && secret == "") {
-								return username, secret, nil
-							}
-						}
-						return "", "", nil
-					})),
+					docker.WithAuthCreds(multiCredsFuncs(ref, credsFuncs...))),
 			}
 			if localhost, _ := docker.MatchLocalhost(config.Host); localhost || h.Insecure {
 				config.Scheme = "http"
@@ -95,5 +86,18 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.Regist
 			hosts = append(hosts, config)
 		}
 		return
+	}
+}
+
+func multiCredsFuncs(ref reference.Spec, credsFuncs ...Credential) func(string) (string, string, error) {
+	return func(host string) (string, string, error) {
+		for _, f := range credsFuncs {
+			if username, secret, err := f(host, ref); err != nil {
+				return "", "", err
+			} else if !(username == "" && secret == "") {
+				return username, secret, nil
+			}
+		}
+		return "", "", nil
 	}
 }
