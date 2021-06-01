@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package main
+package store
 
 import (
 	"context"
@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,9 +58,11 @@ const (
 	remoteSnapshotLogKey = "remote-snapshot-prepared"
 	prepareSucceeded     = "true"
 	prepareFailed        = "false"
+
+	defaultMaxConcurrency = 2
 )
 
-func newPool(root string, hosts source.RegistryHosts, cfg config.Config) (*pool, error) {
+func NewPool(root string, hosts source.RegistryHosts, cfg config.Config) (*Pool, error) {
 	var poolroot = filepath.Join(root, "pool")
 	if err := os.MkdirAll(poolroot, 0700); err != nil {
 		return nil, err
@@ -81,7 +84,7 @@ func newPool(root string, hosts source.RegistryHosts, cfg config.Config) (*pool,
 	if ns != nil {
 		metrics.Register(ns)
 	}
-	return &pool{
+	return &Pool{
 		path:                  poolroot,
 		layer:                 make(map[string]layer.Layer),
 		hosts:                 hosts,
@@ -100,7 +103,7 @@ func newPool(root string, hosts source.RegistryHosts, cfg config.Config) (*pool,
 
 // resolver provides manifests, configs and layers of images.
 // This also manages caches for these resources.
-type pool struct {
+type Pool struct {
 	path         string
 	layer        map[string]layer.Layer
 	layerMu      sync.Mutex
@@ -119,28 +122,28 @@ type pool struct {
 	resolveLock           *namedmutex.NamedMutex
 }
 
-func (p *pool) root() string {
+func (p *Pool) root() string {
 	return p.path
 }
 
-func (p *pool) metadataDir(refspec reference.Spec) string {
+func (p *Pool) metadataDir(refspec reference.Spec) string {
 	return filepath.Join(p.path,
 		"metadata--"+colon2dash(digest.FromString(refspec.String()).String()))
 }
 
-func (p *pool) manifestFile(refspec reference.Spec) string {
+func (p *Pool) manifestFile(refspec reference.Spec) string {
 	return filepath.Join(p.metadataDir(refspec), "manifest")
 }
 
-func (p *pool) configFile(refspec reference.Spec) string {
+func (p *Pool) configFile(refspec reference.Spec) string {
 	return filepath.Join(p.metadataDir(refspec), "config")
 }
 
-func (p *pool) layerInfoFile(refspec reference.Spec, dgst digest.Digest) string {
+func (p *Pool) layerInfoFile(refspec reference.Spec, dgst digest.Digest) string {
 	return filepath.Join(p.metadataDir(refspec), colon2dash(dgst.String()))
 }
 
-func (p *pool) loadManifestAndConfig(ctx context.Context, refspec reference.Spec) (manifest ocispec.Manifest, mPath string, config ocispec.Image, cPath string, err error) {
+func (p *Pool) loadManifestAndConfig(ctx context.Context, refspec reference.Spec) (manifest ocispec.Manifest, mPath string, config ocispec.Image, cPath string, err error) {
 	manifest, mPath, config, cPath, err = p.readManifestAndConfig(refspec)
 	if err == nil {
 		log.G(ctx).Debugf("reusing manifest and config of %q", refspec.String())
@@ -158,7 +161,7 @@ func (p *pool) loadManifestAndConfig(ctx context.Context, refspec reference.Spec
 	return manifest, mPath, config, cPath, err
 }
 
-func (p *pool) loadLayerInfo(ctx context.Context, refspec reference.Spec, dgst digest.Digest) (layerInfoPath string, err error) {
+func (p *Pool) loadLayerInfo(ctx context.Context, refspec reference.Spec, dgst digest.Digest) (layerInfoPath string, err error) {
 	layerInfoPath = p.layerInfoFile(refspec, dgst)
 	if _, err := os.Stat(layerInfoPath); err == nil {
 		log.G(ctx).Debugf("reusing layer info of %q/%q: %q",
@@ -169,7 +172,7 @@ func (p *pool) loadLayerInfo(ctx context.Context, refspec reference.Spec, dgst d
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to get manifest and config")
 	}
-	info, err := genLayerInfo(dgst, manifest, config)
+	info, err := genLayerInfo(ctx, dgst, manifest, config)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to generate layer info")
 	}
@@ -184,7 +187,7 @@ func (p *pool) loadLayerInfo(ctx context.Context, refspec reference.Spec, dgst d
 	return layerInfoPath, json.NewEncoder(infoF).Encode(&info)
 }
 
-func (p *pool) loadLayer(ctx context.Context, refspec reference.Spec, target ocispec.Descriptor, preResolve []ocispec.Descriptor) (layer.Layer, error) {
+func (p *Pool) loadLayer(ctx context.Context, refspec reference.Spec, target ocispec.Descriptor, preResolve []ocispec.Descriptor) (layer.Layer, error) {
 	var (
 		result     layer.Layer
 		resultChan = make(chan layer.Layer)
@@ -247,7 +250,7 @@ func (p *pool) loadLayer(ctx context.Context, refspec reference.Spec, target oci
 	return l, nil
 }
 
-func (p *pool) resolveLayer(ctx context.Context, refspec reference.Spec, target ocispec.Descriptor) (layer.Layer, error) {
+func (p *Pool) resolveLayer(ctx context.Context, refspec reference.Spec, target ocispec.Descriptor) (layer.Layer, error) {
 	key := refspec.String() + "/" + target.Digest.String()
 
 	// Wait if resolving this layer is already running.
@@ -331,7 +334,7 @@ func (p *pool) resolveLayer(ctx context.Context, refspec reference.Spec, target 
 	return l, nil
 }
 
-func (p *pool) release(ref reference.Spec, dgst digest.Digest) (int, error) {
+func (p *Pool) release(ref reference.Spec, dgst digest.Digest) (int, error) {
 	// TODO: implement GC
 	targetRef := ref.String()
 	targetDgst := dgst.String()
@@ -349,7 +352,7 @@ func (p *pool) release(ref reference.Spec, dgst digest.Digest) (int, error) {
 	return p.refcounter[targetRef][targetDgst], nil
 }
 
-func (p *pool) use(ref reference.Spec, dgst digest.Digest) int {
+func (p *Pool) use(ref reference.Spec, dgst digest.Digest) int {
 	// TODO: implement GC
 	targetRef := ref.String()
 	targetDgst := dgst.String()
@@ -362,7 +365,7 @@ func (p *pool) use(ref reference.Spec, dgst digest.Digest) int {
 	return p.refcounter[targetRef][targetDgst]
 }
 
-func (p *pool) readManifestAndConfig(refspec reference.Spec) (manifest ocispec.Manifest, mPath string, config ocispec.Image, cPath string, _ error) {
+func (p *Pool) readManifestAndConfig(refspec reference.Spec) (manifest ocispec.Manifest, mPath string, config ocispec.Image, cPath string, _ error) {
 	mPath, cPath = p.manifestFile(refspec), p.configFile(refspec)
 	mf, err := os.Open(mPath)
 	if err != nil {
@@ -383,7 +386,7 @@ func (p *pool) readManifestAndConfig(refspec reference.Spec) (manifest ocispec.M
 	return manifest, mPath, config, cPath, nil
 }
 
-func (p *pool) writeManifestAndConfig(refspec reference.Spec, manifest ocispec.Manifest, config ocispec.Image) (mPath string, cPath string, _ error) {
+func (p *Pool) writeManifestAndConfig(refspec reference.Spec, manifest ocispec.Manifest, config ocispec.Image) (mPath string, cPath string, _ error) {
 	mPath, cPath = p.manifestFile(refspec), p.configFile(refspec)
 	if err := os.MkdirAll(filepath.Dir(mPath), 0700); err != nil {
 		return "", "", err
@@ -411,6 +414,7 @@ func (p *pool) writeManifestAndConfig(refspec reference.Spec, manifest ocispec.M
 }
 
 func fetchManifestAndConfig(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec) (ocispec.Manifest, ocispec.Image, error) {
+	// temporary resolver. should only be used for resolving `refpec`.
 	resolver := docker.NewResolver(docker.ResolverOptions{
 		Hosts: func(host string) ([]docker.RegistryHost, error) {
 			if host != refspec.Hostname() {
@@ -506,9 +510,15 @@ type Layer struct {
 const (
 	// Defined in https://github.com/containers/storage/blob/b64e13a1afdb0bfed25601090ce4bbbb1bc183fc/pkg/archive/archive.go#L108-L119
 	gzipTypeMagicNum = 2
+
+	// StoreUncompressedSizeAnnotation is an additional annotation key for eStargz to enable lazy
+	// pulling on containers/storage. Stargz Store is required to expose the layer's uncompressed size
+	// to the runtime but current OCI image doesn't ship this information by default. So we store this
+	// to the special annotation.
+	StoreUncompressedSizeAnnotation = "io.containers.estargz.uncompressed-size"
 )
 
-func genLayerInfo(dgst digest.Digest, manifest ocispec.Manifest, config ocispec.Image) (Layer, error) {
+func genLayerInfo(ctx context.Context, dgst digest.Digest, manifest ocispec.Manifest, config ocispec.Image) (Layer, error) {
 	if len(manifest.Layers) != len(config.RootFS.DiffIDs) {
 		return Layer{}, fmt.Errorf(
 			"len(manifest.Layers) != len(config.Rootfs): %d != %d",
@@ -525,11 +535,21 @@ func genLayerInfo(dgst digest.Digest, manifest ocispec.Manifest, config ocispec.
 	if layerIndex == -1 {
 		return Layer{}, fmt.Errorf("layer %q not found in the manifest", dgst.String())
 	}
+	var uncompressedSize int64
+	var err error
+	if uncompressedSizeStr, ok := manifest.Layers[layerIndex].Annotations[StoreUncompressedSizeAnnotation]; ok {
+		uncompressedSize, err = strconv.ParseInt(uncompressedSizeStr, 10, 64)
+		if err != nil {
+			log.G(ctx).WithError(err).Warnf("layer %q has invalid uncompressed size; exposing incomplete layer info", dgst.String())
+		}
+	} else {
+		log.G(ctx).Warnf("layer %q doesn't have uncompressed size; exposing incomplete layer info", dgst.String())
+	}
 	return Layer{
 		CompressedDigest:   manifest.Layers[layerIndex].Digest,
 		CompressedSize:     manifest.Layers[layerIndex].Size,
 		UncompressedDigest: config.RootFS.DiffIDs[layerIndex],
-		UncompressedSize:   0, // TODO
+		UncompressedSize:   uncompressedSize,
 		CompressionType:    gzipTypeMagicNum,
 		ReadOnly:           true,
 	}, nil

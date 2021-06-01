@@ -23,6 +23,7 @@ ORG_IMAGE_TAG="${REGISTRY_HOST}/test/test:org$(date '+%M%S')"
 OPT_IMAGE_TAG="${REGISTRY_HOST}/test/test:opt$(date '+%M%S')"
 NOOPT_IMAGE_TAG="${REGISTRY_HOST}/test/test:noopt$(date '+%M%S')"
 TOC_JSON_DIGEST_ANNOTATION="containerd.io/snapshot/stargz/toc.digest"
+UNCOMPRESSED_SIZE_ANNOTATION="io.containers.estargz.uncompressed-size"
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
 ## Image for doing network-related tests
@@ -107,6 +108,23 @@ function validate_toc_json {
     return 0
 }
 
+function check_uncompressed_size {
+    local MANIFEST=${1}
+    local LAYER_NUM=${2}
+    local LAYER_TAR=${3}
+
+    SIZE_ANNOTATION="$(cat ${MANIFEST} | jq -r '.layers['"${LAYER_NUM}"'].annotations."'${UNCOMPRESSED_SIZE_ANNOTATION}'"')"
+    SIZE=$(cat "${LAYER_TAR}" | gunzip | wc -c)
+
+    if [ "${SIZE_ANNOTATION}" != "${SIZE}" ] ; then
+        echo "Invalid uncompressed size (layer:${LAYER_NUM}): want ${SIZE_ANNOTATION}; got: ${SIZE}"
+        return 1
+    fi
+
+    echo "Valid uncompressed size (layer:${LAYER_NUM}) ${SIZE_ANNOTATION} == ${SIZE}"
+    return 0
+}
+
 function check_optimization {
     local TARGET=${1}
 
@@ -141,6 +159,9 @@ function check_optimization {
         validate_toc_json "${LOCAL_WORKING_DIR}/dist-manifest.json" \
                           "${INDEX}" \
                           "${LOCAL_WORKING_DIR}/${L}"
+        check_uncompressed_size "${LOCAL_WORKING_DIR}/dist-manifest.json" \
+                                "${INDEX}" \
+                                "${LOCAL_WORKING_DIR}/${L}"
         ((INDEX+=1))
     done
 

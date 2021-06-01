@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
+	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
@@ -28,6 +30,7 @@ import (
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/labels"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/store"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -94,13 +97,36 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			return nil, err
 		}
 
-		n, err := io.Copy(w, blob)
+		// Copy and count the contents
+		pr, pw := io.Pipe()
+		c := new(counter)
+		doneCount := make(chan struct{})
+		go func() {
+			defer close(doneCount)
+			defer pr.Close()
+			decompressR, err := compression.DecompressStream(pr)
+			if err != nil {
+				pr.CloseWithError(err)
+				return
+			}
+			defer decompressR.Close()
+			if _, err := io.Copy(c, decompressR); err != nil {
+				pr.CloseWithError(err)
+				return
+			}
+		}()
+		n, err := io.Copy(w, io.TeeReader(blob, pw))
 		if err != nil {
 			return nil, err
 		}
 		if err := blob.Close(); err != nil {
 			return nil, err
 		}
+		if err := pw.Close(); err != nil {
+			return nil, err
+		}
+		<-doneCount
+
 		// update diffID label
 		labelz[labels.LabelUncompressed] = blob.DiffID().String()
 		if err = w.Commit(ctx, n, "", content.WithLabels(labelz)); err != nil && !errdefs.IsAlreadyExists(err) {
@@ -123,6 +149,26 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			newDesc.Annotations = make(map[string]string, 1)
 		}
 		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = blob.TOCDigest().String()
+		newDesc.Annotations[store.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", c.size())
 		return &newDesc, nil
 	}
+}
+
+type counter struct {
+	n  int64
+	mu sync.Mutex
+}
+
+func (c *counter) Write(p []byte) (n int, err error) {
+	c.mu.Lock()
+	c.n += int64(len(p))
+	c.mu.Unlock()
+	return len(p), nil
+}
+
+func (c *counter) size() (n int64) {
+	c.mu.Lock()
+	n = c.n
+	c.mu.Unlock()
+	return
 }
