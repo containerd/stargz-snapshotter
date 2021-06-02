@@ -96,3 +96,6 @@ test-cri-o:
 
 test-criauth:
 	@./script/criauth/test.sh
+
+test-k3s:
+	@./script/k3s/test.sh

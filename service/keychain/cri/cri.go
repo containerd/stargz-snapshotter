@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
-	criserver "github.com/containerd/containerd/pkg/cri/server"
 	"github.com/containerd/containerd/reference"
 	distribution "github.com/containerd/containerd/reference/docker"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
@@ -62,8 +61,7 @@ type instrumentedService struct {
 	configMu sync.Mutex
 }
 
-func (in *instrumentedService) credentials(refspec reference.Spec) (string, string, error) {
-	host := refspec.Hostname()
+func (in *instrumentedService) credentials(host string, refspec reference.Spec) (string, string, error) {
 	if host == "docker.io" || host == "registry-1.docker.io" {
 		// Creds of "docker.io" is stored keyed by "https://index.docker.io/v1/".
 		host = "index.docker.io"
@@ -71,7 +69,7 @@ func (in *instrumentedService) credentials(refspec reference.Spec) (string, stri
 	in.configMu.Lock()
 	defer in.configMu.Unlock()
 	if cfg, ok := in.config[refspec.String()]; ok {
-		return criserver.ParseAuth(cfg, host)
+		return resolver.ParseAuth(cfg, host)
 	}
 	return "", "", nil
 }

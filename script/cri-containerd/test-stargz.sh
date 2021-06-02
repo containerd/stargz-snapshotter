@@ -123,9 +123,8 @@ endpoint = ["http://${REGISTRY_HOST}:5000"]
 EOF
     if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
         cat <<EOF >> "${CONTAINERD_CONFIG}"
-[[plugins."io.containerd.snapshotter.v1.stargz".resolver.host."${DOMAIN}".mirrors]]
-host = "${REGISTRY_HOST}:5000"
-insecure = true
+[plugins."io.containerd.snapshotter.v1.stargz".registry.mirrors."${DOMAIN}"]
+endpoint = ["http://${REGISTRY_HOST}:5000"]
 EOF
     else
         cat <<EOF >> "${SNAPSHOTTER_CONFIG}"

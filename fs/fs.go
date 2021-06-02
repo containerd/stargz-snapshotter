@@ -39,6 +39,7 @@ package fs
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"sync"
 	"syscall"
@@ -62,7 +63,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-const defaultMaxConcurrency = 2
+const (
+	defaultMaxConcurrency = 2
+	fusermountBin         = "fusermount"
+)
 
 type Option func(*options)
 
@@ -284,12 +288,18 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		EntryTimeout:    &timeSec,
 		NullPermissions: true,
 	})
-	server, err := fuse.NewServer(rawFS, mountpoint, &fuse.MountOptions{
-		AllowOther: true,             // allow users other than root&mounter to access fs
-		FsName:     "stargz",         // name this filesystem as "stargz"
-		Options:    []string{"suid"}, // allow setuid inside container
+	mountOpts := &fuse.MountOptions{
+		AllowOther: true,     // allow users other than root&mounter to access fs
+		FsName:     "stargz", // name this filesystem as "stargz"
 		Debug:      fs.debug,
-	})
+	}
+	if _, err := exec.LookPath(fusermountBin); err == nil {
+		mountOpts.Options = []string{"suid"} // option for fusermount; allow setuid inside container
+	} else {
+		log.G(ctx).WithError(err).Debugf("%s not installed; trying direct mount", fusermountBin)
+		mountOpts.DirectMount = true
+	}
+	server, err := fuse.NewServer(rawFS, mountpoint, mountOpts)
 	if err != nil {
 		log.G(ctx).WithError(err).Debug("failed to make filesystem server")
 		return err
