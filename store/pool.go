@@ -507,16 +507,8 @@ type Layer struct {
 	ReadOnly           bool          `json:"-"`
 }
 
-const (
-	// Defined in https://github.com/containers/storage/blob/b64e13a1afdb0bfed25601090ce4bbbb1bc183fc/pkg/archive/archive.go#L108-L119
-	gzipTypeMagicNum = 2
-
-	// StoreUncompressedSizeAnnotation is an additional annotation key for eStargz to enable lazy
-	// pulling on containers/storage. Stargz Store is required to expose the layer's uncompressed size
-	// to the runtime but current OCI image doesn't ship this information by default. So we store this
-	// to the special annotation.
-	StoreUncompressedSizeAnnotation = "io.containers.estargz.uncompressed-size"
-)
+// Defined in https://github.com/containers/storage/blob/b64e13a1afdb0bfed25601090ce4bbbb1bc183fc/pkg/archive/archive.go#L108-L119
+const gzipTypeMagicNum = 2
 
 func genLayerInfo(ctx context.Context, dgst digest.Digest, manifest ocispec.Manifest, config ocispec.Image) (Layer, error) {
 	if len(manifest.Layers) != len(config.RootFS.DiffIDs) {
@@ -537,7 +529,7 @@ func genLayerInfo(ctx context.Context, dgst digest.Digest, manifest ocispec.Mani
 	}
 	var uncompressedSize int64
 	var err error
-	if uncompressedSizeStr, ok := manifest.Layers[layerIndex].Annotations[StoreUncompressedSizeAnnotation]; ok {
+	if uncompressedSizeStr, ok := manifest.Layers[layerIndex].Annotations[estargz.StoreUncompressedSizeAnnotation]; ok {
 		uncompressedSize, err = strconv.ParseInt(uncompressedSizeStr, 10, 64)
 		if err != nil {
 			log.G(ctx).WithError(err).Warnf("layer %q has invalid uncompressed size; exposing incomplete layer info", dgst.String())
