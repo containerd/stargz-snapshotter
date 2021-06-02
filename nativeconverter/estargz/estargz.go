@@ -30,7 +30,6 @@ import (
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/labels"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/store"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -149,7 +148,7 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			newDesc.Annotations = make(map[string]string, 1)
 		}
 		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = blob.TOCDigest().String()
-		newDesc.Annotations[store.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", c.size())
+		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", c.size())
 		return &newDesc, nil
 	}
 }
