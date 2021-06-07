@@ -11,7 +11,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.3.2
 	github.com/docker/cli v20.10.6+incompatible
 	github.com/docker/docker v20.10.6+incompatible // indirect
-	github.com/docker/docker-credential-helpers v0.6.3 // indirect
+	github.com/docker/docker-credential-helpers v0.6.4 // indirect
 	github.com/docker/go-metrics v0.0.1
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
 	github.com/hanwen/go-fuse/v2 v2.1.0
