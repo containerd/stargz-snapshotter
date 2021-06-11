@@ -143,7 +143,7 @@ jobs:
     steps:
     - uses: actions/setup-go@v2
       with:
-        go-version: '1.16.4'
+        go-version: '1.16.x'
     - name: Install k3d
       run: |
         wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v4.4.4/install.sh | bash
@@ -168,6 +168,9 @@ jobs:
     runs-on: ubuntu-20.04
     timeout-minutes: 5
     steps:
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '1.16.x'
       - uses: actions/checkout@v2
         with:
           path: src/github.com/containerd/stargz-snapshotter
