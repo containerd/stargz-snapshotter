@@ -189,7 +189,7 @@ The footer MUST be the following 51 bytes (1 byte = 8 bits in gzip).
 Runtimes MAY first read and parse the footer of the archive to get the offset of TOC.
 Each file's metadata is recorded in the TOC so runtimes don't need to extract other parts of the archive as long as it only uses file metadata.
 If runtime needs to get a regular file's content, it MAY get size and offset information of that content from the TOC and MAY extract that range without scanning the whole archive.
-By combining this with HTTP Range Request supported by [OCI Distribution Spec](https://github.com/opencontainers/distribution-spec/blob/master/spec.md#fetch-blob-part) and [Docker Registry API](https://docs.docker.com/registry/spec/api/#fetch-blob-part), runtimes can selectively download file entries from registries
+By combining this with HTTP Range Request supported by [OCI Distribution Spec](https://github.com/opencontainers/distribution-spec/blob/main/detail.md#fetch-blob-part) and [Docker Registry API](https://docs.docker.com/registry/spec/api/#fetch-blob-part), runtimes can selectively download file entries from registries
 
 ### Notes on compatibility with stargz
 
