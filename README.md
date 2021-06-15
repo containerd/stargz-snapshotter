@@ -140,28 +140,29 @@ Generally, container images are built with purpose and the *workloads* are defin
 By default, `ctr-remote` optimizes the performance of reading files that are most likely accessed in the workload defined in the Dockerfile.
 [You can also specify the custom workload using options if needed](/docs/ctr-remote.md).
 
-The following example converts the legacy `library/ubuntu:18.04` image into eStargz.
+The following example converts the legacy `library/ubuntu:20.04` image into eStargz.
 The command also optimizes the image for the workload of executing `ls` on `/bin/bash`.
 The thing actually done is it runs the specified workload in a temporary container and profiles all file accesses with marking them as *likely accessed* also during runtime.
 The converted image is still **docker-compatible** so you can run it with eStargz-agnostic runtimes (e.g. Docker).
 
 ```console
-# ctr-remote image pull docker.io/library/ubuntu:18.04
-# ctr-remote image optimize --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "ls" ]' docker.io/library/ubuntu:18.04 registry2:5000/ubuntu:18.04
-# ctr-remote image push --plain-http registry2:5000/ubuntu:18.04
+# ctr-remote image pull docker.io/library/ubuntu:20.04
+# ctr-remote image optimize --oci --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "ls" ]' docker.io/library/ubuntu:20.04 registry2:5000/ubuntu:20.04
+# ctr-remote image push --plain-http registry2:5000/ubuntu:20.04
 ```
 
 Finally, the following commands clear the local cache then pull the eStargz image lazily.
 Stargz snapshotter prefetches files that are most likely accessed in the optimized workload, which hopefully increases the cache hit rate for that workload and mitigates runtime overheads as shown in the benchmarking result shown top of this doc.
 
 ```console
-# ctr-remote image rm --sync registry2:5000/ubuntu:18.04
-# ctr-remote images rpull --plain-http registry2:5000/ubuntu:18.04
-fetching sha256:728332a6... application/vnd.docker.distribution.manifest.v2+json
-fetching sha256:80026893... application/vnd.docker.container.image.v1+json
-# ctr-remote run --rm -t --snapshotter=stargz registry2:5000/ubuntu:18.04 test /bin/bash
-root@8dab301bd68d:/# ls
-bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
+# ctr-remote image rm --sync registry2:5000/ubuntu:20.04
+# ctr-remote images rpull --plain-http registry2:5000/ubuntu:20.04
+fetching sha256:610399d1... application/vnd.oci.image.index.v1+json
+fetching sha256:0b4a26b4... application/vnd.oci.image.manifest.v1+json
+fetching sha256:8d8d9dbe... application/vnd.oci.image.config.v1+json
+# ctr-remote run --rm -t --snapshotter=stargz registry2:5000/ubuntu:20.04 test /bin/bash
+root@8eabb871a9bd:/# ls
+bin  boot  dev  etc  home  lib  lib32  lib64  libx32  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
 ```
 
 ## Importing Stargz Snapshotter as go module
