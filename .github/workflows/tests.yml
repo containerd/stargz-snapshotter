@@ -178,3 +178,6 @@ jobs:
       - uses: containerd/project-checks@v1
         with:
           working-directory: src/github.com/containerd/stargz-snapshotter
+      - name: Check proto generated code
+        run: make validate-generated
+        working-directory: src/github.com/containerd/stargz-snapshotter

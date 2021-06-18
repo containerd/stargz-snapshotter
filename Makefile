@@ -27,7 +27,7 @@ CMD=containerd-stargz-grpc ctr-remote stargz-store
 
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
 
-.PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-pullsecrets test-cri-containerd test-cri-o test-criauth
+.PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-pullsecrets test-cri-containerd test-cri-o test-criauth generate validate-generated
 
 all: build
 
@@ -64,6 +64,12 @@ uninstall:
 clean:
 	@echo "$@"
 	@rm -f $(CMD_BINARIES)
+
+generate:
+	@./script/generated-files/generate.sh update
+
+validate-generated:
+	@./script/generated-files/generate.sh validate
 
 test:
 	@echo "$@"
