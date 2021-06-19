@@ -6,9 +6,9 @@
 
 # Stargz Snapshotter
 
-[![Tests Status](https://github.com/containerd/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ATests+branch%3Amaster)
-[![Benchmarking](https://github.com/containerd/stargz-snapshotter/workflows/Benchmark/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ABenchmark+branch%3Amaster)
-[![Nightly](https://github.com/containerd/stargz-snapshotter/workflows/Nightly/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ANightly+branch%3Amaster)
+[![Tests Status](https://github.com/containerd/stargz-snapshotter/workflows/Tests/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ATests+branch%3Amain)
+[![Benchmarking](https://github.com/containerd/stargz-snapshotter/workflows/Benchmark/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ABenchmark+branch%3Amain)
+[![Nightly](https://github.com/containerd/stargz-snapshotter/workflows/Nightly/badge.svg)](https://github.com/containerd/stargz-snapshotter/actions?query=workflow%3ANightly+branch%3Amain)
 
 Read also introductory blog: [Startup Containers in Lightning Speed with Lazy Image Distribution on Containerd](https://medium.com/nttlabs/startup-containers-in-lightning-speed-with-lazy-image-distribution-on-containerd-243d94522361)
 
@@ -178,8 +178,8 @@ Please make sure you import the both of them and they point to *the same commit 
 
 Stargz Snapshotter is a containerd **non-core** sub-project, licensed under the [Apache 2.0 license](./LICENSE).
 As a containerd non-core sub-project, you will find the:
- * [Project governance](https://github.com/containerd/project/blob/master/GOVERNANCE.md),
+ * [Project governance](https://github.com/containerd/project/blob/main/GOVERNANCE.md),
  * [Maintainers](./MAINTAINERS),
- * and [Contributing guidelines](https://github.com/containerd/project/blob/master/CONTRIBUTING.md)
+ * and [Contributing guidelines](https://github.com/containerd/project/blob/main/CONTRIBUTING.md)
 
 information in our [`containerd/project`](https://github.com/containerd/project) repository.
