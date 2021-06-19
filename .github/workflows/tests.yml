@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -58,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -74,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -95,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -116,7 +116,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=master"] # released version & master version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
         exclude:
         - buildargs: ""
