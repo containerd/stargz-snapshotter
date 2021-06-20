@@ -3,6 +3,6 @@
 # As a containerd sub-project, containerd maintainers are also included from https://github.com/containerd/project/blob/main/MAINTAINERS.
 # See https://github.com/containerd/project/blob/main/GOVERNANCE.md for description of maintainer role
 #
-# MAINTAINERS
+# COMMITTERS
 # GitHub ID, Name, Email address
 ktock, Kohei Tokunaga, ktokunaga.mail@gmail.com
