@@ -78,6 +78,10 @@ var samplerFlags = []cli.Flag{
 		Name:  "env",
 		Usage: "environment valulable to add or override to the image's default config",
 	},
+	cli.StringFlag{
+		Name:  "env-file",
+		Usage: "specify additional container environment variables in a file(i.e. FOO=bar, one per line)",
+	},
 	cli.StringSliceFlag{
 		Name:  "mount",
 		Usage: "additional mounts for the container (e.g. type=foo,source=/path,destination=/target,options=bind)",
@@ -162,6 +166,9 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 			resolverOpt,
 			entrypointOpt,
 		)
+		if envFile := clicontext.String("env-file"); envFile != "" {
+			opts = append(opts, oci.WithEnvFile(envFile))
+		}
 		if username := clicontext.String("user"); username != "" {
 			opts = append(opts, oci.WithUser(username))
 		}
