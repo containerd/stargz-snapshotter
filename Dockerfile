@@ -23,6 +23,9 @@ ARG CONMON_VERSION=v2.0.26
 ARG COMMON_VERSION=v0.37.1
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=k8s.gcr.io/pause:3.5
 
+# Used in CI
+ARG CRI_TOOLS_VERSION=v1.21.0
+
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 

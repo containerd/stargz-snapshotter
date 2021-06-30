@@ -18,6 +18,12 @@ set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
+
+source "${REPO}/script/util/utils.sh"
+
+GOBASE_VERSION=$(go_base_version "${REPO}/Dockerfile")
+
+# TODO: get the following versions from go.mod once we add them.
 PROTOC_VERSION=3.17.3
 GOGO_VERSION=v1.3.2
 
@@ -38,7 +44,7 @@ function cleanup {
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
-FROM golang:1.16-buster AS golang-base
+FROM golang:${GOBASE_VERSION} AS golang-base
 
 ARG PROTOC_VERSION=${PROTOC_VERSION}
 ARG GOGO_VERSION=${GOGO_VERSION}

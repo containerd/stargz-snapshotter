@@ -1,0 +1,25 @@
+version: 2
+updates:
+
+  # Automatic upgrade for go modules.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    ignore:
+      # We upgrade this manually on each release
+      - dependency-name: "github.com/containerd/stargz-snapshotter/estargz"
+      # This forcefully points to v1.22.1. See go.mod.
+      - dependency-name: "github.com/urfave/cli"
+
+  # Automatic upgrade for base images used in the Dockerfile
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+
+  # Automatic upgrade for Github Actions
+  - package-ecosystem: "github-actions"
+    directory: "/" # means ".github/workflows"
+    schedule:
+      interval: "daily"

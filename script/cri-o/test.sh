@@ -18,9 +18,11 @@ set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
-CRI_TOOLS_VERSION=53ad8bb7f97e1b1d1c0c0634e43a3c2b8b07b718
 
 source "${CONTEXT}/const.sh"
+source "${REPO}/script/util/utils.sh"
+
+CRI_TOOLS_VERSION=v$(get_version_from_arg "${REPO}/Dockerfile" "CRI_TOOLS_VERSION")
 
 if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
