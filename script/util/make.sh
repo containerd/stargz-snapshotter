@@ -20,6 +20,10 @@ CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
 IMAGE_NAME="minienv"
 
+source "${REPO}/script/util/utils.sh"
+
+GOBASE_VERSION=$(go_base_version "${REPO}/Dockerfile")
+
 TMP_CONTEXT=$(mktemp -d)
 function cleanup {
     local ORG_EXIT_CODE="${1}"
@@ -29,7 +33,7 @@ function cleanup {
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
-FROM golang:1.16
+FROM golang:${GOBASE_VERSION}
 RUN apt-get update -y && apt-get --no-install-recommends install -y fuse
 EOF
 docker build -t "${IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"

@@ -41,7 +41,9 @@ replace (
 	// Import local package for estargz.
 	github.com/containerd/stargz-snapshotter/estargz => ./estargz
 
-	// NOTE: github.com/containerd/containerd v1.4.0 depends on github.com/urfave/cli v1.22.1
-	//       because of https://github.com/urfave/cli/issues/1092
+	// NOTE1: github.com/containerd/containerd v1.4.0 depends on github.com/urfave/cli v1.22.1
+	//        because of https://github.com/urfave/cli/issues/1092
+	// NOTE2: Automatic upgrade of this is disabled in denendabot.yml. When we remove this replace
+	//        directive, we must remove the corresponding "ignore" configuration from dependabot.yml
 	github.com/urfave/cli => github.com/urfave/cli v1.22.1
 )

@@ -24,9 +24,11 @@ DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 OPTIMIZE_BASE_IMAGE_NAME="optimize-image-base"
 OPTIMIZE_TEST_IMAGE_NAME="optimize-image-test"
-CNI_VERSION="v0.9.1"
 
 source "${REPO}/script/util/utils.sh"
+
+CNI_PLUGINS_VERSION=$(get_version_from_arg "${REPO}/Dockerfile" "CNI_PLUGINS_VERSION")
+NERDCTL_VERSION=$(get_version_from_arg "${REPO}/Dockerfile" "NERDCTL_VERSION")
 
 if [ "${OPTIMIZE_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
@@ -76,18 +78,15 @@ cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
-ARG BUILDKIT_VERSION=v0.8.1
-
 FROM ${OPTIMIZE_BASE_IMAGE_NAME}
 ARG TARGETARCH
-ARG BUILDKIT_VERSION
 
 RUN apt-get update -y && \
     apt-get --no-install-recommends install -y jq iptables && \
     GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane && \
     mkdir -p /opt/tmp/cni/bin /etc/tmp/cni/net.d && \
-    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-${CNI_VERSION}.tgz | tar xzv -C /opt/tmp/cni/bin && \
-    curl -Ls https://github.com/moby/buildkit/releases/download/\${BUILDKIT_VERSION}/buildkit-\${BUILDKIT_VERSION}.linux-\${TARGETARCH:-amd64}.tar.gz | tar xzv -C /usr/local
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/v${CNI_PLUGINS_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-v${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/tmp/cni/bin && \
+    curl -sSL https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-full-${NERDCTL_VERSION}-linux-\${TARGETARCH:-amd64}.tar.gz | tar -C /usr/local -zx bin/buildkitd bin/buildctl
 
 # Installs CNI-related files to irregular paths (/opt/tmp/cni/bin and /etc/tmp/cni/net.d) for test.
 # see entrypoint.sh for more details.

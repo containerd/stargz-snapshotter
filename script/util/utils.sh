@@ -52,3 +52,16 @@ function check_remote_snapshots {
         return 1
     fi
 }
+
+# Get version from ARG directive in the specified Dockerfile.
+function get_version_from_arg {
+    local DOCKERFILE="${1}"
+    local ARGNAME="${2}"
+    cat "${DOCKERFILE}" | grep "${ARGNAME}=" | head -1 | sed -E 's/ARG +'"${ARGNAME}"'=v?([^ ]+).*/\1/g' | tr -d '\n'
+}
+
+# Get version of golang base image from the specified Dockerfile.
+function go_base_version {
+    local DOCKERFILE="${1}"
+    cat "${DOCKERFILE}" | grep -E 'FROM\s+golang:' | head -1 | sed -E 's/FROM +[^:]*:([^ ]+).*/\1/g' | tr -d '\n'
+}

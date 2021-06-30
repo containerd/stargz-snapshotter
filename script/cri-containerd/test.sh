@@ -18,11 +18,13 @@ set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
-CRI_TOOLS_VERSION=53ad8bb7f97e1b1d1c0c0634e43a3c2b8b07b718
-CNI_VERSION="v0.9.1"
 SNAPSHOTTER_SOCK_PATH=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
 source "${CONTEXT}/const.sh"
+source "${REPO}/script/util/utils.sh"
+
+CNI_PLUGINS_VERSION=$(get_version_from_arg "${REPO}/Dockerfile" "CNI_PLUGINS_VERSION")
+CRI_TOOLS_VERSION=v$(get_version_from_arg "${REPO}/Dockerfile" "CRI_TOOLS_VERSION")
 
 if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
@@ -121,7 +123,7 @@ RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
     cd \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
     git checkout ${CRI_TOOLS_VERSION} && \
     make && make install -e BINDIR=\${GOPATH}/bin && \
-    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-${CNI_VERSION}.tgz | tar xzv -C /opt/cni/bin && \
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/v${CNI_PLUGINS_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-v${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin && \
     systemctl disable kubelet
 
 COPY ./test.conflist /etc/cni/net.d/test.conflist
