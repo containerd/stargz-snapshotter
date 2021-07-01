@@ -82,6 +82,10 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	if err != nil {
 		return nil, err
 	}
+
+	if r.blobConfig.ForceSingleRangeMode {
+		fetcher.singleRangeMode()
+	}
 	return &blob{
 		fetcher:       fetcher,
 		size:          size,
