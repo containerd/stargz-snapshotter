@@ -1,6 +1,6 @@
 # Containerd Stargz Snapshotter Plugin Overview
 
-__Before get through this overview document, we recommend you to read [README](README.md).__
+__Before get through this overview document, we recommend you to read [README](../README.md).__
 
 Pulling image is one of the time-consuming steps in the container startup process.
 In containerd community, we have had a lot of discussions to address this issue as the following,
