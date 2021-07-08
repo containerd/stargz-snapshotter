@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -77,6 +78,11 @@ var OptimizeCommand = cli.Command{
 			Name:  "oci",
 			Usage: "convert Docker media types to OCI media types",
 		},
+		cli.IntFlag{
+			Name:  "estargz-compression-level",
+			Usage: "eStargz compression level",
+			Value: gzip.BestCompression,
+		},
 	}, samplerFlags...),
 	Action: func(clicontext *cli.Context) error {
 		convertOpts := []converter.Opt{}
@@ -133,7 +139,10 @@ var OptimizeCommand = cli.Command{
 		if wrapper != nil {
 			f = wrapper(f)
 		}
-		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(logWrapper(f)))
+
+		esgzOpts := []estargz.Option{estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level"))}
+
+		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(logWrapper(f)), converter.WithLayerConvertFunc(estargzconvert.LayerConvertFunc(esgzOpts...)))
 
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
