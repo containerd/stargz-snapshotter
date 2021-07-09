@@ -72,6 +72,9 @@ type snapshotterConfig struct {
 
 	// MetricsAddress is address for the metrics API
 	MetricsAddress string `toml:"metrics_address"`
+
+	// NoPrometheus is a flag to disable the emission of the metrics
+	NoPrometheus bool `toml:"no_prometheus"`
 }
 
 func main() {
@@ -189,7 +192,8 @@ func serve(ctx context.Context, rpc *grpc.Server, addr string, rs snapshots.Snap
 
 	errCh := make(chan error, 1)
 
-	if config.MetricsAddress != "" {
+	// We need to consider both the existence of MetricsAddress as well as NoPrometheus flag not set
+	if config.MetricsAddress != "" && !config.NoPrometheus {
 		l, err := net.Listen("tcp", config.MetricsAddress)
 		if err != nil {
 			return false, errors.Wrapf(err, "failed to get listener for metrics endpoint")

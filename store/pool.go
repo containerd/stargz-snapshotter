@@ -36,7 +36,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
-	fsmetrics "github.com/containerd/stargz-snapshotter/fs/metrics"
+	layermetrics "github.com/containerd/stargz-snapshotter/fs/metrics/layer"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
@@ -80,7 +80,7 @@ func NewPool(root string, hosts source.RegistryHosts, cfg config.Config) (*Pool,
 	if !cfg.NoPrometheus {
 		ns = metrics.NewNamespace("stargz", "fs", nil)
 	}
-	c := fsmetrics.NewLayerMetrics(ns)
+	c := layermetrics.NewLayerMetrics(ns)
 	if ns != nil {
 		metrics.Register(ns)
 	}
@@ -118,7 +118,7 @@ type Pool struct {
 	backgroundTaskManager *task.BackgroundTaskManager
 	allowNoVerification   bool
 	disableVerification   bool
-	metricsController     *fsmetrics.Controller
+	metricsController     *layermetrics.Controller
 	resolveLock           *namedmutex.NamedMutex
 }
 
