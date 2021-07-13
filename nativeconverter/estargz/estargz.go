@@ -38,14 +38,14 @@ import (
 // Media type is unchanged. Should be used in conjunction with WithDockerToOCI(). See
 // LayerConvertFunc for more details. The difference between this function and
 // LayerConvertFunc is that this allows to specify additional eStargz options per layer.
-func LayerConvertWithLayerOptsFunc(opts map[digest.Digest][]estargz.Option) converter.ConvertFunc {
+func LayerConvertWithLayerAndCommonOptsFunc(opts map[digest.Digest][]estargz.Option, commonOpts ...estargz.Option) converter.ConvertFunc {
 	if opts == nil {
-		return LayerConvertFunc()
+		return LayerConvertFunc(commonOpts...)
 	}
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
 		// TODO: enable to speciy option per layer "index" because it's possible that there are
 		//       two layers having same digest in an image (but this should be rare case)
-		return LayerConvertFunc(opts[desc.Digest]...)(ctx, cs, desc)
+		return LayerConvertFunc(append(commonOpts, opts[desc.Digest]...)...)(ctx, cs, desc)
 	}
 }
 
