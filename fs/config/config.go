@@ -66,4 +66,5 @@ type DirectoryCacheConfig struct {
 	MaxLRUCacheEntry int  `toml:"max_lru_cache_entry"`
 	MaxCacheFds      int  `toml:"max_cache_fds"`
 	SyncAdd          bool `toml:"sync_add"`
+	Direct           bool `toml:"direct"`
 }
