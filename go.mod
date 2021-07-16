@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/containerd/console v1.0.2
-	github.com/containerd/containerd v1.5.2
+	github.com/containerd/containerd v1.5.3
 	github.com/containerd/continuity v0.1.0
 	github.com/containerd/go-cni v1.0.2
 	github.com/containerd/stargz-snapshotter/estargz v0.6.4
