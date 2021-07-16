@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/containerd/console v1.0.2
-	github.com/containerd/containerd v1.5.2
+	github.com/containerd/containerd v1.5.3
 	github.com/containerd/continuity v0.1.0
 	github.com/containerd/go-cni v1.0.2
 	github.com/containerd/stargz-snapshotter/estargz v0.6.4
@@ -31,10 +31,10 @@ require (
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
 	golang.org/x/sys v0.0.0-20210603081109-ebe580a85c40
 	google.golang.org/grpc v1.35.0
-	k8s.io/api v0.20.6
-	k8s.io/apimachinery v0.20.6
-	k8s.io/client-go v0.20.6
-	k8s.io/cri-api v0.20.6
+	k8s.io/api v0.21.2
+	k8s.io/apimachinery v0.21.2
+	k8s.io/client-go v0.21.2
+	k8s.io/cri-api v0.21.2
 )
 
 replace (
