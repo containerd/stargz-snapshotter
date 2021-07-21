@@ -25,11 +25,13 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/contrib/nvidia"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/oci"
 	"github.com/containerd/containerd/pkg/netns"
@@ -39,6 +41,7 @@ import (
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/rs/xid"
+	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 )
 
@@ -114,6 +117,14 @@ var samplerFlags = []cli.Flag{
 	cli.StringFlag{
 		Name:  "cni-plugin-dir",
 		Usage: "path to the CNI plugins binary directory",
+	},
+	cli.IntSliceFlag{
+		Name:  "gpus",
+		Usage: "add gpus to the container",
+	},
+	cli.BoolFlag{
+		Name:  "net-host",
+		Usage: "enable host networking in the container",
 	},
 }
 
@@ -191,6 +202,20 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 			}
 			cleanups = append(cleanups, cleanup)
 			opts = append(opts, nOpt)
+		}
+		if clicontext.Bool("net-host") {
+			if runtime.GOOS == "windows" {
+				logrus.Warn("option --net-host is not supported on Windows")
+			} else {
+				opts = append(opts, oci.WithHostNamespace(runtimespec.NetworkNamespace), oci.WithHostHostsFile, oci.WithHostResolvconf)
+			}
+		}
+		if clicontext.IsSet("gpus") {
+			if runtime.GOOS == "windows" {
+				logrus.Warn("option --gpus is not supported on Windows")
+			} else {
+				opts = append(opts, nvidia.WithGPUs(nvidia.WithDevices(clicontext.IntSlice("gpus")...), nvidia.WithAllCapabilities))
+			}
 		}
 
 		return

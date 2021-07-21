@@ -66,6 +66,18 @@ The following example optimizes an image with a compression level of 1.
 # ctr-remote image optimize --oci --estargz-compression-level 1 ghcr.io/stargz-containers/golang:1.15.3-buster-org registry2:5000/golang:1.15.3-esgz
 ```
 
+You can enable host networking for the container using the `net-host` flag.
+
+```console
+# ctr-remote i optimize -t -i --oci --entrypoint='[ "/bin/bash", "-c" ]' --net-host --args='[ "ip a && curl example.com" ]' ghcr.io/stargz-containers/centos:8-test registry2:5000/centos:8-test-esgz
+```
+
+You can optimize GPU-based images using the `gpu` flag. The flag expects a comma separated list of integers.
+
+```console
+# ctr-remote i optimize --oci --gpus "0" <src> <target>
+```
+
 `--oci` option is highly recommended to add when you create eStargz image.
 If the source image is [Docker image](https://github.com/moby/moby/blob/master/image/spec/v1.2.md) that doesn't allow us [content verification of eStargz](/docs/verification.md), `ctr-remote` converts this image into the [OCI starndard compliant image](https://github.com/opencontainers/image-spec/).
 OCI image also can run on most of modern container runtimes.
