@@ -1,16 +1,15 @@
 # Trying pre-converted images
 
-We have several pre-converted stargz images on Github Container Registry, mainly for benchmarking purpose. This doc lists these images in a table format. You can try them on your machine with our snapshotter. Please refer to README for the procedure.
+We have several pre-converted stargz images on Github Container Registry (`ghcr.io/stargz-containers`), mainly for benchmarking purpose.
+This document lists them.
 
-Please do not use them in production. You always can build your eStargz images optimized for your workload, using [`ctr-remote` command](/docs/ctr-remote.md).
+:information_source: You can build your eStargz images optimized for your workload, using [`ctr-remote` command](/docs/ctr-remote.md).
+
+:information_source: You can convert arbitrary images into eStargz on the registry-side, using [`estargz.kontain.me`](https://estargz.kontain.me).
 
 ## Pre-converted images
 
-This section contains a table of pre-converted images which can be used for benchmarking, testing, etc.
-
-We have pre-converted images on GitHub Container Registry. Images are stored under the repository `ghcr.io/stargz-containers`.
-
-Additionally, image names listed in `Image Name` contain the following suffixes based on the type of the image.
+In the following table, image names listed in `Image Name` contain the following suffixes based on the type of the image.
 
 - `org`: Legacy image copied from `docker.io/library` without optimization. Layers are normal tarballs.
 - `esgz`: eStargz-formatted version of the `org` images. `ctr-remote images optimize` command is used for the optimization.
