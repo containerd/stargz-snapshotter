@@ -68,13 +68,13 @@ version = 2
 
 **Note that `disable_snapshot_annotations = false` is required since containerd > v1.4.2**
 
-This repo contains [a Dockerfile as a KinD node image](/Dockerfile) which includes the above configuration.
-You can use it with [KinD](https://github.com/kubernetes-sigs/kind) like the following,
+You can try our [prebuilt](/Dockerfile) [KinD](https://github.com/kubernetes-sigs/kind) node image that contains the above configuration.
 
 ```console
-$ docker build -t stargz-kind-node https://github.com/containerd/stargz-snapshotter.git
-$ kind create cluster --name stargz-demo --image stargz-kind-node
+$ kind create cluster --name stargz-demo --image ghcr.io/stargz-containers/estargz-kind-node:0.7.0
 ```
+
+> kind binary v0.11.x or newer is recommended for `estargz-kind-node:0.7.0`.
 
 Then you can create eStargz pods on the cluster.
 In this example, we create a stargz-converted Node.js pod (`ghcr.io/stargz-containers/node:13.13.0-esgz`) as a demo.
