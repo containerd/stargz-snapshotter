@@ -57,3 +57,21 @@ Additionally, image names listed in `Image Name` contain the following suffixes 
 |`ghcr.io/stargz-containers/wordpress:5.7-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
 |`ghcr.io/stargz-containers/mariadb:10.5-org`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
 |`ghcr.io/stargz-containers/mariadb:10.5-esgz`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
+
+## lazy-pulling-enabled KinD node image
+
+You can enable lazy pulling of eStargz on [KinD](https://github.com/kubernetes-sigs/kind) using our [prebuilt node image](https://github.com/orgs/stargz-containers/packages/container/package/estargz-kind-node).
+
+```console
+$ kind create cluster --name stargz-demo --image ghcr.io/stargz-containers/estargz-kind-node:0.7.0
+```
+
+> kind binary v0.11.x or newer is recommended for `estargz-kind-node:0.7.0`.
+
+You can also build it on your own.
+
+```
+$ docker build -t estargz-kind-node https://github.com/containerd/stargz-snapshotter.git
+```
+
+Please refer to README for more details.
