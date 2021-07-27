@@ -111,16 +111,44 @@ Hello World!
 
 Stargz snapshotter also supports [further configuration](/docs/overview.md) including private registry authentication, mirror registries, etc.
 
-## Creating eStargz images with optimization
+## Getting eStargz images
 
 - For more examples and details about the image converter `ctr-remote`, refer to [Optimize Images with `ctr-remote image optimize`](/docs/ctr-remote.md).
 - For more details about eStargz format, refer to [eStargz: Standard-Compatible Extensions to Tar.gz Layers for Lazy Pulling Container Images](/docs/stargz-estargz.md)
 
 For lazy pulling images, you need to prepare eStargz images first.
-You can use [`ctr-remote`](/docs/ctr-remote.md) command for do this.
-You can also try our pre-converted images listed in [Trying pre-converted images](/docs/pre-converted-images.md).
+There are several ways to achieve that.
+This section describes some of them.
 
-In this section, we introduce `ctr-remote` command for converting images into eStargz with optimization for reading files.
+### Trying pre-built eStargz images
+
+You can try our pre-converted eStargz images on ghcr.io listed in [Trying pre-converted images](/docs/pre-converted-images.md).
+
+### Registry-side conversion with `estargz.kontain.me`
+
+You can convert arbitrary images into eStargz on the registry-side, using [`estargz.kontain.me`](https://estargz.kontain.me).
+`estargz.kontain.me/[image]` serves eStargz-converted version of an arbitrary public image.
+
+For example, the following Kubernetes manifest performs lazy pulling of eStargz-formatted version of `docker.io/library/nginx:1.21.1` that is converted by `estargz.kontain.me`.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: estargz.kontain.me/docker.io/library/nginx:1.21.1
+    ports:
+    - containerPort: 80
+```
+
+> WARNING: Before trying this method, read [caveats from kontain.me](https://github.com/imjasonh/kontain.me#caveats). If you rely on it in production, you should copy the image to your own registry or build eStargz by your own using `ctr-remote` as described in the following.
+
+### Creating eStargz using `ctr-remote`
+
+In this section, we introduce [`ctr-remote`](/docs/ctr-remote.md) command for converting images into eStargz with optimization for reading files.
 As shown in the above benchmarking result, on-demand lazy pulling improves the performance of pull but causes runtime performance penalty because reading files induce remotely downloading contents.
 For solving this, `ctr-remote` has *workload-based* optimization for images.
 
@@ -164,6 +192,8 @@ fetching sha256:8d8d9dbe... application/vnd.oci.image.config.v1+json
 root@8eabb871a9bd:/# ls
 bin  boot  dev  etc  home  lib  lib32  lib64  libx32  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
 ```
+
+> NOTE: You can perform lazy pulling from any OCI-compatible registries (e.g. docker.io, ghcr.io, etc) as long as the image is formatted as eStargz.
 
 ## Importing Stargz Snapshotter as go module
 
