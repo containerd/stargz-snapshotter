@@ -8,7 +8,7 @@ Type=notify
 Environment=HOME=/root
 ExecStart=/usr/local/bin/containerd-stargz-grpc --log-level=debug --config=/etc/containerd-stargz-grpc/config.toml
 Restart=always
-RestartSec=1
+RestartSec=1s
 
 [Install]
 WantedBy=multi-user.target
