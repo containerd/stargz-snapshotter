@@ -46,12 +46,21 @@ ARG CONTAINERD_VERSION
 COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
 RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     git clone -b ${CONTAINERD_VERSION} --depth 1 \
-              https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
-    echo 'require github.com/containerd/stargz-snapshotter v0.0.0\nreplace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter\nreplace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' \
-      >> $GOPATH/src/github.com/containerd/containerd/go.mod && \
-    echo 'package main \nimport _ "github.com/containerd/stargz-snapshotter/service/plugin"' \
-      > $GOPATH/src/github.com/containerd/containerd/cmd/containerd/builtins_stargz_snapshotter.go && \
+      https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
+    echo 'require github.com/containerd/stargz-snapshotter v0.0.0' >> go.mod && \
+    echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> go.mod && \
+    echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> go.mod && \
+    # recent containerd requires to update api/go.mod and integration/client/go.mod as well.
+    if [ -f api/go.mod ] ; then \
+      echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> api/go.mod && \
+      echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> api/go.mod ; \
+    fi && \
+    if [ -f integration/client/go.mod ] ; then \
+      echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> integration/client/go.mod && \
+      echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> integration/client/go.mod ; \
+    fi && \
+    echo 'package main \nimport _ "github.com/containerd/stargz-snapshotter/service/plugin"' > cmd/containerd/builtins_stargz_snapshotter.go && \
     make vendor && make && DESTDIR=/out/ PREFIX= make install
 
 # Build runc
