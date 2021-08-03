@@ -167,18 +167,18 @@ func (b *blob) Cache(offset int64, size int64, opts ...Option) error {
 
 	fetchReg := region{floor(offset, b.chunkSize), ceil(offset+size-1, b.chunkSize) - 1}
 	discard := make(map[region]io.Writer)
-	b.walkChunks(fetchReg, func(reg region) error {
+	err := b.walkChunks(fetchReg, func(reg region) error {
 		if r, err := b.cache.Get(fr.genID(reg), cacheOpts.cacheOpts...); err == nil {
 			return r.Close() // nop if the cache hits
 		}
 		discard[reg] = ioutil.Discard
 		return nil
 	})
-	if err := b.fetchRange(discard, &cacheOpts); err != nil {
+	if err != nil {
 		return err
 	}
 
-	return nil
+	return b.fetchRange(discard, &cacheOpts)
 }
 
 // ReadAt reads remote chunks from specified offset for the buffer size.
