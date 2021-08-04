@@ -21,8 +21,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -35,6 +37,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -55,7 +58,13 @@ const (
 
 func Mount(ctx context.Context, mountpoint string, layerManager *LayerManager, debug bool) error {
 	timeSec := time.Second
-	rawFS := fusefs.NewNodeFS(&rootnode{layerManager: layerManager}, &fusefs.Options{
+	rawFS := fusefs.NewNodeFS(&rootnode{
+		fs: &fs{
+			layerManager: layerManager,
+			nodeMap:      new(idMap),
+			layerMap:     new(idMap),
+		},
+	}, &fusefs.Options{
 		AttrTimeout:     &timeSec,
 		EntryTimeout:    &timeSec,
 		NullPermissions: true,
@@ -79,10 +88,78 @@ func Mount(ctx context.Context, mountpoint string, layerManager *LayerManager, d
 	return server.WaitMount()
 }
 
-// rootnode is the mountpoint node of stargz-store.w
+type fs struct {
+	layerManager *LayerManager
+
+	// nodeMap manages inode numbers for nodes other than nodes in layers
+	// (i.e. nodes other than ones inside `diff` directories).
+	// - inode number = [ 0 ][ uint32 ID ]
+	nodeMap *idMap
+	// layerMap manages upper bits of inode numbers for nodes inside layers.
+	// - inode number = [ uint32 layer ID ][ uint32 number (unique inside `diff` directory) ]
+	// inodes numbers of noeds inside each `diff` directory are prefixed by an unique uint32
+	// so that they don't conflict with nodes outside `diff` directories.
+	layerMap *idMap
+
+	knownNode   map[string]map[string]*layerReleasable
+	knownNodeMu sync.Mutex
+}
+
+type layerReleasable struct {
+	n        fusefs.InodeEmbedder
+	released bool
+	mu       sync.Mutex
+}
+
+func (lh *layerReleasable) releasable() bool {
+	lh.mu.Lock()
+	released := lh.released
+	lh.mu.Unlock()
+	return released && isForgotten(lh.n.EmbeddedInode())
+}
+
+func (lh *layerReleasable) release() {
+	lh.mu.Lock()
+	lh.released = true
+	lh.mu.Unlock()
+}
+
+func isForgotten(n *fusefs.Inode) bool {
+	if !n.Forgotten() {
+		return false
+	}
+	for _, cn := range n.Children() {
+		if !isForgotten(cn) {
+			return false
+		}
+	}
+	return true
+}
+
+type inoReleasable struct {
+	n fusefs.InodeEmbedder
+}
+
+func (r *inoReleasable) releasable() bool {
+	return r.n.EmbeddedInode().Forgotten()
+}
+
+func (fs *fs) newInodeWithID(ctx context.Context, p func(uint32) fusefs.InodeEmbedder) (*fusefs.Inode, syscall.Errno) {
+	var ino fusefs.InodeEmbedder
+	if err := fs.nodeMap.add(func(id uint32) (releasable, error) {
+		ino = p(id)
+		return &inoReleasable{ino}, nil
+	}); err != nil || ino == nil {
+		log.G(ctx).WithError(err).Debug("cannot generate ID")
+		return nil, syscall.EIO
+	}
+	return ino.EmbeddedInode(), 0
+}
+
+// rootnode is the mountpoint node of stargz-store.
 type rootnode struct {
 	fusefs.Inode
-	layerManager *LayerManager
+	fs *fs
 }
 
 var _ = (fusefs.InodeEmbedder)((*rootnode)(nil))
@@ -92,12 +169,31 @@ var _ = (fusefs.NodeLookuper)((*rootnode)(nil))
 // Lookup loads manifest and config of specified name (imgae reference)
 // and returns refnode of the specified name
 func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
+	// lookup on memory nodes
+	if cn := n.GetChild(name); cn != nil {
+		switch tn := cn.Operations().(type) {
+		case *fusefs.MemSymlink:
+			copyAttr(&out.Attr, &tn.Attr)
+		case *refnode:
+			copyAttr(&out.Attr, &tn.attr)
+		default:
+			log.G(ctx).Warn("rootnode.Lookup: uknown node type detected")
+			return nil, syscall.EIO
+		}
+		out.Attr.Ino = cn.StableAttr().Ino
+		return cn, 0
+	}
 	switch name {
 	case poolLink:
 		sAttr := defaultLinkAttr(&out.Attr)
-		var attr2 fuse.Attr
-		copyAttr(&attr2, &out.Attr)
-		return n.NewInode(ctx, &fusefs.MemSymlink{Attr: attr2, Data: []byte(n.layerManager.refPool.root())}, sAttr), 0
+		cn := &fusefs.MemSymlink{Data: []byte(n.fs.layerManager.refPool.root())}
+		copyAttr(&cn.Attr, &out.Attr)
+		return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
+			out.Attr.Ino = uint64(ino)
+			cn.Attr.Ino = uint64(ino)
+			sAttr.Ino = uint64(ino)
+			return n.NewInode(ctx, cn, sAttr)
+		})
 	}
 	refBytes, err := base64.StdEncoding.DecodeString(name)
 	if err != nil {
@@ -110,16 +206,25 @@ func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 		log.G(ctx).WithError(err).Warnf("invalid reference %q for %q", ref, name)
 		return nil, syscall.EINVAL
 	}
-	return n.NewInode(ctx, &refnode{
-		layerManager: n.layerManager,
-		ref:          refspec,
-	}, defaultDirAttr(&out.Attr)), 0
+	sAttr := defaultDirAttr(&out.Attr)
+	cn := &refnode{
+		fs:  n.fs,
+		ref: refspec,
+	}
+	copyAttr(&cn.attr, &out.Attr)
+	return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
+		out.Attr.Ino = uint64(ino)
+		cn.attr.Ino = uint64(ino)
+		sAttr.Ino = uint64(ino)
+		return n.NewInode(ctx, cn, sAttr)
+	})
 }
 
 // refnode is the node at <mountpoint>/<imageref>.
 type refnode struct {
 	fusefs.Inode
-	layerManager *LayerManager
+	fs   *fs
+	attr fuse.Attr
 
 	ref reference.Spec
 }
@@ -130,16 +235,36 @@ var _ = (fusefs.NodeLookuper)((*refnode)(nil))
 
 // Lookup returns layernode of the specified name
 func (n *refnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
+	// lookup on memory nodes
+	if cn := n.GetChild(name); cn != nil {
+		switch tn := cn.Operations().(type) {
+		case *layernode:
+			copyAttr(&out.Attr, &tn.attr)
+		default:
+			log.G(ctx).Warn("rootnode.Lookup: uknown node type detected")
+			return nil, syscall.EIO
+		}
+		out.Attr.Ino = cn.StableAttr().Ino
+		return cn, 0
+	}
 	targetDigest, err := digest.Parse(name)
 	if err != nil {
 		log.G(ctx).WithError(err).Warnf("invalid digest for %q", name)
 		return nil, syscall.EINVAL
 	}
-	return n.NewInode(ctx, &layernode{
-		layerManager: n.layerManager,
-		digest:       targetDigest,
-		refnode:      n,
-	}, defaultDirAttr(&out.Attr)), 0
+	sAttr := defaultDirAttr(&out.Attr)
+	cn := &layernode{
+		fs:      n.fs,
+		digest:  targetDigest,
+		refnode: n,
+	}
+	copyAttr(&cn.attr, &out.Attr)
+	return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
+		out.Attr.Ino = uint64(ino)
+		cn.attr.Ino = uint64(ino)
+		sAttr.Ino = uint64(ino)
+		return n.NewInode(ctx, cn, sAttr)
+	})
 }
 
 var _ = (fusefs.NodeRmdirer)((*refnode)(nil))
@@ -153,16 +278,25 @@ func (n *refnode) Rmdir(ctx context.Context, name string) syscall.Errno {
 		log.G(ctx).WithError(err).Warnf("invalid digest for %q during release", name)
 		return syscall.EINVAL
 	}
-	current, err := n.layerManager.release(ctx, n.ref, targetDigest)
+	current, err := n.fs.layerManager.release(ctx, n.ref, targetDigest)
 	if err != nil {
 		log.G(ctx).WithError(err).Warnf("failed to release layer %v / %v", n.ref, targetDigest)
 		return syscall.EIO
-
 	}
 	if current == 0 {
-		if cn := n.GetChild(name); cn != nil {
-			cn.RmAllChildren() // release all children of the layer.
+		n.fs.knownNodeMu.Lock()
+		lh, ok := n.fs.knownNode[n.ref.String()][targetDigest.String()]
+		if !ok {
+			n.fs.knownNodeMu.Unlock()
+			log.G(ctx).WithError(err).Warnf("node of layer %v/%v is not registered", n.ref, targetDigest)
+			return syscall.EIO
 		}
+		lh.release()
+		delete(n.fs.knownNode[n.ref.String()], targetDigest.String())
+		if len(n.fs.knownNode[n.ref.String()]) == 0 {
+			delete(n.fs.knownNode, n.ref.String())
+		}
+		n.fs.knownNodeMu.Unlock()
 	}
 	log.G(ctx).WithField("refcounter", current).Infof("layer %v/%v is marked as RELEASE", n.ref, targetDigest)
 	return syscall.ENOENT
@@ -171,7 +305,8 @@ func (n *refnode) Rmdir(ctx context.Context, name string) syscall.Errno {
 // layernode is the node at <mountpoint>/<imageref>/<layerdigest>.
 type layernode struct {
 	fusefs.Inode
-	layerManager *LayerManager
+	attr fuse.Attr
+	fs   *fs
 
 	refnode *refnode
 	digest  digest.Digest
@@ -185,7 +320,7 @@ var _ = (fusefs.NodeCreater)((*layernode)(nil))
 // We don't use refnode.Mkdir because Mkdir event doesn't reach here if layernode already exists.
 func (n *layernode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (node *fusefs.Inode, fh fusefs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	if name == layerUseFile {
-		current := n.layerManager.use(n.refnode.ref, n.digest)
+		current := n.fs.layerManager.use(n.refnode.ref, n.digest)
 		log.G(ctx).WithField("refcounter", current).Infof("layer %v / %v is marked as USING", n.refnode.ref, n.digest)
 	}
 	return nil, nil, 0, syscall.ENOENT
@@ -197,7 +332,7 @@ var _ = (fusefs.NodeLookuper)((*layernode)(nil))
 func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
 	switch name {
 	case layerInfoLink:
-		info, err := n.layerManager.getLayerInfo(ctx, n.refnode.ref, n.digest)
+		info, err := n.fs.layerManager.getLayerInfo(ctx, n.refnode.ref, n.digest)
 		if err != nil {
 			log.G(ctx).WithError(err).Warnf("failed to get layer info for %q: %q", name, n.digest)
 			return nil, syscall.EIO
@@ -209,11 +344,36 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 		}
 		infoData := buf.Bytes()
 		sAttr := defaultFileAttr(uint64(len(infoData)), &out.Attr)
-		var attr2 fuse.Attr
-		copyAttr(&attr2, &out.Attr)
-		return n.NewInode(ctx, &fusefs.MemRegularFile{Data: infoData, Attr: attr2}, sAttr), 0
+		cn := &fusefs.MemRegularFile{Data: infoData}
+		copyAttr(&cn.Attr, &out.Attr)
+		return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
+			out.Attr.Ino = uint64(ino)
+			cn.Attr.Ino = uint64(ino)
+			sAttr.Ino = uint64(ino)
+			return n.NewInode(ctx, cn, sAttr)
+		})
 	case layerLink, blobLink:
-		l, err := n.layerManager.getLayer(ctx, n.refnode.ref, n.digest)
+
+		// Check if layer is already known
+		if name == layerLink {
+			n.fs.knownNodeMu.Lock()
+			if lh, ok := n.fs.knownNode[n.refnode.ref.String()][n.digest.String()]; ok {
+				var ao fuse.AttrOut
+				if errno := lh.n.(fusefs.NodeGetattrer).Getattr(ctx, nil, &ao); errno != 0 {
+					return nil, errno
+				}
+				copyAttr(&out.Attr, &ao.Attr)
+				n.fs.knownNodeMu.Unlock()
+				return n.NewInode(ctx, lh.n, fusefs.StableAttr{
+					Mode: out.Attr.Mode,
+					Ino:  out.Attr.Ino,
+				}), 0
+			}
+			n.fs.knownNodeMu.Unlock()
+		}
+
+		// Resolve layer
+		l, err := n.fs.layerManager.getLayer(ctx, n.refnode.ref, n.digest)
 		if err != nil {
 			cErr := ctx.Err()
 			if errors.Is(cErr, context.Canceled) || errors.Is(err, context.Canceled) {
@@ -231,29 +391,61 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 			return nil, syscall.EIO
 		}
 		if name == blobLink {
-			return n.NewInode(ctx, &blobnode{l: l}, layerToAttr(l, &out.Attr)), 0
+			sAttr := layerToAttr(l, &out.Attr)
+			cn := &blobnode{l: l}
+			copyAttr(&cn.attr, &out.Attr)
+			return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
+				out.Attr.Ino = uint64(ino)
+				cn.attr.Ino = uint64(ino)
+				sAttr.Ino = uint64(ino)
+				return n.NewInode(ctx, cn, sAttr)
+			})
 		}
-		root, err := l.RootNode()
-		if err != nil {
+
+		var cn *fusefs.Inode
+		var errno syscall.Errno
+		err = n.fs.layerMap.add(func(id uint32) (releasable, error) {
+			root, err := l.RootNode(id)
+			if err != nil {
+				return nil, err
+			}
+
+			var ao fuse.AttrOut
+			errno = root.(fusefs.NodeGetattrer).Getattr(ctx, nil, &ao)
+			if errno != 0 {
+				return nil, fmt.Errorf("failed to get root node: %v", errno)
+			}
+
+			copyAttr(&out.Attr, &ao.Attr)
+			cn = n.NewInode(ctx, root, fusefs.StableAttr{
+				Mode: out.Attr.Mode,
+				Ino:  out.Attr.Ino,
+			})
+
+			rr := &layerReleasable{n: root}
+			n.fs.knownNodeMu.Lock()
+			if n.fs.knownNode == nil {
+				n.fs.knownNode = make(map[string]map[string]*layerReleasable)
+			}
+			if n.fs.knownNode[n.refnode.ref.String()] == nil {
+				n.fs.knownNode[n.refnode.ref.String()] = make(map[string]*layerReleasable)
+			}
+			n.fs.knownNode[n.refnode.ref.String()][n.digest.String()] = rr
+			n.fs.knownNodeMu.Unlock()
+			return rr, nil
+		})
+		if err != nil || errno != 0 {
 			log.G(ctx).WithField(remoteSnapshotLogKey, prepareFailed).
 				WithField("layerdigest", n.digest).
 				WithError(err).
+				WithField("errno", errno).
 				Debugf("failed to get root node")
-			return nil, syscall.EIO
-		}
-		var ao fuse.AttrOut
-		if errno := root.(fusefs.NodeGetattrer).Getattr(ctx, nil, &ao); errno != 0 {
-			log.G(ctx).WithField(remoteSnapshotLogKey, prepareFailed).
-				WithField("layerdigest", n.digest).
-				WithError(err).
-				Debugf("failed to get root node")
+			if errno == 0 {
+				errno = syscall.EIO
+			}
 			return nil, errno
 		}
-		copyAttr(&out.Attr, &ao.Attr)
-		return n.NewInode(ctx, root, fusefs.StableAttr{
-			Mode: out.Attr.Mode,
-			Ino:  out.Attr.Ino,
-		}), 0
+		return cn, 0
 	case layerUseFile:
 		log.G(ctx).Debugf("\"use\" file is referred but return ENOENT for reference management")
 		return nil, syscall.ENOENT
@@ -266,7 +458,8 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 // blobnode is a regular file node that contains raw blob data
 type blobnode struct {
 	fusefs.Inode
-	l layer.Layer
+	l    layer.Layer
+	attr fuse.Attr
 }
 
 var _ = (fusefs.InodeEmbedder)((*blobnode)(nil))
@@ -395,4 +588,63 @@ func defaultLinkAttr(out *fuse.Attr) fusefs.StableAttr {
 	return fusefs.StableAttr{
 		Mode: out.Mode,
 	}
+}
+
+// idMap manages uint32 IDs with automatic GC for releasable objects.
+type idMap struct {
+	m        map[uint32]releasable
+	max      uint32
+	mu       sync.Mutex
+	cleanupG singleflight.Group
+}
+
+type releasable interface {
+	releasable() bool
+}
+
+// add reserves an unique uint32 object for the provided releasable object.
+// when that object become releasable, that ID will be reused for other objects.
+func (m *idMap) add(p func(uint32) (releasable, error)) error {
+	m.cleanupG.Do("cleanup", func() (interface{}, error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		max := uint32(0)
+		for i := uint32(0); i <= m.max; i++ {
+			if e, ok := m.m[i]; ok {
+				if e.releasable() {
+					delete(m.m, i)
+				} else {
+					max = i
+				}
+			}
+		}
+		m.max = max
+		return nil, nil
+	})
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.m == nil {
+		m.m = make(map[uint32]releasable)
+	}
+
+	for i := uint32(0); i <= ^uint32(0); i++ {
+		if i == 0 {
+			continue
+		}
+		e, ok := m.m[i]
+		if !ok || e.releasable() {
+			r, err := p(i)
+			if err != nil {
+				return err
+			}
+			if m.max < i {
+				m.max = i
+			}
+			m.m[i] = r
+			return nil
+		}
+	}
+	return fmt.Errorf("no ID is usable")
 }

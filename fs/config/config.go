@@ -46,6 +46,7 @@ type Config struct {
 	DisableVerification bool   `toml:"disable_verification"`
 	MaxConcurrency      int64  `toml:"max_concurrency"`
 	NoPrometheus        bool   `toml:"no_prometheus"`
+	MetadataStore       string `toml:"metadata_store"`
 
 	// BlobConfig is config for layer blob management.
 	BlobConfig `toml:"blob"`

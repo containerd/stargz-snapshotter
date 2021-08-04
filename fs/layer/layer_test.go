@@ -27,6 +27,9 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"path"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +39,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/metadata"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	digest "github.com/opencontainers/go-digest"
@@ -52,13 +56,22 @@ var testStateLayerDigest = digest.FromString("dummy")
 
 // Tests prefetch method of each stargz file.
 func TestPrefetch(t *testing.T) {
+	testPrefetch(t, "db", newDBReader)
+	testPrefetch(t, "mem", newMemoryReader)
+}
+
+func testPrefetch(t *testing.T, name string, factory readerFactory) {
 	defaultPrefetchSize := int64(10000)
 	landmarkPosition := func(t *testing.T, l *layer) int64 {
 		if l.r == nil {
 			t.Fatalf("layer hasn't been verified yet")
 		}
-		if e, ok := l.r.Lookup(estargz.PrefetchLandmark); ok {
-			return e.Offset
+		if id, _, err := l.r.Metadata().GetChild(l.r.Metadata().RootID(), estargz.PrefetchLandmark); err == nil {
+			offset, err := l.r.Metadata().GetOffset(id)
+			if err != nil {
+				t.Fatalf("failed to get offset of prefetch landmark")
+			}
+			return offset
 		}
 		return defaultPrefetchSize
 	}
@@ -105,7 +118,7 @@ func TestPrefetch(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name+"-"+name, func(t *testing.T) {
 			sr, dgst, err := testutil.BuildEStargz(tt.in,
 				testutil.WithEStargzOptions(
 					estargz.WithChunkSize(sampleChunkSize),
@@ -116,11 +129,15 @@ func TestPrefetch(t *testing.T) {
 			}
 			blob := newBlob(sr)
 			mcache := cache.NewMemoryCache()
-			// define telemetry hooks to measure latency metrics inside estargz package
-			telemetry := estargz.Telemetry{}
-			vr, err := reader.NewReader(sr, mcache, testStateLayerDigest, &telemetry)
+			mr, closeFn, err := factory(sr)
 			if err != nil {
-				t.Fatalf("failed to make stargz reader: %v", err)
+				t.Fatalf("failed to create metadata reader: %v", err)
+			}
+			defer mr.Close()
+			defer closeFn()
+			vr, err := reader.NewReader(mr, mcache, digest.FromString(""))
+			if err != nil {
+				t.Fatalf("failed to create reader: %v", err)
 			}
 			l := newLayer(
 				&Resolver{
@@ -161,11 +178,15 @@ func TestPrefetch(t *testing.T) {
 				t.Fatalf("failed to get reader from layer: %v", err)
 			}
 			for _, file := range tt.wants {
-				e, ok := lr.Lookup(file)
-				if !ok {
-					t.Fatalf("failed to lookup %q", file)
+				id, err := lookup(lr.Metadata(), file)
+				if err != nil {
+					t.Fatalf("failed to lookup %q: %v", file, err)
 				}
-				wantFile, err := lr.OpenFile(file)
+				e, err := lr.Metadata().GetAttr(id)
+				if err != nil {
+					t.Fatalf("failed to get attr of %q: %v", file, err)
+				}
+				wantFile, err := lr.OpenFile(id)
 				if err != nil {
 					t.Fatalf("failed to open file %q", file)
 				}
@@ -180,6 +201,20 @@ func TestPrefetch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func lookup(r metadata.Reader, name string) (uint32, error) {
+	name = strings.TrimPrefix(path.Clean("/"+name), "/")
+	if name == "" {
+		return r.RootID(), nil
+	}
+	dir, base := filepath.Split(name)
+	pid, err := lookup(r, dir)
+	if err != nil {
+		return 0, err
+	}
+	id, _, err := r.GetChild(pid, base)
+	return id, err
 }
 
 func chunkNum(data string) int {

@@ -81,10 +81,18 @@ func (f tarEntryFunc) AppendTar(tw *tar.Writer, opts BuildTarOptions) error { re
 type DirectoryBuildTarOption func(o *dirOpts)
 
 type dirOpts struct {
-	uid    int
-	gid    int
-	xattrs map[string]string
-	mode   *os.FileMode
+	uid     int
+	gid     int
+	xattrs  map[string]string
+	mode    *os.FileMode
+	modTime time.Time
+}
+
+// WithFileModTime specifies the modtime of the dir.
+func WithDirModTime(modTime time.Time) DirectoryBuildTarOption {
+	return func(o *dirOpts) {
+		o.modTime = modTime
+	}
 }
 
 // WithDirOwner specifies the owner of the directory.
@@ -127,6 +135,7 @@ func Dir(name string, opts ...DirectoryBuildTarOption) TarEntry {
 			Typeflag: tar.TypeDir,
 			Name:     buildOpts.Prefix + name,
 			Mode:     mode,
+			ModTime:  dOpts.modTime,
 			Xattrs:   dOpts.xattrs,
 			Uid:      dOpts.uid,
 			Gid:      dOpts.gid,
@@ -138,10 +147,11 @@ func Dir(name string, opts ...DirectoryBuildTarOption) TarEntry {
 type FileBuildTarOption func(o *fileOpts)
 
 type fileOpts struct {
-	uid    int
-	gid    int
-	xattrs map[string]string
-	mode   *os.FileMode
+	uid     int
+	gid     int
+	xattrs  map[string]string
+	mode    *os.FileMode
+	modTime time.Time
 }
 
 // WithFileOwner specifies the owner of the file.
@@ -156,6 +166,13 @@ func WithFileOwner(uid, gid int) FileBuildTarOption {
 func WithFileXattrs(xattrs map[string]string) FileBuildTarOption {
 	return func(o *fileOpts) {
 		o.xattrs = xattrs
+	}
+}
+
+// WithFileModTime specifies the modtime of the file.
+func WithFileModTime(modTime time.Time) FileBuildTarOption {
+	return func(o *fileOpts) {
+		o.modTime = modTime
 	}
 }
 
@@ -184,6 +201,7 @@ func File(name, contents string, opts ...FileBuildTarOption) TarEntry {
 			Typeflag: tar.TypeReg,
 			Name:     buildOpts.Prefix + name,
 			Mode:     mode,
+			ModTime:  fOpts.modTime,
 			Xattrs:   fOpts.xattrs,
 			Size:     int64(len(contents)),
 			Uid:      fOpts.uid,

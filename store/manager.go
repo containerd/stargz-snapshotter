@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	layermetrics "github.com/containerd/stargz-snapshotter/fs/metrics/layer"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/metadata"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
 	"github.com/docker/go-metrics"
@@ -82,9 +83,8 @@ func NewLayerManager(ctx context.Context, root string, hosts source.RegistryHost
 		disableVerification:   cfg.DisableVerification,
 		metricsController:     c,
 		resolveLock:           new(namedmutex.NamedMutex),
-
-		layer:      make(map[string]map[string]layer.Layer),
-		refcounter: make(map[string]map[string]int),
+		layer:                 make(map[string]map[string]layer.Layer),
+		refcounter:            make(map[string]map[string]int),
 	}, nil
 }
 
@@ -242,13 +242,13 @@ func (r *LayerManager) resolveLayer(ctx context.Context, refspec reference.Spec,
 	}
 
 	// Resolve this layer.
-	var esgzOpts []estargz.OpenOption
+	var esgzOpts []metadata.Option
 	if target.Annotations != nil {
 		if tocOffsetStr, ok := target.Annotations[zstdchunked.ManifestPositionAnnotation]; ok {
 			if parts := strings.Split(tocOffsetStr, ":"); len(parts) == 4 {
 				tocOffset, err := strconv.ParseInt(parts[0], 10, 64)
 				if err == nil {
-					esgzOpts = append(esgzOpts, estargz.WithTOCOffset(tocOffset))
+					esgzOpts = append(esgzOpts, metadata.WithTOCOffset(tocOffset))
 				}
 			}
 		}
@@ -343,11 +343,11 @@ func (r *LayerManager) release(ctx context.Context, refspec reference.Spec, dgst
 			delete(r.refcounter, refspec.String())
 		}
 		if r.layer == nil || r.layer[refspec.String()] == nil {
-			return 0, fmt.Errorf("layer of reference %q is not registered", refspec)
+			return 0, fmt.Errorf("layer of reference %q is not registered (ref=%d)", refspec, i)
 		}
 		l, ok := r.layer[refspec.String()][dgst.String()]
 		if !ok {
-			return 0, fmt.Errorf("layer of digest %q/%q is not registered", refspec, dgst)
+			return 0, fmt.Errorf("layer of digest %q/%q is not registered (ref=%d)", refspec, dgst, i)
 		}
 		l.Done()
 		delete(r.layer[refspec.String()], dgst.String())

@@ -44,16 +44,16 @@ func TestGzipEStargz(t *testing.T) {
 }
 
 func gzipControllerWithLevel(compressionLevel int) TestingController {
-	return &gzipController{&gzipCompressor{compressionLevel}, &GzipDecompressor{}}
+	return &gzipController{&GzipCompressor{compressionLevel}, &GzipDecompressor{}}
 }
 
 type gzipController struct {
-	*gzipCompressor
+	*GzipCompressor
 	*GzipDecompressor
 }
 
 func (gc *gzipController) String() string {
-	return fmt.Sprintf("gzip_compression_level=%v", gc.gzipCompressor.compressionLevel)
+	return fmt.Sprintf("gzip_compression_level=%v", gc.GzipCompressor.compressionLevel)
 }
 
 func (gc *gzipController) CountStreams(t *testing.T, b []byte) (numStreams int) {
@@ -125,7 +125,7 @@ func checkLegacyFooter(t *testing.T, off int64) {
 	if len(footer) != legacyFooterSize {
 		t.Fatalf("for offset %v, footer length was %d, not expected %d. got bytes: %q", off, len(footer), legacyFooterSize, footer)
 	}
-	_, got, _, err := (&legacyGzipDecompressor{}).ParseFooter(footer)
+	_, got, _, err := (&LegacyGzipDecompressor{}).ParseFooter(footer)
 	if err != nil {
 		t.Fatalf("failed to parse legacy footer for offset %d, footer: %x: err: %v",
 			off, footer, err)
