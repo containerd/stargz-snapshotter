@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/cache"
@@ -391,12 +392,16 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *opti
 		}
 		return singlePartReader(reg, res.Body), nil
 	} else if retry && res.StatusCode == http.StatusForbidden {
+		log.G(ctx).Infof("Received status code: %v. Refreshing URL and retrying...", res.Status)
+
 		// re-redirect and retry this once.
 		if err := f.refreshURL(ctx); err != nil {
 			return nil, errors.Wrapf(err, "failed to refresh URL on %v", res.Status)
 		}
 		return f.fetch(ctx, rs, false, opts)
 	} else if retry && res.StatusCode == http.StatusBadRequest && !singleRangeMode {
+		log.G(ctx).Infof("Received status code: %v. Setting single range mode and retrying...", res.Status)
+
 		// gcr.io (https://storage.googleapis.com) returns 400 on multi-range request (2020 #81)
 		f.singleRangeMode()                  // fallbacks to singe range request mode
 		return f.fetch(ctx, rs, false, opts) // retries with the single range mode

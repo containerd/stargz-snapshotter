@@ -216,7 +216,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	if fs.disableVerification {
 		// Skip if verification is disabled completely
 		l.SkipVerify()
-		log.G(ctx).Debugf("Verification forcefully skipped")
+		log.G(ctx).Infof("Verification forcefully skipped")
 	} else if tocDigest, ok := labels[estargz.TOCJSONDigestAnnotation]; ok {
 		// Verify this layer using the TOC JSON digest passed through label.
 		dgst, err := digest.Parse(tocDigest)
@@ -268,7 +268,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			fs.backgroundTaskManager.DoPrioritizedTask()
 			defer fs.backgroundTaskManager.DonePrioritizedTask()
 			if err := l.Prefetch(prefetchSize); err != nil {
-				log.G(ctx).WithError(err).Debug("failed to prefetched layer")
+				log.G(ctx).WithError(err).Warnf("failed to prefetch layer=%v", digest)
 				return
 			}
 			log.G(ctx).Debug("completed to prefetch")
@@ -282,7 +282,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	if !fs.noBackgroundFetch {
 		go func() {
 			if err := l.BackgroundFetch(); err != nil {
-				log.G(ctx).WithError(err).Debug("failed to fetch whole layer")
+				log.G(ctx).WithError(err).Warnf("failed to fetch whole layer=%v", digest)
 				return
 			}
 			log.G(ctx).Debug("completed to fetch all layer data in background")
@@ -305,7 +305,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	if _, err := exec.LookPath(fusermountBin); err == nil {
 		mountOpts.Options = []string{"suid"} // option for fusermount; allow setuid inside container
 	} else {
-		log.G(ctx).WithError(err).Debugf("%s not installed; trying direct mount", fusermountBin)
+		log.G(ctx).WithError(err).Infof("%s not installed; trying direct mount", fusermountBin)
 		mountOpts.DirectMount = true
 	}
 	server, err := fuse.NewServer(rawFS, mountpoint, mountOpts)
