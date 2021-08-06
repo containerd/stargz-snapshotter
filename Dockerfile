@@ -24,7 +24,7 @@ ARG COMMON_VERSION=v0.42.1
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=k8s.gcr.io/pause:3.5
 
 # Used in CI
-ARG CRI_TOOLS_VERSION=v1.21.0
+ARG CRI_TOOLS_VERSION=v1.22.0
 
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
@@ -206,7 +206,7 @@ RUN apt-get update && apt-get install -y iptables && \
     curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
 
 # Image which can be used as a node image for KinD (containerd with builtin snapshotter)
-FROM kindest/node:v1.21.2 AS kind-builtin-snapshotter
+FROM kindest/node:v1.22.0 AS kind-builtin-snapshotter
 COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 COPY ./script/config/ /
@@ -244,7 +244,7 @@ COPY ./script/config-cri-o/ /
 ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 
 # Image which can be used as a node image for KinD
-FROM kindest/node:v1.21.2
+FROM kindest/node:v1.22.0
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /
