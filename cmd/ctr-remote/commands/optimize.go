@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/analyzer"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
@@ -293,7 +294,19 @@ func isReusableESGZLayer(ctx context.Context, desc ocispec.Descriptor, cs conten
 		return false
 	}
 	defer ra.Close()
-	r, err := estargz.Open(io.NewSectionReader(ra, 0, desc.Size))
+	// define telemetry hooks to measure latency metrics inside estargz package
+	telemetry := estargz.Telemetry{
+		GetFooterLatency: func(start time.Time) {
+			commonmetrics.MeasureLatency(commonmetrics.StargzFooterGet, desc.Digest, start)
+		},
+		GetTocLatency: func(start time.Time) {
+			commonmetrics.MeasureLatency(commonmetrics.StargzTocGet, desc.Digest, start)
+		},
+		DeserializeTocLatency: func(start time.Time) {
+			commonmetrics.MeasureLatency(commonmetrics.DeserializeTocJSON, desc.Digest, start)
+		},
+	}
+	r, err := estargz.OpenWithTelemetry(io.NewSectionReader(ra, 0, desc.Size), &telemetry)
 	if err != nil {
 		return false
 	}

@@ -35,9 +35,14 @@ const (
 
 // Lists all metric labels.
 const (
-	Mount             = "mount"
-	RemoteRegistryGet = "remote_registry_get"
-	NodeReaddir       = "node_readdir"
+	Mount               = "mount"
+	RemoteRegistryGet   = "remote_registry_get"
+	NodeReaddir         = "node_readdir"
+	StargzHeaderGet     = "stargz_header_get"
+	StargzFooterGet     = "stargz_footer_get"
+	StargzTocGet        = "stargz_toc_get"
+	DeserializeTocJSON  = "stargz_toc_json_deserialize"
+	PrefetchesCompleted = "all_prefetches_completed"
 )
 
 var (
@@ -77,6 +82,8 @@ func Register() {
 // Wraps the labels attachment as well as calling Observe into a single method.
 // Right now we attach the operation and layer sha, so it's possible to see the breakdown for latency
 // by operation and individual layers.
+// If you want this to be layer agnostic, just pass the digest from empty string, e.g.
+// layerDigest := digest.FromString("")
 func MeasureLatency(operation string, layer digest.Digest, start time.Time) {
 	operationLatency.WithLabelValues(operation, layer.String()).Observe(sinceInMilliseconds(start))
 }

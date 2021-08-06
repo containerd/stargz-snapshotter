@@ -62,17 +62,51 @@ type Reader struct {
 	chunks map[string][]*TOCEntry
 }
 
+// A func which takes start time and records the diff
+type MeasureLatencyHook func(time.Time)
+
+// A struct which defines telemetry hooks. By implementing these hooks you should be able to record
+// the latency metrics of the respective steps of estargz open operation. To be used with estargz.OpenWithTelemetry(...)
+type Telemetry struct {
+	GetFooterLatency      MeasureLatencyHook // measure time to get stargz footer (in milliseconds)
+	GetTocLatency         MeasureLatencyHook // measure time to GET TOC JSON (in milliseconds)
+	DeserializeTocLatency MeasureLatencyHook // measure time to deserialize TOC JSON (in milliseconds)
+}
+
 // Open opens a stargz file for reading.
 //
 // Note that each entry name is normalized as the path that is relative to root.
 func Open(sr *io.SectionReader) (*Reader, error) {
+	return openWithTelemetry(sr, nil)
+}
+
+// Open opens a stargz file for reading.
+// Allows adding telemetry hooks to measure the time it takes to do individual steps.
+//
+// Note that each entry name is normalized as the path that is relative to root.
+func OpenWithTelemetry(sr *io.SectionReader, telemetry *Telemetry) (*Reader, error) {
+	return openWithTelemetry(sr, telemetry)
+}
+
+// open opens a stargz file for reading.
+//
+// Note that each entry name is normalized as the path that is relative to root.
+func openWithTelemetry(sr *io.SectionReader, telemetry *Telemetry) (*Reader, error) {
+	start := time.Now() // before getting layer footer
 	tocOff, footerSize, err := OpenFooter(sr)
+	if telemetry != nil && telemetry.GetFooterLatency != nil {
+		telemetry.GetFooterLatency(start)
+	}
 	if err != nil {
 		return nil, errors.Wrapf(err, "error parsing footer")
 	}
 	tocTargz := make([]byte, sr.Size()-tocOff-footerSize)
+	start = time.Now() // start of getting the stargz TOC JSON
 	if _, err := sr.ReadAt(tocTargz, tocOff); err != nil {
 		return nil, fmt.Errorf("error reading %d byte TOC targz: %v", len(tocTargz), err)
+	}
+	if telemetry != nil && telemetry.GetTocLatency != nil {
+		telemetry.GetTocLatency(start)
 	}
 	zr, err := gzip.NewReader(bytes.NewReader(tocTargz))
 	if err != nil {
@@ -89,9 +123,14 @@ func Open(sr *io.SectionReader) (*Reader, error) {
 	}
 	dgstr := digest.Canonical.Digester()
 	toc := new(jtoc)
+	start = time.Now() // start of deserialization of TOC JSON
 	if err := json.NewDecoder(io.TeeReader(tr, dgstr.Hash())).Decode(&toc); err != nil {
 		return nil, fmt.Errorf("error decoding TOC JSON: %v", err)
 	}
+	if telemetry != nil && telemetry.DeserializeTocLatency != nil {
+		telemetry.DeserializeTocLatency(start)
+	}
+
 	r := &Reader{sr: sr, toc: toc, tocDigest: dgstr.Digest()}
 	if err := r.initFields(); err != nil {
 		return nil, fmt.Errorf("failed to initialize fields of entries: %v", err)

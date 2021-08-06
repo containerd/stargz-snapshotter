@@ -151,7 +151,9 @@ func newFetcher(ctx context.Context, hosts source.RegistryHosts, refspec referen
 
 		// Get size information
 		// TODO: we should try to use the Size field in the descriptor here.
+		start := time.Now() // start time before getting layer header
 		size, err := getSize(ctx, url, tr, timeout)
+		commonmetrics.MeasureLatency(commonmetrics.StargzHeaderGet, digest, start) // time to get layer header
 		if err != nil {
 			rErr = errors.Wrapf(rErr, "failed to get size (host %q, ref:%q, digest:%q): %v",
 				host.Host, refspec, digest, err)

@@ -107,6 +107,202 @@ func legacyFooterBytes(tocOff int64) []byte {
 	return buf.Bytes()
 }
 
+func TestWriteAndOpenWithTelemetry(t *testing.T) {
+	const content = "Some contents"
+	invalidUtf8 := "\xff\xfe\xfd"
+
+	xAttrFile := xAttr{"foo": "bar", "invalid-utf8": invalidUtf8}
+
+	tests := []struct {
+		name      string
+		chunkSize int
+		in        []tarEntry
+		want      []stargzCheck
+		wantNumGz int        // expected number of gzip streams
+		telemetry *Telemetry // telemetry hooks configuration
+	}{
+		{
+			name: "no_telemetry",
+			in: tarOf(
+				dir("foo/"),
+				file("foo/bar.txt", content, xAttrFile),
+			),
+			wantNumGz: 4, // var dir, foo.txt alone, TOC, footer
+			want: checks(
+				numTOCEntries(2),
+				hasDir("foo/"),
+				hasFileLen("foo/bar.txt", len(content)),
+				hasFileDigest("foo/bar.txt", digestFor(content)),
+				hasFileContentsRange("foo/bar.txt", 0, content),
+				hasFileContentsRange("foo/bar.txt", 1, content[1:]),
+				entryHasChildren("", "foo"),
+				entryHasChildren("foo", "bar.txt"),
+				hasFileXattrs("foo/bar.txt", "foo", "bar"),
+				hasFileXattrs("foo/bar.txt", "invalid-utf8", invalidUtf8),
+			),
+			telemetry: nil,
+		},
+		{
+			name: "no_get_footer",
+			in: tarOf(
+				dir("foo/"),
+				file("foo/bar.txt", content, xAttrFile),
+			),
+			wantNumGz: 4, // var dir, foo.txt alone, TOC, footer
+			want: checks(
+				numTOCEntries(2),
+				hasDir("foo/"),
+				hasFileLen("foo/bar.txt", len(content)),
+				hasFileDigest("foo/bar.txt", digestFor(content)),
+				hasFileContentsRange("foo/bar.txt", 0, content),
+				hasFileContentsRange("foo/bar.txt", 1, content[1:]),
+				entryHasChildren("", "foo"),
+				entryHasChildren("foo", "bar.txt"),
+				hasFileXattrs("foo/bar.txt", "foo", "bar"),
+				hasFileXattrs("foo/bar.txt", "invalid-utf8", invalidUtf8),
+			),
+			telemetry: &Telemetry{
+				GetTocLatency: func(t time.Time) {
+
+				},
+				DeserializeTocLatency: func(t time.Time) {
+
+				},
+			},
+		},
+		{
+			name: "no_get_toc",
+			in: tarOf(
+				dir("foo/"),
+				file("foo/bar.txt", content, xAttrFile),
+			),
+			wantNumGz: 4, // var dir, foo.txt alone, TOC, footer
+			want: checks(
+				numTOCEntries(2),
+				hasDir("foo/"),
+				hasFileLen("foo/bar.txt", len(content)),
+				hasFileDigest("foo/bar.txt", digestFor(content)),
+				hasFileContentsRange("foo/bar.txt", 0, content),
+				hasFileContentsRange("foo/bar.txt", 1, content[1:]),
+				entryHasChildren("", "foo"),
+				entryHasChildren("foo", "bar.txt"),
+				hasFileXattrs("foo/bar.txt", "foo", "bar"),
+				hasFileXattrs("foo/bar.txt", "invalid-utf8", invalidUtf8),
+			),
+			telemetry: &Telemetry{
+				GetFooterLatency: func(t time.Time) {
+
+				},
+				DeserializeTocLatency: func(t time.Time) {
+
+				},
+			},
+		},
+		{
+			name: "no_deserialize_toc",
+			in: tarOf(
+				dir("foo/"),
+				file("foo/bar.txt", content, xAttrFile),
+			),
+			wantNumGz: 4, // var dir, foo.txt alone, TOC, footer
+			want: checks(
+				numTOCEntries(2),
+				hasDir("foo/"),
+				hasFileLen("foo/bar.txt", len(content)),
+				hasFileDigest("foo/bar.txt", digestFor(content)),
+				hasFileContentsRange("foo/bar.txt", 0, content),
+				hasFileContentsRange("foo/bar.txt", 1, content[1:]),
+				entryHasChildren("", "foo"),
+				entryHasChildren("foo", "bar.txt"),
+				hasFileXattrs("foo/bar.txt", "foo", "bar"),
+				hasFileXattrs("foo/bar.txt", "invalid-utf8", invalidUtf8),
+			),
+			telemetry: &Telemetry{
+				GetFooterLatency: func(t time.Time) {
+
+				},
+				GetTocLatency: func(t time.Time) {
+
+				},
+			},
+		},
+		{
+			name: "telemetry_is_set",
+			in: tarOf(
+				dir("foo/"),
+				file("foo/bar.txt", content, xAttrFile),
+			),
+			wantNumGz: 4, // var dir, foo.txt alone, TOC, footer
+			want: checks(
+				numTOCEntries(2),
+				hasDir("foo/"),
+				hasFileLen("foo/bar.txt", len(content)),
+				hasFileDigest("foo/bar.txt", digestFor(content)),
+				hasFileContentsRange("foo/bar.txt", 0, content),
+				hasFileContentsRange("foo/bar.txt", 1, content[1:]),
+				entryHasChildren("", "foo"),
+				entryHasChildren("foo", "bar.txt"),
+				hasFileXattrs("foo/bar.txt", "foo", "bar"),
+				hasFileXattrs("foo/bar.txt", "invalid-utf8", invalidUtf8),
+			),
+			telemetry: &Telemetry{
+				GetFooterLatency: func(t time.Time) {
+
+				},
+				GetTocLatency: func(t time.Time) {
+
+				},
+				DeserializeTocLatency: func(t time.Time) {
+
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		for _, cl := range compressionLevels {
+			cl := cl
+			for _, prefix := range allowedPrefix {
+				prefix := prefix
+				t.Run(tt.name+"-"+fmt.Sprintf("compression=%v-prefix=%q", cl, prefix), func(t *testing.T) {
+					tr, cancel := buildTar(t, tt.in, prefix)
+					defer cancel()
+					var stargzBuf bytes.Buffer
+					w := NewWriterLevel(&stargzBuf, cl)
+					w.ChunkSize = tt.chunkSize
+					if err := w.AppendTar(tr); err != nil {
+						t.Fatalf("Append: %v", err)
+					}
+					if _, err := w.Close(); err != nil {
+						t.Fatalf("Writer.Close: %v", err)
+					}
+					b := stargzBuf.Bytes()
+
+					diffID := w.DiffID()
+					wantDiffID := diffIDOfGz(t, b)
+					if diffID != wantDiffID {
+						t.Errorf("DiffID = %q; want %q", diffID, wantDiffID)
+					}
+
+					got := countGzStreams(t, b)
+					if got != tt.wantNumGz {
+						t.Errorf("number of gzip streams = %d; want %d", got, tt.wantNumGz)
+					}
+
+					r, err := OpenWithTelemetry(io.NewSectionReader(bytes.NewReader(b), 0, int64(len(b))), tt.telemetry)
+					if err != nil {
+						t.Fatalf("stargz.OpenWithTelemetry: %v", err)
+					}
+					for _, want := range tt.want {
+						want.check(t, r)
+					}
+
+				})
+			}
+		}
+	}
+}
+
 func TestWriteAndOpen(t *testing.T) {
 	const content = "Some contents"
 	invalidUtf8 := "\xff\xfe\xfd"
