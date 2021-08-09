@@ -38,7 +38,7 @@ RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     git clone -b ${CONTAINERD_VERSION} --depth 1 \
               https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
-    GO111MODULE=off make && DESTDIR=/out/ PREFIX= make install
+    make && DESTDIR=/out/ PREFIX= make install
 
 # Build containerd with builtin stargz snapshotter
 FROM golang-base AS containerd-snapshotter-dev
@@ -70,7 +70,7 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev && \
     git clone -b ${RUNC_VERSION} --depth 1 \
               https://github.com/opencontainers/runc $GOPATH/src/github.com/opencontainers/runc && \
     cd $GOPATH/src/github.com/opencontainers/runc && \
-    GO111MODULE=off make && make install PREFIX=/out/
+    make && make install PREFIX=/out/
 
 # Build stargz snapshotter
 FROM golang-base AS snapshotter-dev
