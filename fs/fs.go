@@ -65,6 +65,7 @@ import (
 )
 
 const (
+	defaultFuseTimeout    = time.Second
 	defaultMaxConcurrency = 2
 	fusermountBin         = "fusermount"
 )
@@ -90,6 +91,17 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 	if maxConcurrency == 0 {
 		maxConcurrency = defaultMaxConcurrency
 	}
+
+	attrTimeout := time.Duration(cfg.FuseConfig.AttrTimeout) * time.Second
+	if attrTimeout == 0 {
+		attrTimeout = defaultFuseTimeout
+	}
+
+	entryTimeout := time.Duration(cfg.FuseConfig.EntryTimeout) * time.Second
+	if entryTimeout == 0 {
+		entryTimeout = defaultFuseTimeout
+	}
+
 	getSources := fsOpts.getSources
 	if getSources == nil {
 		getSources = source.FromDefaultLabels(func(refspec reference.Spec) (hosts []docker.RegistryHost, _ error) {
@@ -124,6 +136,8 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		allowNoVerification:   cfg.AllowNoVerification,
 		disableVerification:   cfg.DisableVerification,
 		metricsController:     c,
+		attrTimeout:           attrTimeout,
+		entryTimeout:          entryTimeout,
 	}, nil
 }
 
@@ -140,6 +154,8 @@ type filesystem struct {
 	disableVerification   bool
 	getSources            source.GetSources
 	metricsController     *layermetrics.Controller
+	attrTimeout           time.Duration
+	entryTimeout          time.Duration
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) (retErr error) {
@@ -291,10 +307,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 
 	// mount the node to the specified mountpoint
 	// TODO: bind mount the state directory as a read-only fs on snapshotter's side
-	timeSec := time.Second
 	rawFS := fusefs.NewNodeFS(node, &fusefs.Options{
-		AttrTimeout:     &timeSec,
-		EntryTimeout:    &timeSec,
+		AttrTimeout:     &fs.attrTimeout,
+		EntryTimeout:    &fs.entryTimeout,
 		NullPermissions: true,
 	})
 	mountOpts := &fuse.MountOptions{
