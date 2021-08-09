@@ -196,6 +196,7 @@ func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// TODO: support more status codes and retries
 	if resp.StatusCode == http.StatusUnauthorized {
+		log.G(ctx).Infof("Received status code: %v. Refreshing creds...", resp.Status)
 
 		// prepare authorization for the target host using docker.Authorizer
 		if err := tr.auth.AddResponses(ctx, []*http.Response{resp}); err != nil {
