@@ -57,11 +57,18 @@ type Config struct {
 }
 
 type BlobConfig struct {
-	ValidInterval        int64 `toml:"valid_interval"`
-	CheckAlways          bool  `toml:"check_always"`
+	ValidInterval int64 `toml:"valid_interval"`
+	CheckAlways   bool  `toml:"check_always"`
+	// ChunkSize is the granularity at which background fetch and on-demand reads
+	// are fetched from the remote registry.
 	ChunkSize            int64 `toml:"chunk_size"`
 	FetchTimeoutSec      int64 `toml:"fetching_timeout_sec"`
 	ForceSingleRangeMode bool  `toml:"force_single_range_mode"`
+	// PrefetchChunkSize is the maximum bytes transferred per http GET from remote registry
+	// during prefetch. It is recommended to have PrefetchChunkSize > ChunkSize.
+	// If PrefetchChunkSize < ChunkSize prefetch bytes will be fetched as a single http GET,
+	// else total GET requests for prefetch = ceil(PrefetchSize / PrefetchChunkSize).
+	PrefetchChunkSize int64 `toml:"prefetch_chunk_size"`
 }
 
 type DirectoryCacheConfig struct {

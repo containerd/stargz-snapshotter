@@ -41,12 +41,13 @@ import (
 )
 
 const (
-	testURL            = "http://testdummy.com/v2/library/test/blobs/sha256:deadbeaf"
-	rangeHeaderPrefix  = "bytes="
-	sampleChunkSize    = 3
-	sampleMiddleOffset = sampleChunkSize / 2
-	sampleData1        = "0123456789"
-	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
+	testURL                  = "http://testdummy.com/v2/library/test/blobs/sha256:deadbeaf"
+	rangeHeaderPrefix        = "bytes="
+	sampleChunkSize          = 3
+	sampleMiddleOffset       = sampleChunkSize / 2
+	sampleData1              = "0123456789"
+	lastChunkOffset1         = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
+	defaultPrefetchChunkSize = 0
 )
 
 // Tests ReadAt and Cache method of each file.
@@ -68,6 +69,10 @@ func TestReadAt(t *testing.T) {
 		"in_1_chunk_blob":  sampleChunkSize * 1,
 		"in_3_chunks_blob": sampleChunkSize * 3,
 		"in_max_size_blob": int64(len(sampleData1)),
+	}
+	prefetchChunkSizeCond := map[string]int64{
+		"single_get_prefetch":   0,
+		"multiple_get_prefetch": sampleChunkSize * 2,
 	}
 	type cacheCond struct {
 		reg     region
@@ -119,54 +124,57 @@ func TestReadAt(t *testing.T) {
 		for in, innero := range innerOffsetCond {
 			for bo, baseo := range baseOffsetCond {
 				for bs, blobsize := range blobSizeCond {
-					for tc, trCond := range transportCond {
-						t.Run(fmt.Sprintf("reading_%s_%s_%s_%s_%s", sn, in, bo, bs, tc), func(t *testing.T) {
-							if blobsize > int64(len(sampleData1)) {
-								t.Fatal("sample file size is larger than sample data")
-							}
-
-							wantN := size
-							offset := baseo + innero
-							if remain := blobsize - offset; remain < wantN {
-								if wantN = remain; wantN < 0 {
-									wantN = 0
+					for pc, prefetchchunksize := range prefetchChunkSizeCond {
+						for tc, trCond := range transportCond {
+							t.Run(fmt.Sprintf("reading_%s_%s_%s_%s_%s_%s", sn, in, bo, bs, pc, tc), func(t *testing.T) {
+								if blobsize > int64(len(sampleData1)) {
+									t.Fatal("sample file size is larger than sample data")
 								}
-							}
 
-							// use constant string value as a data source.
-							want := strings.NewReader(sampleData1)
-
-							// data we want to get.
-							wantData := make([]byte, wantN)
-							_, err := want.ReadAt(wantData, offset)
-							if err != nil && err != io.EOF {
-								t.Fatalf("want.ReadAt (offset=%d,size=%d): %v", offset, wantN, err)
-							}
-
-							// data we get through a remote blob.
-							blob := []byte(sampleData1)[:blobsize]
-
-							// Check with allowing multi range requests
-							var cacheChunks []region
-							var except []region
-							for _, cond := range trCond.cacheCond {
-								cacheChunks = append(cacheChunks, cond.reg)
-								if cond.mustHit {
-									except = append(except, cond.reg)
+								wantN := size
+								offset := baseo + innero
+								if remain := blobsize - offset; remain < wantN {
+									if wantN = remain; wantN < 0 {
+										wantN = 0
+									}
 								}
-							}
-							tr := multiRoundTripper(t, blob, allowMultiRange(trCond.allowMultiRange), exceptChunks(except))
 
-							// Check ReadAt method
-							bb1 := makeBlob(t, blobsize, sampleChunkSize, tr)
-							cacheAll(t, bb1, cacheChunks)
-							checkRead(t, wantData, bb1, offset, size)
+								// use constant string value as a data source.
+								want := strings.NewReader(sampleData1)
 
-							// Check Cache method
-							bb2 := makeBlob(t, blobsize, sampleChunkSize, tr)
-							cacheAll(t, bb2, cacheChunks)
-							checkCache(t, bb2, offset, size)
-						})
+								// data we want to get.
+								wantData := make([]byte, wantN)
+								_, err := want.ReadAt(wantData, offset)
+								if err != nil && err != io.EOF {
+									t.Fatalf("want.ReadAt (offset=%d,size=%d): %v", offset, wantN, err)
+								}
+
+								// data we get through a remote blob.
+								blob := []byte(sampleData1)[:blobsize]
+
+								// Check with allowing multi range requests
+								var cacheChunks []region
+								var except []region
+								for _, cond := range trCond.cacheCond {
+									cacheChunks = append(cacheChunks, cond.reg)
+									if cond.mustHit {
+										except = append(except, cond.reg)
+									}
+								}
+								tr := multiRoundTripper(t, blob, allowMultiRange(trCond.allowMultiRange), exceptChunks(except))
+
+								// Check ReadAt method
+								bb1 := makeBlob(t, blobsize, sampleChunkSize, prefetchchunksize, tr)
+								cacheAll(t, bb1, cacheChunks)
+								checkRead(t, wantData, bb1, offset, size)
+
+								// Check Cache method
+								bb2 := makeBlob(t, blobsize, sampleChunkSize, prefetchchunksize, tr)
+								cacheAll(t, bb2, cacheChunks)
+								checkCache(t, bb2, offset, size)
+							})
+						}
+
 					}
 				}
 			}
@@ -251,7 +259,7 @@ func checkAllCached(t *testing.T, r *blob, offset, size int64) {
 func TestFailReadAt(t *testing.T) {
 
 	// test failed http respose.
-	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, failRoundTripper())
+	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, failRoundTripper())
 	respData := make([]byte, len(sampleData1))
 	_, err := r.ReadAt(respData, 0)
 	if err == nil || err == io.EOF {
@@ -270,12 +278,12 @@ func TestFailReadAt(t *testing.T) {
 
 func checkBrokenBody(t *testing.T, allowMultiRange bool) {
 	respData := make([]byte, len(sampleData1))
-	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	if _, err := r.ReadAt(respData, 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken full body but err=%v (allowMultiRange=%v)", err, allowMultiRange)
 		return
 	}
-	r = makeBlob(t, int64(len(sampleData1)), sampleChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	r = makeBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	if _, err := r.ReadAt(respData[0:len(sampleData1)/2], 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken multipart body but err=%v (allowMultiRange=%v)", err, allowMultiRange)
 		return
@@ -283,7 +291,7 @@ func checkBrokenBody(t *testing.T, allowMultiRange bool) {
 }
 
 func checkBrokenHeader(t *testing.T, allowMultiRange bool) {
-	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, brokenHeaderRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenHeaderRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	respData := make([]byte, len(sampleData1))
 	if _, err := r.ReadAt(respData[0:len(sampleData1)/2], 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken multipart header but err=%v (allowMultiRange=%v)", err, allowMultiRange)
@@ -291,17 +299,18 @@ func checkBrokenHeader(t *testing.T, allowMultiRange bool) {
 	}
 }
 
-func makeBlob(t *testing.T, size int64, chunkSize int64, fn RoundTripFunc) *blob {
+func makeBlob(t *testing.T, size int64, chunkSize int64, prefetchChunkSize int64, fn RoundTripFunc) *blob {
 	return &blob{
 		fetcher: &fetcher{
 			url: testURL,
 			tr:  fn,
 		},
-		size:         size,
-		chunkSize:    chunkSize,
-		cache:        cache.NewMemoryCache(),
-		resolver:     &Resolver{},
-		fetchTimeout: time.Duration(defaultFetchTimeoutSec) * time.Second,
+		size:              size,
+		chunkSize:         chunkSize,
+		prefetchChunkSize: prefetchChunkSize,
+		cache:             cache.NewMemoryCache(),
+		resolver:          &Resolver{},
+		fetchTimeout:      time.Duration(defaultFetchTimeoutSec) * time.Second,
 	}
 }
 
