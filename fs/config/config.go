@@ -52,6 +52,8 @@ type Config struct {
 
 	// DirectoryCacheConfig is config for directory-based cache.
 	DirectoryCacheConfig `toml:"directory_cache"`
+
+	FuseConfig `toml:"fuse"`
 }
 
 type BlobConfig struct {
@@ -67,4 +69,12 @@ type DirectoryCacheConfig struct {
 	MaxCacheFds      int  `toml:"max_cache_fds"`
 	SyncAdd          bool `toml:"sync_add"`
 	Direct           bool `toml:"direct"`
+}
+
+type FuseConfig struct {
+	// AttrTimeout defines overall timeout attribute for a file system in seconds.
+	AttrTimeout int64 `toml:"attr_timeout"`
+
+	// EntryTimeout defines TTL for directory, name lookup in seconds.
+	EntryTimeout int64 `toml:"entry_timeout"`
 }
