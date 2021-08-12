@@ -38,6 +38,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/fs/config"
+	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
@@ -102,9 +103,10 @@ type Layer interface {
 
 // Info is the current status of a layer.
 type Info struct {
-	Digest      digest.Digest
-	Size        int64
-	FetchedSize int64
+	Digest       digest.Digest
+	Size         int64 // layer size in bytes
+	FetchedSize  int64 // layer fetched size in bytes
+	PrefetchSize int64 // layer prefetch size in bytes
 }
 
 // Resolver resolves the layer location and provieds the handler of that layer.
@@ -273,7 +275,19 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		defer r.backgroundTaskManager.DonePrioritizedTask()
 		return blobR.ReadAt(p, offset)
 	}), 0, blobR.Size())
-	vr, err := reader.NewReader(sr, fsCache)
+	// define telemetry hooks to measure latency metrics inside estargz package
+	telemetry := estargz.Telemetry{
+		GetFooterLatency: func(start time.Time) {
+			commonmetrics.MeasureLatency(commonmetrics.StargzFooterGet, desc.Digest, start)
+		},
+		GetTocLatency: func(start time.Time) {
+			commonmetrics.MeasureLatency(commonmetrics.StargzTocGet, desc.Digest, start)
+		},
+		DeserializeTocLatency: func(start time.Time) {
+			commonmetrics.MeasureLatency(commonmetrics.DeserializeTocJSON, desc.Digest, start)
+		},
+	}
+	vr, err := reader.NewReader(sr, fsCache, &telemetry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read layer")
 	}
@@ -368,6 +382,8 @@ type layer struct {
 	verifiableReader *reader.VerifiableReader
 	prefetchWaiter   *waiter
 
+	prefetchSize int64
+
 	r reader.Reader
 
 	closed   bool
@@ -376,9 +392,10 @@ type layer struct {
 
 func (l *layer) Info() Info {
 	return Info{
-		Digest:      l.desc.Digest,
-		Size:        l.blob.Size(),
-		FetchedSize: l.blob.FetchedSize(),
+		Digest:       l.desc.Digest,
+		Size:         l.blob.Size(),
+		FetchedSize:  l.blob.FetchedSize(),
+		PrefetchSize: l.prefetchSize,
 	}
 }
 
@@ -433,6 +450,9 @@ func (l *layer) Prefetch(prefetchSize int64) error {
 	if err := l.blob.Cache(0, prefetchSize); err != nil {
 		return errors.Wrap(err, "failed to prefetch layer")
 	}
+
+	// Set prefetch size for metrics after prefetch completed
+	l.prefetchSize = prefetchSize
 
 	// Cache uncompressed contents of the prefetched range
 	if err := lr.Cache(reader.WithFilter(func(e *estargz.TOCEntry) bool {

@@ -92,8 +92,8 @@ func (nv nopVerifier) Verified() bool {
 // NewReader creates a Reader based on the given stargz blob and cache implementation.
 // It returns VerifiableReader so the caller must provide a estargz.TOCEntryVerifier
 // to use for verifying file or chunk contained in this stargz blob.
-func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*VerifiableReader, error) {
-	r, err := estargz.Open(sr)
+func NewReader(sr *io.SectionReader, cache cache.BlobCache, telemetry *estargz.Telemetry) (*VerifiableReader, error) {
+	r, err := estargz.OpenWithTelemetry(sr, telemetry)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse stargz")
 	}
@@ -107,6 +107,7 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache) (*VerifiableReader, 
 				return new(bytes.Buffer)
 			},
 		},
+		telemetry: telemetry,
 	}
 
 	return &VerifiableReader{vr}, nil
@@ -118,6 +119,8 @@ type reader struct {
 	cache    cache.BlobCache
 	bufPool  sync.Pool
 	verifier estargz.TOCEntryVerifier
+
+	telemetry *estargz.Telemetry
 
 	closed   bool
 	closedMu sync.Mutex
@@ -162,7 +165,7 @@ func (gr *reader) Cache(opts ...CacheOption) (err error) {
 
 	r := gr.r
 	if cacheOpts.reader != nil {
-		if r, err = estargz.Open(cacheOpts.reader); err != nil {
+		if r, err = estargz.OpenWithTelemetry(cacheOpts.reader, gr.telemetry); err != nil {
 			return errors.Wrap(err, "failed to parse stargz")
 		}
 	}

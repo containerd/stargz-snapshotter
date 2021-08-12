@@ -264,7 +264,6 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 			return nil, err
 		}
 	}
-
 	return o.mounts(ctx, s, parent)
 }
 

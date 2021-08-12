@@ -340,6 +340,8 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string, labels map[s
 	fs.backgroundTaskManager.DoPrioritizedTask()
 	defer fs.backgroundTaskManager.DonePrioritizedTask()
 
+	defer commonmetrics.MeasureLatency(commonmetrics.PrefetchesCompleted, digest.FromString(""), time.Now()) // measuring the time the container launch is blocked on prefetch to complete
+
 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("mountpoint", mountpoint))
 
 	fs.layerMu.Lock()
