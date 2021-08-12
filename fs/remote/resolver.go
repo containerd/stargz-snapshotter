@@ -90,14 +90,15 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		fetcher.singleRangeMode()
 	}
 	return &blob{
-		fetcher:       fetcher,
-		size:          size,
-		chunkSize:     r.blobConfig.ChunkSize,
-		cache:         blobCache,
-		lastCheck:     time.Now(),
-		checkInterval: time.Duration(r.blobConfig.ValidInterval) * time.Second,
-		resolver:      r,
-		fetchTimeout:  time.Duration(r.blobConfig.FetchTimeoutSec) * time.Second,
+		fetcher:           fetcher,
+		size:              size,
+		chunkSize:         r.blobConfig.ChunkSize,
+		prefetchChunkSize: r.blobConfig.PrefetchChunkSize,
+		cache:             blobCache,
+		lastCheck:         time.Now(),
+		checkInterval:     time.Duration(r.blobConfig.ValidInterval) * time.Second,
+		resolver:          r,
+		fetchTimeout:      time.Duration(r.blobConfig.FetchTimeoutSec) * time.Second,
 	}, nil
 }
 
