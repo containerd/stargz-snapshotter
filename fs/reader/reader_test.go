@@ -327,7 +327,7 @@ func makeFile(t *testing.T, contents []byte, chunkSize int) *file {
 func newReader(sr *io.SectionReader, cache cache.BlobCache, ev estargz.TOCEntryVerifier) (*reader, *estargz.TOCEntry, error) {
 	var r *reader
 	telemetry := &estargz.Telemetry{}
-	vr, err := NewReader(sr, cache, telemetry)
+	vr, err := NewReader(sr, cache, digest.FromString(""), telemetry)
 	if vr != nil {
 		r = vr.r
 		r.verifier = ev

@@ -117,7 +117,7 @@ func TestPrefetch(t *testing.T) {
 			mcache := cache.NewMemoryCache()
 			// define telemetry hooks to measure latency metrics inside estargz package
 			telemetry := estargz.Telemetry{}
-			vr, err := reader.NewReader(sr, mcache, &telemetry)
+			vr, err := reader.NewReader(sr, mcache, testStateLayerDigest, &telemetry)
 			if err != nil {
 				t.Fatalf("failed to make stargz reader: %v", err)
 			}
