@@ -18,6 +18,8 @@ package service
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/containerd/containerd/log"
@@ -25,6 +27,7 @@ import (
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
+	"github.com/containerd/stargz-snapshotter/snapshot"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/snapshot/overlayutils"
 	"github.com/hashicorp/go-multierror"
@@ -53,6 +56,22 @@ func WithCustomRegistryHosts(hosts source.RegistryHosts) Option {
 
 // NewStargzSnapshotterService returns stargz snapshotter.
 func NewStargzSnapshotterService(ctx context.Context, root string, config *Config, opts ...Option) (snapshots.Snapshotter, error) {
+	fs, err := NewFileSystem(ctx, root, config, opts...)
+	if err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
+	}
+
+	var snapshotter snapshots.Snapshotter
+
+	snapshotter, err = snbase.NewSnapshotter(ctx, snapshotterRoot(root), fs, snbase.AsynchronousRemove)
+	if err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to create new snapshotter")
+	}
+
+	return snapshotter, err
+}
+
+func NewFileSystem(ctx context.Context, root string, config *Config, opts ...Option) (snapshot.FileSystem, error) {
 	var sOpts options
 	for _, o := range opts {
 		o(&sOpts)
@@ -73,17 +92,43 @@ func NewStargzSnapshotterService(ctx context.Context, root string, config *Confi
 		)),
 	)
 	if err != nil {
-		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
+		return nil, err
 	}
 
-	var snapshotter snapshots.Snapshotter
+	return fs, nil
+}
 
-	snapshotter, err = snbase.NewSnapshotter(ctx, snapshotterRoot(root), fs, snbase.AsynchronousRemove)
-	if err != nil {
-		log.G(ctx).WithError(err).Fatalf("failed to create new snapshotter")
+func StartFuseManager(ctx context.Context, executable, address, fusestore, logLevel, logPath string) error {
+	// if socket exists, do not start it
+	if _, err := os.Stat(address); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 
-	return snapshotter, err
+	if _, err := os.Stat(executable); err != nil {
+		log.G(ctx).WithError(err).Errorf("failed to stat fusemanager binary: %s", executable)
+		return err
+	}
+
+	args := []string{
+		"-action", "start",
+		"-address", address,
+		"-fusestore-path", fusestore,
+		"-log-level", logLevel,
+		"-log-path", logPath,
+	}
+
+	cmd := exec.Command(executable, args...)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func snapshotterRoot(root string) string {

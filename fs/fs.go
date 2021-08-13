@@ -70,6 +70,13 @@ const (
 	fusermountBin         = "fusermount"
 )
 
+var (
+	nsLock = sync.Mutex{}
+
+	ns         *metrics.Namespace
+	metricsCtr *layermetrics.Controller
+)
+
 type Option func(*options)
 
 type options struct {
@@ -114,14 +121,16 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		return nil, errors.Wrapf(err, "failed to setup resolver")
 	}
 
-	var ns *metrics.Namespace
-	if !cfg.NoPrometheus {
+	nsLock.Lock()
+	defer nsLock.Unlock()
+
+	if !cfg.NoPrometheus && ns == nil {
 		ns = metrics.NewNamespace("stargz", "fs", nil)
 		commonmetrics.Register() // Register common metrics. This will happen only once.
+		metrics.Register(ns)     // Register layer metrics.
 	}
-	c := layermetrics.NewLayerMetrics(ns)
-	if ns != nil {
-		metrics.Register(ns) // Register layer metrics.
+	if metricsCtr == nil {
+		metricsCtr = layermetrics.NewLayerMetrics(ns)
 	}
 
 	return &filesystem{
@@ -135,7 +144,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		backgroundTaskManager: tm,
 		allowNoVerification:   cfg.AllowNoVerification,
 		disableVerification:   cfg.DisableVerification,
-		metricsController:     c,
+		metricsController:     metricsCtr,
 		attrTimeout:           attrTimeout,
 		entryTimeout:          entryTimeout,
 	}, nil

@@ -95,6 +95,14 @@ root@1d43741b8d29:/go# cat /.stargz-snapshotter/*
 {"digest":"sha256:f077511be7d385c17ba88980379c5cd0aab7068844dffa7a1cefbf68cc3daea3","size":580,"fetchedSize":580,"fetchedPercent":100}
 ```
 
+## Fuse manager
+
+Remote snapshots are mounted using FUSE, its filesystem process are attached to stargz snapshotter. If stargz snapshotter restarts (The reason may be a change of configuration or a crash), all filesystem process will be killed and restarted, which cause the remount of FUSE mountpoints, making running containers unavailable.
+
+To avoid this, we use a fuse daemon called fuse manager to handle filesystem process. Fuse manager is responsible for Mount and Unmount of remote snapshotters, its process is detached from stargz snapshotter main process to an independent one in a shim-like way during snapshotter's startup, so the restart of snapshotter won't affect filesystem process it manages, keeping mountpoints and running containers available during restart. But we still need to note that the restart of fuse manager itself triggers remount, so it's recommended to keep fuse manager running in good state.
+
+You can enable fuse manager by adding flag `--detach-fuse-manager=true` to stargz snapshotter.
+
 ## Registry-related configuration
 
 You can configure stargz snapshotter for accessing registries with custom configurations.
