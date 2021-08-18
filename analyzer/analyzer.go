@@ -331,6 +331,7 @@ func waitOnTimeout(ctx context.Context, container containerd.Container, task con
 	case status := <-statusC:
 		return status, true, nil
 	case <-time.After(period):
+		log.G(ctx).Warnf("killing task. the time period to monitor access log (%s) has timed out", period.String())
 		status, err := killTask(ctx, container, task, statusC)
 		if err != nil {
 			log.G(ctx).WithError(err).Warnf("failed to kill container")
