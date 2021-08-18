@@ -28,7 +28,7 @@ To enable lazy pulling of eStargz on containerd, you need to install *Stargz Sna
 This section shows the step to install Stargz Snapshotter with systemd.
 We assume that you are using containerd (> v1.4.2) as a CRI runtime.
 
-- Download release tarball from [the release page](https://github.com/containerd/stargz-snapshotter/releases). For example, amd64 binary of v0.6.0 is available from https://github.com/containerd/stargz-snapshotter/releases/download/v0.6.0/stargz-snapshotter-v0.6.0-linux-amd64.tar.gz.
+- Download release tarball from [the release page](https://github.com/containerd/stargz-snapshotter/releases).
 
 - Add the following configuration to containerd's configuration file (typically: /etc/containerd/config.toml). Please see also [an example configuration file](../script/config/etc/containerd/config.toml).
   ```toml
@@ -80,7 +80,7 @@ To enable lazy pulling of eStargz on CRI-O/Podman, you need to install *Stargz S
 This section shows the step to install Stargz Store with systemd.
 We assume that you are using CRI-O newer than https://github.com/cri-o/cri-o/pull/4850 or Podman newer than https://github.com/containers/podman/pull/10214 .
 
-- Download release tarball from [the release page](https://github.com/containerd/stargz-snapshotter/releases). For example, amd64 binary of v0.6.0 is available from https://github.com/containerd/stargz-snapshotter/releases/download/v0.6.0/stargz-snapshotter-v0.6.0-linux-amd64.tar.gz.
+- Download release tarball from [the release page](https://github.com/containerd/stargz-snapshotter/releases).
 
 - Add the following configuration to the storage configuration file of CRI-O/Podman (typically: /etc/containers/storage.conf). Please see also [an example configuration file](../script/config-cri-o/etc/containers/storage.conf).
   ```toml
