@@ -115,7 +115,7 @@ ARG TARGETARCH
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
 RUN apt install -y --no-install-recommends git make gcc build-essential jq && \
-    curl https://dl.google.com/go/go1.16.4.linux-\${TARGETARCH:-amd64}.tar.gz \
+    curl https://dl.google.com/go/go1.17.linux-\${TARGETARCH:-amd64}.tar.gz \
     | tar -C /usr/local -xz && \
     go get -u github.com/onsi/ginkgo/ginkgo && \
     git clone https://github.com/kubernetes-sigs/cri-tools \
