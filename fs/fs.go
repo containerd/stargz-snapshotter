@@ -301,6 +301,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 				log.G(ctx).WithError(err).Warnf("failed to fetch whole layer=%v", digest)
 				return
 			}
+			commonmetrics.LogLatencyForLastOnDemandFetch(ctx, digest, start, l.Info().ReadTime) // write log record for the latency between mount start and last on demand fetch
 			log.G(ctx).Debug("completed to fetch all layer data in background")
 		}()
 	}

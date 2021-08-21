@@ -324,6 +324,7 @@ func (tr *testReader) OpenFile(name string) (io.ReaderAt, error)    { return tr.
 func (tr *testReader) Lookup(name string) (*estargz.TOCEntry, bool) { return tr.r.Lookup(name) }
 func (tr *testReader) Cache(opts ...reader.CacheOption) error       { return nil }
 func (tr *testReader) Close() error                                 { return nil }
+func (tr *testReader) LastOnDemandReadTime() time.Time              { return time.Now() }
 
 type testBlobState struct {
 	size        int64
