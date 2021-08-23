@@ -46,11 +46,11 @@ stargz-store: FORCE
 
 check:
 	@echo "$@"
-	@GO111MODULE=$(GO111MODULE_VALUE) golangci-lint run
-	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) golangci-lint run
+	@GO111MODULE=$(GO111MODULE_VALUE) $(shell go env GOPATH)/bin/golangci-lint run
+	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) $(shell go env GOPATH)/bin/golangci-lint run
 
 install-check-tools:
-	@curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.39.0
+	@curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(shell go env GOPATH)/bin v1.39.0
 
 install:
 	@echo "$@"
