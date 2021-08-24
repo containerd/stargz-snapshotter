@@ -34,6 +34,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/containerd/sys"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
@@ -75,6 +76,9 @@ type snapshotterConfig struct {
 
 	// NoPrometheus is a flag to disable the emission of the metrics
 	NoPrometheus bool `toml:"no_prometheus"`
+
+	// DebugAddress is a Unix domain socket address where the snapshotter exposes /debug/ endpoints.
+	DebugAddress string `toml:"debug_address"`
 }
 
 func main() {
@@ -203,6 +207,19 @@ func serve(ctx context.Context, rpc *grpc.Server, addr string, rs snapshots.Snap
 		go func() {
 			if err := http.Serve(l, m); err != nil {
 				errCh <- errors.Wrapf(err, "error on serving metrics via socket %q", addr)
+			}
+		}()
+	}
+
+	if config.DebugAddress != "" {
+		log.G(ctx).Infof("listen %q for debugging", config.DebugAddress)
+		l, err := sys.GetLocalListener(config.DebugAddress, 0, 0)
+		if err != nil {
+			return false, errors.Wrapf(err, "failed to listen %q", config.DebugAddress)
+		}
+		go func() {
+			if err := http.Serve(l, debugServerMux()); err != nil {
+				errCh <- errors.Wrapf(err, "error on serving a debug endpoint via socket %q", addr)
 			}
 		}()
 	}
