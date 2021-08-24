@@ -89,17 +89,16 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	if r.blobConfig.ForceSingleRangeMode {
 		fetcher.singleRangeMode()
 	}
-	return &blob{
-		fetcher:           fetcher,
-		size:              size,
-		chunkSize:         r.blobConfig.ChunkSize,
-		prefetchChunkSize: r.blobConfig.PrefetchChunkSize,
-		cache:             blobCache,
-		lastCheck:         time.Now(),
-		checkInterval:     time.Duration(r.blobConfig.ValidInterval) * time.Second,
-		resolver:          r,
-		fetchTimeout:      time.Duration(r.blobConfig.FetchTimeoutSec) * time.Second,
-	}, nil
+
+	return makeBlob(fetcher,
+		size,
+		r.blobConfig.ChunkSize,
+		r.blobConfig.PrefetchChunkSize,
+		blobCache,
+		time.Now(),
+		time.Duration(r.blobConfig.ValidInterval)*time.Second,
+		r,
+		time.Duration(r.blobConfig.FetchTimeoutSec)*time.Second), nil
 }
 
 func newFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (*fetcher, int64, error) {
