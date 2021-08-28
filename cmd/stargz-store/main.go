@@ -123,11 +123,11 @@ func main() {
 		log.G(ctx).Warnf("content verification is not supported; switching to non-verification mode")
 		config.Config.DisableVerification = true
 	}
-	pool, err := store.NewPool(*rootDir, hosts, config.Config)
+	layerManager, err := store.NewLayerManager(ctx, *rootDir, hosts, config.Config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to prepare pool")
 	}
-	if err := store.Mount(ctx, mountPoint, pool, config.Config.Debug); err != nil {
+	if err := store.Mount(ctx, mountPoint, layerManager, config.Config.Debug); err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to mount fs at %q", mountPoint)
 	}
 	defer func() {
