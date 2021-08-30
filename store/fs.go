@@ -17,8 +17,10 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"os/exec"
 	"syscall"
@@ -32,30 +34,28 @@ import (
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
 
 const (
 	defaultLinkMode = syscall.S_IFLNK | 0400 // -r--------
 	defaultDirMode  = syscall.S_IFDIR | 0500 // dr-x------
+	defaultFileMode = 0400                   // -r--------
 	layerFileMode   = 0400                   // -r--------
 	blockSize       = 4096
 
-	poolLink          = "pool"
-	layerLink         = "diff"
-	blobLink          = "blob"
-	debugManifestLink = "manifest"
-	debugConfigLink   = "config"
-	layerInfoLink     = "info"
-	layerUseFile      = "use"
+	poolLink      = "pool"
+	layerLink     = "diff"
+	blobLink      = "blob"
+	layerInfoLink = "info"
+	layerUseFile  = "use"
 
 	fusermountBin = "fusermount"
 )
 
-func Mount(ctx context.Context, mountpoint string, pool *Pool, debug bool) error {
+func Mount(ctx context.Context, mountpoint string, layerManager *LayerManager, debug bool) error {
 	timeSec := time.Second
-	rawFS := fusefs.NewNodeFS(&rootnode{pool: pool}, &fusefs.Options{
+	rawFS := fusefs.NewNodeFS(&rootnode{layerManager: layerManager}, &fusefs.Options{
 		AttrTimeout:     &timeSec,
 		EntryTimeout:    &timeSec,
 		NullPermissions: true,
@@ -82,7 +82,7 @@ func Mount(ctx context.Context, mountpoint string, pool *Pool, debug bool) error
 // rootnode is the mountpoint node of stargz-store.w
 type rootnode struct {
 	fusefs.Inode
-	pool *Pool
+	layerManager *LayerManager
 }
 
 var _ = (fusefs.InodeEmbedder)((*rootnode)(nil))
@@ -94,8 +94,10 @@ var _ = (fusefs.NodeLookuper)((*rootnode)(nil))
 func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
 	switch name {
 	case poolLink:
-		return n.NewInode(ctx,
-			&linknode{linkname: n.pool.root()}, defaultLinkAttr(&out.Attr)), 0
+		sAttr := defaultLinkAttr(&out.Attr)
+		var attr2 fuse.Attr
+		copyAttr(&attr2, &out.Attr)
+		return n.NewInode(ctx, &fusefs.MemSymlink{Attr: attr2, Data: []byte(n.layerManager.refPool.root())}, sAttr), 0
 	}
 	refBytes, err := base64.StdEncoding.DecodeString(name)
 	if err != nil {
@@ -108,32 +110,18 @@ func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 		log.G(ctx).WithError(err).Warnf("invalid reference %q for %q", ref, name)
 		return nil, syscall.EINVAL
 	}
-	manifest, mPath, config, cPath, err := n.pool.loadManifestAndConfig(ctx, refspec)
-	if err != nil {
-		log.G(ctx).WithError(err).
-			Warnf("failed to fetch manifest and config of %q(%q)", ref, name)
-		return nil, syscall.EIO
-	}
 	return n.NewInode(ctx, &refnode{
-		pool:         n.pool,
+		layerManager: n.layerManager,
 		ref:          refspec,
-		manifest:     manifest,
-		manifestPath: mPath,
-		config:       config,
-		configPath:   cPath,
 	}, defaultDirAttr(&out.Attr)), 0
 }
 
 // refnode is the node at <mountpoint>/<imageref>.
 type refnode struct {
 	fusefs.Inode
-	pool *Pool
+	layerManager *LayerManager
 
-	ref          reference.Spec
-	manifest     ocispec.Manifest
-	manifestPath string
-	config       ocispec.Image
-	configPath   string
+	ref reference.Spec
 }
 
 var _ = (fusefs.InodeEmbedder)((*refnode)(nil))
@@ -142,35 +130,15 @@ var _ = (fusefs.NodeLookuper)((*refnode)(nil))
 
 // Lookup returns layernode of the specified name
 func (n *refnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
-	switch name {
-	case debugManifestLink:
-		return n.NewInode(ctx,
-			&linknode{linkname: n.manifestPath}, defaultLinkAttr(&out.Attr)), 0
-	case debugConfigLink:
-		return n.NewInode(ctx,
-			&linknode{linkname: n.configPath}, defaultLinkAttr(&out.Attr)), 0
-	}
 	targetDigest, err := digest.Parse(name)
 	if err != nil {
 		log.G(ctx).WithError(err).Warnf("invalid digest for %q", name)
 		return nil, syscall.EINVAL
 	}
-	var layer *ocispec.Descriptor
-	for _, l := range n.manifest.Layers {
-		if l.Digest == targetDigest {
-			layer = &l
-			break
-		}
-	}
-	if layer == nil {
-		log.G(ctx).WithError(err).Warnf("invalid digest for %q: %q", name, targetDigest.String())
-		return nil, syscall.EINVAL
-	}
 	return n.NewInode(ctx, &layernode{
-		pool:    n.pool,
-		layer:   *layer,
-		layers:  n.manifest.Layers,
-		refnode: n,
+		layerManager: n.layerManager,
+		digest:       targetDigest,
+		refnode:      n,
 	}, defaultDirAttr(&out.Attr)), 0
 }
 
@@ -180,33 +148,33 @@ var _ = (fusefs.NodeRmdirer)((*refnode)(nil))
 // We don't use layernode.Unlink because Unlink event doesn't reach here when "use" file isn't visible
 // to the filesystem client.
 func (n *refnode) Rmdir(ctx context.Context, name string) syscall.Errno {
-	if name == debugManifestLink || name == debugConfigLink {
-		return syscall.EROFS // nop
-	}
 	targetDigest, err := digest.Parse(name)
 	if err != nil {
 		log.G(ctx).WithError(err).Warnf("invalid digest for %q during release", name)
 		return syscall.EINVAL
 	}
-	current, err := n.pool.release(n.ref, targetDigest)
+	current, err := n.layerManager.release(ctx, n.ref, targetDigest)
 	if err != nil {
 		log.G(ctx).WithError(err).Warnf("failed to release layer %v / %v", n.ref, targetDigest)
 		return syscall.EIO
 
 	}
-	log.G(ctx).WithField("refcounter", current).Warnf("layer %v / %v is marked as RELEASE", n.ref, targetDigest)
+	if current == 0 {
+		if cn := n.GetChild(name); cn != nil {
+			cn.RmAllChildren() // release all children of the layer.
+		}
+	}
+	log.G(ctx).WithField("refcounter", current).Infof("layer %v/%v is marked as RELEASE", n.ref, targetDigest)
 	return syscall.ENOENT
 }
 
 // layernode is the node at <mountpoint>/<imageref>/<layerdigest>.
 type layernode struct {
 	fusefs.Inode
-	pool *Pool
-
-	layer  ocispec.Descriptor
-	layers []ocispec.Descriptor
+	layerManager *LayerManager
 
 	refnode *refnode
+	digest  digest.Digest
 }
 
 var _ = (fusefs.InodeEmbedder)((*layernode)(nil))
@@ -217,12 +185,9 @@ var _ = (fusefs.NodeCreater)((*layernode)(nil))
 // We don't use refnode.Mkdir because Mkdir event doesn't reach here if layernode already exists.
 func (n *layernode) Create(ctx context.Context, name string, flags uint32, mode uint32, out *fuse.EntryOut) (node *fusefs.Inode, fh fusefs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	if name == layerUseFile {
-		current := n.pool.use(n.refnode.ref, n.layer.Digest)
-		log.G(ctx).WithField("refcounter", current).Warnf("layer %v / %v is marked as USING",
-			n.refnode.ref, n.layer.Digest)
+		current := n.layerManager.use(n.refnode.ref, n.digest)
+		log.G(ctx).WithField("refcounter", current).Infof("layer %v / %v is marked as USING", n.refnode.ref, n.digest)
 	}
-
-	// TODO: implement cleanup
 	return nil, nil, 0, syscall.ENOENT
 }
 
@@ -232,32 +197,37 @@ var _ = (fusefs.NodeLookuper)((*layernode)(nil))
 func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
 	switch name {
 	case layerInfoLink:
-		var err error
-		infopath, err := n.pool.loadLayerInfo(ctx, n.refnode.ref, n.layer.Digest)
+		info, err := n.layerManager.getLayerInfo(ctx, n.refnode.ref, n.digest)
 		if err != nil {
-			log.G(ctx).WithError(err).
-				Warnf("failed to get layer info for %q: %q", name, n.layer.Digest)
+			log.G(ctx).WithError(err).Warnf("failed to get layer info for %q: %q", name, n.digest)
 			return nil, syscall.EIO
 		}
-		return n.NewInode(ctx, &linknode{linkname: infopath}, defaultLinkAttr(&out.Attr)), 0
+		buf := new(bytes.Buffer)
+		if err := json.NewEncoder(buf).Encode(&info); err != nil {
+			log.G(ctx).WithError(err).Warnf("failed to encode layer info for %q: %q", name, n.digest)
+			return nil, syscall.EIO
+		}
+		infoData := buf.Bytes()
+		sAttr := defaultFileAttr(uint64(len(infoData)), &out.Attr)
+		var attr2 fuse.Attr
+		copyAttr(&attr2, &out.Attr)
+		return n.NewInode(ctx, &fusefs.MemRegularFile{Data: infoData, Attr: attr2}, sAttr), 0
 	case layerLink, blobLink:
-		l, err := n.pool.loadLayer(ctx, n.refnode.ref, n.layer, n.layers)
+		l, err := n.layerManager.getLayer(ctx, n.refnode.ref, n.digest)
 		if err != nil {
 			cErr := ctx.Err()
 			if errors.Is(cErr, context.Canceled) || errors.Is(err, context.Canceled) {
 				// When filesystem client canceled to lookup this layer,
 				// do not log this as "preparation failure" because it's
 				// intensional.
-				log.G(ctx).WithError(err).
-					Debugf("error resolving layer (context error: %v)", cErr)
+				log.G(ctx).WithError(err).Debugf("error resolving layer (context error: %v)", cErr)
 				return nil, syscall.EIO
 			}
 			log.G(ctx).WithField(remoteSnapshotLogKey, prepareFailed).
-				WithField("layerdigest", n.layer.Digest).
+				WithField("layerdigest", n.digest).
 				WithError(err).
 				Debugf("error resolving layer (context error: %v)", cErr)
-			log.G(ctx).WithError(err).Warnf("failed to mount layer %q: %q",
-				name, n.layer.Digest)
+			log.G(ctx).WithError(err).Warnf("failed to mount layer %q: %q", name, n.digest)
 			return nil, syscall.EIO
 		}
 		if name == blobLink {
@@ -266,7 +236,7 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 		root, err := l.RootNode()
 		if err != nil {
 			log.G(ctx).WithField(remoteSnapshotLogKey, prepareFailed).
-				WithField("layerdigest", n.layer.Digest).
+				WithField("layerdigest", n.digest).
 				WithError(err).
 				Debugf("failed to get root node")
 			return nil, syscall.EIO
@@ -274,7 +244,7 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 		var ao fuse.AttrOut
 		if errno := root.(fusefs.NodeGetattrer).Getattr(ctx, nil, &ao); errno != 0 {
 			log.G(ctx).WithField(remoteSnapshotLogKey, prepareFailed).
-				WithField("layerdigest", n.layer.Digest).
+				WithField("layerdigest", n.digest).
 				WithError(err).
 				Debugf("failed to get root node")
 			return nil, errno
@@ -332,19 +302,6 @@ func (f *blobfile) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Errno
 	return 0
 }
 
-type linknode struct {
-	fusefs.Inode
-	linkname string
-}
-
-var _ = (fusefs.InodeEmbedder)((*linknode)(nil))
-
-var _ = (fusefs.NodeReadlinker)((*linknode)(nil))
-
-func (n *linknode) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
-	return []byte(n.linkname), 0 // TODO: linkname shouldn't statically embedded?
-}
-
 func copyAttr(dest, src *fuse.Attr) {
 	dest.Ino = src.Ino
 	dest.Size = src.Size
@@ -379,6 +336,26 @@ func layerToAttr(l layer.Layer, out *fuse.Attr) fusefs.StableAttr {
 	// out.Rdev
 	// out.Padding
 
+	return fusefs.StableAttr{
+		Mode: out.Mode,
+	}
+}
+
+func defaultFileAttr(size uint64, out *fuse.Attr) fusefs.StableAttr {
+	// out.Ino
+	out.Size = size
+	out.Blksize = blockSize
+	out.Blocks = out.Size / uint64(out.Blksize)
+	if out.Size%uint64(out.Blksize) > 0 {
+		out.Blocks++
+	}
+	out.Nlink = 1
+	out.Mode = defaultFileMode
+	out.Owner = fuse.Owner{Uid: 0, Gid: 0}
+	// out.Mtime
+	// out.Mtimensec
+	// out.Rdev
+	// out.Padding
 	return fusefs.StableAttr{
 		Mode: out.Mode,
 	}
