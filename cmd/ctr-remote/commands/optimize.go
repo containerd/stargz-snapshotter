@@ -45,6 +45,7 @@ import (
 
 const defaultPeriod = 10
 
+// OptimizeCommand converts and optimizes an image
 var OptimizeCommand = cli.Command{
 	Name:      "optimize",
 	Usage:     "optimize an image with user-specified workload",

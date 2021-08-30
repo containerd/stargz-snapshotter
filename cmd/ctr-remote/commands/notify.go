@@ -24,6 +24,7 @@ import (
 	"github.com/urfave/cli"
 )
 
+// FanotifyCommand notifies filesystem event under the specified directory.
 var FanotifyCommand = cli.Command{
 	Name:   "fanotify",
 	Hidden: true,

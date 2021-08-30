@@ -101,7 +101,7 @@ func NewPool(root string, hosts source.RegistryHosts, cfg config.Config) (*Pool,
 	}, nil
 }
 
-// resolver provides manifests, configs and layers of images.
+// Pool provides manifests, configs and layers of images.
 // This also manages caches for these resources.
 type Pool struct {
 	path         string

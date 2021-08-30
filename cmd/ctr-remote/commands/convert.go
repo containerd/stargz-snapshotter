@@ -35,6 +35,7 @@ import (
 	"github.com/urfave/cli"
 )
 
+// ConvertCommand converts an image
 var ConvertCommand = cli.Command{
 	Name:      "convert",
 	Usage:     "convert an image",
