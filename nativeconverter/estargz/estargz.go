@@ -34,8 +34,8 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// LayerConvertWithLayerOptsFunc converts legacy tar.gz layers into eStargz tar.gz layers.
-// Media type is unchanged. Should be used in conjunction with WithDockerToOCI(). See
+// LayerConvertWithLayerAndCommonOptsFunc converts legacy tar.gz layers into eStargz tar.gz
+// layers. Media type is unchanged. Should be used in conjunction with WithDockerToOCI(). See
 // LayerConvertFunc for more details. The difference between this function and
 // LayerConvertFunc is that this allows to specify additional eStargz options per layer.
 func LayerConvertWithLayerAndCommonOptsFunc(opts map[digest.Digest][]estargz.Option, commonOpts ...estargz.Option) converter.ConvertFunc {

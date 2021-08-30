@@ -77,7 +77,7 @@ type tarEntryFunc func(*tar.Writer, BuildTarOptions) error
 
 func (f tarEntryFunc) AppendTar(tw *tar.Writer, opts BuildTarOptions) error { return f(tw, opts) }
 
-// DirecoryBuildTarOption is an option for a directory entry.
+// DirectoryBuildTarOption is an option for a directory entry.
 type DirectoryBuildTarOption func(o *dirOpts)
 
 type dirOpts struct {
@@ -102,7 +102,7 @@ func WithDirXattrs(xattrs map[string]string) DirectoryBuildTarOption {
 	}
 }
 
-// WithdirMode specifies the mode of the directory.
+// WithDirMode specifies the mode of the directory.
 func WithDirMode(mode os.FileMode) DirectoryBuildTarOption {
 	return func(o *dirOpts) {
 		o.mode = &mode

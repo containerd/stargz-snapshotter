@@ -37,6 +37,7 @@ const (
 	skipContentVerifyOpt  = "skip-content-verify"
 )
 
+// RpullCommand is a subcommand to pull an image from a registry levaraging stargz snapshotter
 var RpullCommand = cli.Command{
 	Name:      "rpull",
 	Usage:     "pull an image from a registry levaraging stargz snapshotter",
@@ -83,10 +84,7 @@ command.
 			config.skipVerify = true
 		}
 
-		if err := pull(ctx, client, ref, config); err != nil {
-			return err
-		}
-		return nil
+		return pull(ctx, client, ref, config)
 	},
 }
 

@@ -30,7 +30,7 @@ type buildEStargzOptions struct {
 
 type BuildEStargzOption func(o *buildEStargzOptions) error
 
-// WithChunkSize option specifies the chunk size of eStargz blob to build.
+// WithEStargzOptions specifies options for estargz.Build.
 func WithEStargzOptions(eo ...estargz.Option) BuildEStargzOption {
 	return func(o *buildEStargzOptions) error {
 		o.estargzOptions = eo
