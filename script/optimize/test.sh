@@ -82,7 +82,7 @@ FROM ${OPTIMIZE_BASE_IMAGE_NAME}
 ARG TARGETARCH
 
 RUN apt-get update -y && \
-    apt-get --no-install-recommends install -y jq iptables && \
+    apt-get --no-install-recommends install -y jq iptables zstd && \
     GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane && \
     mkdir -p /opt/tmp/cni/bin /etc/tmp/cni/net.d && \
     curl -Ls https://github.com/containernetworking/plugins/releases/download/v${CNI_PLUGINS_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-v${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/tmp/cni/bin && \
@@ -103,6 +103,9 @@ echo "Testing..."
 function test_optimize {
     local OPTIMIZE_COMMAND="${1}"
     local NO_OPTIMIZE_COMMAND="${2}"
+    local GETTOCDIGEST_COMMAND="${3}"
+    local DECOMPRESS_COMMAND="${4}"
+    local INVISIBLE_TOC="${5}"
     cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3.3"
 services:
@@ -116,6 +119,9 @@ services:
     - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:443
     - OPTIMIZE_COMMAND=${OPTIMIZE_COMMAND}
     - NO_OPTIMIZE_COMMAND=${NO_OPTIMIZE_COMMAND}
+    - GETTOCDIGEST_COMMAND=${GETTOCDIGEST_COMMAND}
+    - DECOMPRESS_COMMAND=${DECOMPRESS_COMMAND}
+    - INVISIBLE_TOC=${INVISIBLE_TOC}
     tmpfs:
     - /tmp:exec,mode=777
     volumes:
@@ -154,6 +160,16 @@ EOF
     fi
 }
 
-test_optimize "image optimize --oci" "image optimize --no-optimize --oci"
+test_optimize "image optimize --oci --zstdchunked" \
+              "image optimize --no-optimize --oci --zstdchunked" \
+              "image get-toc-digest --zstdchunked" \
+              "zstd -d" \
+              "true"
+
+test_optimize "image optimize --oci" \
+              "image optimize --no-optimize --oci" \
+              "image get-toc-digest" \
+              "gunzip" \
+              "false"
 
 exit 0

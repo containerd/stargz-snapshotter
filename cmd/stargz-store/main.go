@@ -119,6 +119,10 @@ func main() {
 				Fatalf("failed to prepare mountpoint %q", mountPoint)
 		}
 	}
+	if !config.Config.DisableVerification {
+		log.G(ctx).Warnf("content verification is not supported; switching to non-verification mode")
+		config.Config.DisableVerification = true
+	}
 	pool, err := store.NewPool(*rootDir, hosts, config.Config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to prepare pool")

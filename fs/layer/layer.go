@@ -218,7 +218,7 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 }
 
 // Resolve resolves a layer based on the passed layer blob information.
-func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (_ Layer, retErr error) {
+func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, esgzOpts ...estargz.OpenOption) (_ Layer, retErr error) {
 	name := refspec.String() + "/" + desc.Digest.String()
 
 	// Wait if resolving this layer is already running. The result
@@ -288,7 +288,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 			commonmetrics.MeasureLatency(commonmetrics.DeserializeTocJSON, desc.Digest, start)
 		},
 	}
-	vr, err := reader.NewReader(sr, fsCache, desc.Digest, &telemetry)
+	vr, err := reader.NewReader(sr, fsCache, desc.Digest, &telemetry, esgzOpts...)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read layer")
 	}

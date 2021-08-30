@@ -94,10 +94,10 @@ EOF
 function validate_toc_json {
     local MANIFEST=${1}
     local LAYER_NUM=${2}
-    local LAYER_TAR=${3}
 
     TOCJSON_ANNOTATION="$(cat ${MANIFEST} | jq -r '.layers['"${LAYER_NUM}"'].annotations."'${TOC_JSON_DIGEST_ANNOTATION}'"')"
-    TOCJSON_DIGEST=$(tar -xOf "${LAYER_TAR}" "stargz.index.json" | sha256sum | sed -E 's/([^ ]*).*/sha256:\1/g')
+    LAYER_DIGEST="$(cat ${MANIFEST} | jq -r '.layers['"${LAYER_NUM}"'].digest')"
+    TOCJSON_DIGEST="$(/tmp/out/ctr-remote ${GETTOCDIGEST_COMMAND} ${LAYER_DIGEST})"
 
     if [ "${TOCJSON_ANNOTATION}" != "${TOCJSON_DIGEST}" ] ; then
         echo "Invalid TOC JSON (layer:${LAYER_NUM}): want ${TOCJSON_ANNOTATION}; got: ${TOCJSON_DIGEST}"
@@ -114,7 +114,7 @@ function check_uncompressed_size {
     local LAYER_TAR=${3}
 
     SIZE_ANNOTATION="$(cat ${MANIFEST} | jq -r '.layers['"${LAYER_NUM}"'].annotations."'${UNCOMPRESSED_SIZE_ANNOTATION}'"')"
-    SIZE=$(cat "${LAYER_TAR}" | gunzip | wc -c)
+    SIZE=$(cat "${LAYER_TAR}" | ${DECOMPRESS_COMMAND} | wc -c)
 
     if [ "${SIZE_ANNOTATION}" != "${SIZE}" ] ; then
         echo "Invalid uncompressed size (layer:${LAYER_NUM}): want ${SIZE_ANNOTATION}; got: ${SIZE}"
@@ -156,9 +156,7 @@ function check_optimization {
     INDEX=0
     for L in ${LAYERS}; do
         echo "Validating TOC JSON digest of layer ${INDEX}..."
-        validate_toc_json "${LOCAL_WORKING_DIR}/dist-manifest.json" \
-                          "${INDEX}" \
-                          "${LOCAL_WORKING_DIR}/${L}"
+        validate_toc_json "${LOCAL_WORKING_DIR}/dist-manifest.json" "${INDEX}"
         check_uncompressed_size "${LOCAL_WORKING_DIR}/dist-manifest.json" \
                                 "${INDEX}" \
                                 "${LOCAL_WORKING_DIR}/${L}"
@@ -166,6 +164,13 @@ function check_optimization {
     done
 
     return 0
+}
+
+function append_toc {
+    local TARGET="${1}"
+    if [ "${INVISIBLE_TOC}" != "true" ] ; then
+        echo "stargz.index.json" >> "${TARGET}"
+    fi
 }
 
 echo "===== VERSION INFORMATION ====="
@@ -207,21 +212,21 @@ accessor
 a.txt
 .prefetch.landmark
 b.txt
-stargz.index.json
 EOF
+append_toc "${WORKING_DIR}/0-want"
 
 cat <<EOF > "${WORKING_DIR}/1-want"
 c.txt
 .prefetch.landmark
 d.txt
-stargz.index.json
 EOF
+append_toc "${WORKING_DIR}/1-want"
 
 cat <<EOF > "${WORKING_DIR}/2-want"
 .no.prefetch.landmark
 e.txt
-stargz.index.json
 EOF
+append_toc "${WORKING_DIR}/2-want"
 
 check_optimization "${OPT_IMAGE_TAG}" \
                    "${WORKING_DIR}/0-want" \
@@ -236,21 +241,21 @@ cat <<EOF > "${WORKING_DIR}/0-want"
 a.txt
 accessor
 b.txt
-stargz.index.json
 EOF
+append_toc "${WORKING_DIR}/0-want"
 
 cat <<EOF > "${WORKING_DIR}/1-want"
 .no.prefetch.landmark
 c.txt
 d.txt
-stargz.index.json
 EOF
+append_toc "${WORKING_DIR}/1-want"
 
 cat <<EOF > "${WORKING_DIR}/2-want"
 .no.prefetch.landmark
 e.txt
-stargz.index.json
 EOF
+append_toc "${WORKING_DIR}/2-want"
 
 check_optimization "${NOOPT_IMAGE_TAG}" \
                    "${WORKING_DIR}/0-want" \

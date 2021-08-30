@@ -34,6 +34,7 @@ import (
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	layermetrics "github.com/containerd/stargz-snapshotter/fs/metrics/layer"
@@ -266,7 +267,18 @@ func (p *Pool) resolveLayer(ctx context.Context, refspec reference.Spec, target 
 	}
 
 	// Resolve this layer.
-	l, err := p.resolver.Resolve(ctx, p.hosts, refspec, target)
+	var esgzOpts []estargz.OpenOption
+	if target.Annotations != nil {
+		if tocOffsetStr, ok := target.Annotations[zstdchunked.ZstdChunkedManifestPositionAnnotation]; ok {
+			if parts := strings.Split(tocOffsetStr, ":"); len(parts) == 4 {
+				tocOffset, err := strconv.ParseInt(parts[0], 10, 64)
+				if err == nil {
+					esgzOpts = append(esgzOpts, estargz.WithTOCOffset(tocOffset))
+				}
+			}
+		}
+	}
+	l, err := p.resolver.Resolve(ctx, p.hosts, refspec, target, esgzOpts...)
 	if err != nil {
 		return nil, err
 	}

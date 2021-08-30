@@ -32,8 +32,10 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/analyzer"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
+	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
+	"github.com/containerd/stargz-snapshotter/nativeconverter"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
+	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
 	"github.com/opencontainers/go-digest"
@@ -82,8 +84,12 @@ var OptimizeCommand = cli.Command{
 		},
 		cli.IntFlag{
 			Name:  "estargz-compression-level",
-			Usage: "eStargz compression level",
+			Usage: "eStargz compression level (only applied to gzip as of now)",
 			Value: gzip.BestCompression,
+		},
+		cli.BoolFlag{
+			Name:  "zstdchunked",
+			Usage: "use zstd compression instead of gzip (a.k.a zstd:chunked)",
 		},
 	}, samplerFlags...),
 	Action: func(clicontext *cli.Context) error {
@@ -94,7 +100,10 @@ var OptimizeCommand = cli.Command{
 			return errors.New("src and target image need to be specified")
 		}
 
-		if !clicontext.Bool("all-platforms") {
+		var platformMC platforms.MatchComparer
+		if clicontext.Bool("all-platforms") {
+			platformMC = platforms.All
+		} else {
 			if pss := clicontext.StringSlice("platform"); len(pss) > 0 {
 				var all []ocispec.Platform
 				for _, ps := range pss {
@@ -104,16 +113,19 @@ var OptimizeCommand = cli.Command{
 					}
 					all = append(all, p)
 				}
-				convertOpts = append(convertOpts, converter.WithPlatform(platforms.Ordered(all...)))
+				platformMC = platforms.Ordered(all...)
 			} else {
-				convertOpts = append(convertOpts, converter.WithPlatform(platforms.DefaultStrict()))
+				platformMC = platforms.DefaultStrict()
 			}
 		}
+		convertOpts = append(convertOpts, converter.WithPlatform(platformMC))
 
+		var docker2oci bool
 		if clicontext.Bool("oci") {
+			docker2oci = true
 			convertOpts = append(convertOpts, converter.WithDockerToOCI(true))
-		} else {
-			logrus.Warn("option --oci should be used as well")
+		} else if clicontext.Bool("zstdchunked") {
+			return errors.New("option --zstdchunked must be used in conjunction with --oci")
 		}
 
 		client, ctx, cancel, err := commands.NewClient(clicontext)
@@ -137,15 +149,22 @@ var OptimizeCommand = cli.Command{
 				return errors.Wrapf(err, "failed output record file")
 			}
 		}
-
-		compLevel := clicontext.Int("estargz-compression-level")
-
-		f := estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, estargz.WithCompressionLevel(compLevel))
+		var f converter.ConvertFunc
+		if clicontext.Bool("zstdchunked") {
+			f = zstdchunkedconvert.LayerConvertWithLayerOptsFunc(esgzOptsPerLayer)
+		} else {
+			f = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer,
+				estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")))
+		}
 		if wrapper != nil {
 			f = wrapper(f)
 		}
-		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(logWrapper(f)))
-
+		layerConvertFunc := logWrapper(f)
+		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(layerConvertFunc))
+		convertOpts = append(convertOpts, converter.WithIndexConvertFunc(
+			// index converter patched for zstd compression
+			// TODO: upstream this to containerd/containerd
+			nativeconverter.IndexConvertFunc(layerConvertFunc, docker2oci, platformMC)))
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
 			return err
@@ -295,19 +314,7 @@ func isReusableESGZLayer(ctx context.Context, desc ocispec.Descriptor, cs conten
 		return false
 	}
 	defer ra.Close()
-	// define telemetry hooks to measure latency metrics inside estargz package
-	telemetry := estargz.Telemetry{
-		GetFooterLatency: func(start time.Time) {
-			commonmetrics.MeasureLatency(commonmetrics.StargzFooterGet, desc.Digest, start)
-		},
-		GetTocLatency: func(start time.Time) {
-			commonmetrics.MeasureLatency(commonmetrics.StargzTocGet, desc.Digest, start)
-		},
-		DeserializeTocLatency: func(start time.Time) {
-			commonmetrics.MeasureLatency(commonmetrics.DeserializeTocJSON, desc.Digest, start)
-		},
-	}
-	r, err := estargz.OpenWithTelemetry(io.NewSectionReader(ra, 0, desc.Size), &telemetry)
+	r, err := estargz.Open(io.NewSectionReader(ra, 0, desc.Size), estargz.WithDecompressors(new(zstdchunked.Decompressor)))
 	if err != nil {
 		return false
 	}
