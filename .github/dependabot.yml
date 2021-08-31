@@ -12,6 +12,12 @@ updates:
       # This forcefully points to v1.22.1. See go.mod.
       - dependency-name: "github.com/urfave/cli"
 
+  # Automatic upgrade for go modules of estargz package.
+  - package-ecosystem: "gomod"
+    directory: "/estargz"
+    schedule:
+      interval: "daily"
+
   # Automatic upgrade for base images used in the Dockerfile
   - package-ecosystem: "docker"
     directory: "/"
