@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"sync"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/klauspost/compress/zstd"
@@ -90,10 +91,34 @@ func (z *zstdReadCloser) Close() error {
 type Compressor struct {
 	CompressionLevel zstd.EncoderLevel
 	Metadata         map[string]string
+
+	pool sync.Pool
 }
 
 func (zc *Compressor) Writer(w io.Writer) (io.WriteCloser, error) {
-	return zstd.NewWriter(w, zstd.WithEncoderLevel(zc.CompressionLevel))
+	if wc := zc.pool.Get(); wc != nil {
+		ec := wc.(*zstd.Encoder)
+		ec.Reset(w)
+		return &poolEncoder{ec, zc}, nil
+	}
+	ec, err := zstd.NewWriter(w, zstd.WithEncoderLevel(zc.CompressionLevel), zstd.WithLowerEncoderMem(true))
+	if err != nil {
+		return nil, err
+	}
+	return &poolEncoder{ec, zc}, nil
+}
+
+type poolEncoder struct {
+	*zstd.Encoder
+	zc *Compressor
+}
+
+func (w *poolEncoder) Close() error {
+	if err := w.Encoder.Close(); err != nil {
+		return err
+	}
+	w.zc.pool.Put(w.Encoder)
+	return nil
 }
 
 func (zc *Compressor) WriteTOCAndFooter(w io.Writer, off int64, toc *estargz.JTOC, diffHash hash.Hash) (digest.Digest, error) {

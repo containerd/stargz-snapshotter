@@ -54,9 +54,9 @@ type TestingController interface {
 
 // CompressionTestSuite tests this pkg with controllers can build valid eStargz blobs and parse them.
 func CompressionTestSuite(t *testing.T, controllers ...TestingController) {
-	t.Run("testBuild", func(t *testing.T) { testBuild(t, controllers...) })
-	t.Run("testDigestAndVerify", func(t *testing.T) { testDigestAndVerify(t, controllers...) })
-	t.Run("testWriteAndOpen", func(t *testing.T) { testWriteAndOpen(t, controllers...) })
+	t.Run("testBuild", func(t *testing.T) { t.Parallel(); testBuild(t, controllers...) })
+	t.Run("testDigestAndVerify", func(t *testing.T) { t.Parallel(); testDigestAndVerify(t, controllers...) })
+	t.Run("testWriteAndOpen", func(t *testing.T) { t.Parallel(); testWriteAndOpen(t, controllers...) })
 }
 
 const (
