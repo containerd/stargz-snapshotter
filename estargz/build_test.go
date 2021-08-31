@@ -383,6 +383,7 @@ func TestSort(t *testing.T) {
 						if err != nil {
 							t.Errorf("failed to build stargz: %v", err)
 						}
+						defer rc.Close()
 						zr, err := gzip.NewReader(rc)
 						if err != nil {
 							t.Fatalf("failed to create gzip reader: %v", err)
