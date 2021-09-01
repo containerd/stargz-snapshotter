@@ -368,8 +368,8 @@ class BenchRunner:
         src = '%s/%s' % (self.srcrepository, name)
         self.copy_img(src=src, dest=format_repo(LEGACY_MODE, self.repository, name))
         self.convert_and_push_img(src=src, dest=format_repo(ESTARGZ_NOOPT_MODE, self.repository, name))
-        self.optimize_img(name=name, src=src, dest=format_repo(ESTARGZ_MODE, self.repository, name, ""))
-        self.optimize_img(name=name, src=src, dest=format_repo(ZSTDCHUNKED_MODE, self.repository, name, "--zstdchunked"))
+        self.optimize_img(name=name, src=src, dest=format_repo(ESTARGZ_MODE, self.repository, name), option="")
+        self.optimize_img(name=name, src=src, dest=format_repo(ZSTDCHUNKED_MODE, self.repository, name), option="--zstdchunked")
 
     def operation(self, op, bench, cid):
         if op == 'run':
