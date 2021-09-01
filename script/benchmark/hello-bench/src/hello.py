@@ -36,7 +36,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import os, sys, subprocess, select, random, urllib2, time, json, tempfile, shutil
+import os, sys, subprocess, select, random, urllib2, time, json, tempfile, shutil, itertools
 
 TMP_DIR = tempfile.mkdtemp()
 LEGACY_MODE = "legacy"
@@ -154,7 +154,7 @@ class BenchRunner:
                  Bench('wordpress:5.7', 'web-server'),
              ]])
 
-    def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER, runtime="containerd"):
+    def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER, runtime="containerd", profile=0):
         if runtime == "containerd":
             self.controller = ContainerdController(mode == ESTARGZ_NOOPT_MODE or mode == ESTARGZ_MODE or mode == ZSTDCHUNKED_MODE)
         elif runtime == "podman":
@@ -168,6 +168,10 @@ class BenchRunner:
         self.optimizer = optimizer
         self.puller = puller
         self.pusher = pusher
+
+        profile = int(profile)
+        if profile > 0:
+            self.controller.start_profile(profile)
 
     def cleanup(self, cid, bench):
         self.controller.cleanup(cid, self.fully_qualify(bench.name))
@@ -460,10 +464,13 @@ class ContainerdController:
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
-        cmd = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../reboot_containerd.sh')
-        print cmd
-        rc = os.system(cmd)
-        assert(rc == 0)
+
+    def start_profile(self, seconds):
+        out = open('/tmp/hello-bench-output/profile-%d.out' % (random.randint(1,1000000)), 'w')
+        p = subprocess.Popen(
+            [CTR, 'pprof', '-d', '/run/containerd-stargz-grpc/debug.sock', 'profile', '-s', '%ds' % (seconds)],
+            stdout=out
+        )
 
 class PodmanController:
     def pull_cmd(self, image):
@@ -540,6 +547,7 @@ def main():
         print '--list'
         print '--list-json'
         print '--experiments'
+        print '--profile=<seconds>'
         print '--runtime'
         print '--op=(prepare|run)'
         print '--mode=(%s|%s|%s)' % (LEGACY_MODE, ESTARGZ_NOOPT_MODE, ESTARGZ_MODE, ZSTDCHUNKED_MODE)
@@ -569,6 +577,11 @@ def main():
     trytimes = int(kvargs.pop('experiments', '1'))
     if not op == "run":
         trytimes = 1
+    experiments = range(trytimes)
+
+    profile = int(kvargs.get('profile', 0))
+    if profile > 0:
+        experiments = itertools.count(start=0)
 
     # run benchmarks
     runner = BenchRunner(**kvargs)
@@ -580,7 +593,8 @@ def main():
         create_times = []
         run_times = []
 
-        for i in range(trytimes):
+        for_start = time.time()
+        for i in experiments:
             start = time.time()
             pulltime, createtime, runtime = runner.operation(op, bench, cid)
             elapsed = time.time() - start
@@ -595,6 +609,9 @@ def main():
             print 'pull    %s' % pulltime
             print 'create  %s' % createtime
             print 'run     %s' % runtime
+
+            if profile > 0 and time.time() - for_start > profile:
+                break
 
         row = {'mode':'%s' % runner.mode, 'repo':bench.name, 'bench':bench.name, 'elapsed':sum(elapsed_times) / len(elapsed_times), 'elapsed_pull':sum(pull_times) / len(pull_times), 'elapsed_create':sum(create_times) / len(create_times), 'elapsed_run':sum(run_times) / len(run_times)}
         js = json.dumps(row)
