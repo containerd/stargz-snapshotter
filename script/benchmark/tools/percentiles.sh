@@ -40,9 +40,9 @@ if [ ${#IMAGES[@]} -eq 0 ] ; then
     IMAGES=( $(cat "${JSON}" | jq -r '[ .[] | select(.mode=="'${MODES[0]}'").repo ] | unique[]') )
 fi
 
-GRANULARITY="${BENCHMARK_PERCENTILES_GRANULARITY}"
+GRANULARITY="${BENCHMARK_PERCENTILES_GRANULARITY:-}"
 if [ "${GRANULARITY}" == "" ] ; then
-    GRANULARITY="0.1"
+    GRANULARITY="10"
 fi
 
 # Ensure we use the exact same number of samples among benchmarks
