@@ -137,7 +137,8 @@ if ! ( cd "${CONTEXT}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} \
                           "${BENCHMARKING_NODE}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
-           docker exec -e BENCHMARK_RUNTIME_MODE -e BENCHMARK_SAMPLES_NUM \
+           docker exec \
+		  -e BENCHMARK_RUNTIME_MODE -e BENCHMARK_SAMPLES_NUM -e BENCHMARK_PROFILE \
                   -i "${BENCHMARKING_CONTAINER}" \
                   script/benchmark/hello-bench/run.sh \
                   "${BENCHMARK_REGISTRY:-ghcr.io}/${BENCHMARK_USER}" \
@@ -145,6 +146,10 @@ if ! ( cd "${CONTEXT}" && \
     echo "Failed to run benchmark."
     FAIL=true
 fi
+
+echo "Collecting data inside ${BENCHMARKING_CONTAINER}..."
+docker exec -i "${BENCHMARKING_CONTAINER}" \
+  tar zcf - -C /tmp/hello-bench-output . | tar zxvf - -C "$OUTPUTDIR"
 
 echo "Harvesting log ${LOG_FILE} -> ${OUTPUTDIR} ..."
 tar zcvf "${OUTPUTDIR}/result.log.tar.gz" "${LOG_FILE}"

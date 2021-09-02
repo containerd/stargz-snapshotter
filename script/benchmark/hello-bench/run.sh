@@ -70,8 +70,17 @@ function output {
 function measure {
     local OPTION="${1}"
     local REPOSITORY="${2}"
-    "${MEASURING_SCRIPT}" ${OPTION} --repository=${REPOSITORY} --op=run --experiments=1 --runtime="${BENCHMARK_RUNTIME_MODE}" ${@:3}
+    "${MEASURING_SCRIPT}" ${OPTION} --repository=${REPOSITORY} --op=run --runtime="${BENCHMARK_RUNTIME_MODE}" ${@:3}
 }
+
+if [[ -z "${BENCHMARK_PROFILE:-}" ]]; then
+    echo "Run single experiment"
+    additional_flags='--experiments=1'
+else
+    echo "Run the experiment for ${BENCHMARK_PROFILE}s"
+    additional_flags="--profile=$BENCHMARK_PROFILE"
+fi
+mkdir -p /tmp/hello-bench-output
 
 echo "========="
 echo "SPEC LIST"
@@ -113,28 +122,28 @@ for SAMPLE_NO in $(seq ${NUM_OF_SAMPLES}) ; do
         if [ "${MODE}" == "${LEGACY_MODE}" ] ; then
             # disable lazy pulling
             DISABLE_ESTARGZ="true" "${REBOOT_SCRIPT}"
-            measure "--mode=legacy" ${TARGET_REPOSITORY} ${IMAGE}
+            measure "--mode=legacy" ${TARGET_REPOSITORY} ${IMAGE} "$additional_flags"
         fi
 
         if [ "${MODE}" == "${ESTARGZ_NOOPT_MODE}" ] ; then
             echo -n "" > "${TMP_LOG_FILE}"
             # disable prefetch
             DISABLE_PREFETCH="true" LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_SCRIPT}"
-            measure "--mode=estargz-noopt" ${TARGET_REPOSITORY} ${IMAGE}
+            measure "--mode=estargz-noopt" ${TARGET_REPOSITORY} ${IMAGE} "$additional_flags"
             check_remote_snapshots "${TMP_LOG_FILE}"
         fi
 
         if [ "${MODE}" == "${ESTARGZ_MODE}" ] ; then
             echo -n "" > "${TMP_LOG_FILE}"
             LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_SCRIPT}"
-            measure "--mode=estargz" ${TARGET_REPOSITORY} ${IMAGE}
+            measure "--mode=estargz" ${TARGET_REPOSITORY} ${IMAGE} "$additional_flags"
             check_remote_snapshots "${TMP_LOG_FILE}"
         fi
 
         if [ "${MODE}" == "${ZSTDCHUNKED_MODE}" ] ; then
             echo -n "" > "${TMP_LOG_FILE}"
             LOG_FILE="${TMP_LOG_FILE}" "${REBOOT_SCRIPT}"
-            measure "--mode=zstdchunked" ${TARGET_REPOSITORY} ${IMAGE}
+            measure "--mode=zstdchunked" ${TARGET_REPOSITORY} ${IMAGE} "$additional_flags"
             check_remote_snapshots "${TMP_LOG_FILE}"
         fi
     done
