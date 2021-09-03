@@ -16,10 +16,8 @@
 
 set -euo pipefail
 
-# This test uses patched k3s enabled stargz snapshotter
-# TODO: upstream this
-K3S_VERSION=stargz-snapshotter
-K3S_REPO=https://github.com/ktock/k3s
+K3S_VERSION=master
+K3S_REPO=https://github.com/k3s-io/k3s
 
 REGISTRY_HOST=k3s-private-registry
 K3S_NODE_REPO=ghcr.io/stargz-containers
