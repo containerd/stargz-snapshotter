@@ -105,3 +105,6 @@ test-criauth:
 
 test-k3s:
 	@./script/k3s/test.sh
+
+test-k3s-argo-workflow:
+	@./script/k3s-argo-workflow/run.sh

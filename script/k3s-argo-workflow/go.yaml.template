@@ -1,0 +1,114 @@
+# Example golang CI based on https://github.com/argoproj/argo-workflows/blob/7dc6515ce1ef76475ac7bd2a7a3c3cdbe795a13c/examples/ci.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: ci-example-
+spec:
+  # entrypoint is the name of the template used as the starting point of the workflow
+  entrypoint: ci-example
+  arguments:
+    parameters:
+    - name: revision
+      value: 09c3a5e
+  # a temporary volume, named workdir, will be used as a working directory
+  # for this workflow. This volume is passed around from step to step.
+  volumeClaimTemplates:
+  - metadata:
+      name: workdir
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+
+  templates:
+  - name: ci-example
+    inputs:
+      parameters:
+      - name: revision
+    steps:
+    - - name: golangci-lint
+        template: golangci-lint-example
+        arguments:
+          parameters:
+          - name: revision
+            value: "{{inputs.parameters.revision}}"
+    - - name: gosec
+        template: gosec-example
+    - - name: build
+        template: build-golang-example
+    # the test step expands into three parallel steps running
+    # different operating system images. each mounts the workdir
+    # and runs the compiled binary from the build step.
+    - - name: test
+        template: run-hello
+        arguments:
+          parameters:
+          - name: os-image
+            value: "{{item.image}}:{{item.tag}}"
+        withItems:
+        - { image: 'ghcr.io/stargz-containers/alpine', tag: '3.10.2-${IMAGE_TYPE}' }
+        - { image: 'ghcr.io/stargz-containers/ubuntu', tag: '20.04-${IMAGE_TYPE}' }
+        - { image: 'ghcr.io/stargz-containers/fedora', tag: '30-${IMAGE_TYPE}' }
+
+  - name: golangci-lint-example
+    inputs:
+      parameters:
+      - name: revision
+      artifacts:
+      - name: code
+        path: /go/src/github.com/golang/example
+        git:
+          repo: https://github.com/golang/example.git
+          revision: "{{inputs.parameters.revision}}"
+    container:
+      image: ghcr.io/stargz-containers/golangci-lint:v1.40.1-${IMAGE_TYPE}
+      command: [sh, -c]
+      args: ["
+        cd /go/src/github.com/golang/example/hello &&
+        golangci-lint run ./...
+      "]
+      volumeMounts:
+      - name: workdir
+        mountPath: /go
+
+  - name: gosec-example
+    container:
+      image: ghcr.io/stargz-containers/gosec:v2.8.0-${IMAGE_TYPE}
+      command: [sh, -c]
+      args: ["
+        cd /go/src/github.com/golang/example/hello &&
+        gosec ./...
+      "]
+      volumeMounts:
+      - name: workdir
+        mountPath: /go
+
+  - name: build-golang-example
+    container:
+      image: ghcr.io/stargz-containers/golang:1.15.3-buster-${IMAGE_TYPE}
+      command: [sh, -c]
+      args: ["
+        cd /go/src/github.com/golang/example/hello &&
+        go build -v .
+      "]
+      volumeMounts:
+      - name: workdir
+        mountPath: /go
+
+  - name: run-hello
+    inputs:
+      parameters:
+      - name: os-image
+    container:
+      image: "{{inputs.parameters.os-image}}"
+      command: [sh, -c]
+      args: ["
+        uname -a ;
+        cat /etc/os-release ;
+        /go/src/github.com/golang/example/hello/hello
+      "]
+      volumeMounts:
+      - name: workdir
+        mountPath: /go
