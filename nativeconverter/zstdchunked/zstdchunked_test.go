@@ -57,8 +57,8 @@ func TestLayerConvertFunc(t *testing.T) {
 		mt[hDesc.MediaType] = struct{}{}
 		for k, v := range hDesc.Annotations {
 			if k == estargz.TOCJSONDigestAnnotation ||
-				k == zstdchunked.ZstdChunkedManifestChecksumAnnotation ||
-				k == zstdchunked.ZstdChunkedManifestPositionAnnotation {
+				k == zstdchunked.ManifestChecksumAnnotation ||
+				k == zstdchunked.ManifestPositionAnnotation {
 				metadata[k] = v
 			}
 		}
@@ -78,10 +78,10 @@ func TestLayerConvertFunc(t *testing.T) {
 	if _, ok := metadata[estargz.TOCJSONDigestAnnotation]; !ok {
 		t.Errorf("%q is not set", estargz.TOCJSONDigestAnnotation)
 	}
-	if _, ok := metadata[zstdchunked.ZstdChunkedManifestChecksumAnnotation]; !ok {
-		t.Errorf("%q is not set", zstdchunked.ZstdChunkedManifestChecksumAnnotation)
+	if _, ok := metadata[zstdchunked.ManifestChecksumAnnotation]; !ok {
+		t.Errorf("%q is not set", zstdchunked.ManifestChecksumAnnotation)
 	}
-	if _, ok := metadata[zstdchunked.ZstdChunkedManifestPositionAnnotation]; !ok {
-		t.Errorf("%q is not set", zstdchunked.ZstdChunkedManifestPositionAnnotation)
+	if _, ok := metadata[zstdchunked.ManifestPositionAnnotation]; !ok {
+		t.Errorf("%q is not set", zstdchunked.ManifestPositionAnnotation)
 	}
 }

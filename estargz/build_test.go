@@ -371,7 +371,7 @@ func TestSort(t *testing.T) {
 						if tt.allowMissedFiles != nil {
 							opts = append(opts, WithAllowPrioritizeNotFound(&missedFiles))
 						}
-						rc, err := Build(compressBlob(t, buildTarStatic(t, tt.in, tarprefix), srcCompression),
+						rc, err := Build(compressBlob(t, buildTar(t, tt.in, tarprefix), srcCompression),
 							append(opts, WithPrioritizedFiles(pfiles))...)
 						if tt.wantFail {
 							if err != nil {
@@ -406,7 +406,7 @@ func TestSort(t *testing.T) {
 						gotTar := tar.NewReader(zr)
 
 						// Compare all
-						wantTar := tar.NewReader(buildTarStatic(t, tt.want, tarprefix))
+						wantTar := tar.NewReader(buildTar(t, tt.want, tarprefix))
 						for {
 							// Fetch and parse next header.
 							gotH, wantH, err := next(t, gotTar, wantTar)

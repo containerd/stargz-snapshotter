@@ -84,7 +84,7 @@ var GetTOCDigestCommand = cli.Command{
 			decompressor = new(zstdchunked.Decompressor)
 		}
 
-		tocOff, tocSize, err := decompressor.ParseFooter(footer)
+		_, tocOff, tocSize, err := decompressor.ParseFooter(footer)
 		if err != nil {
 			return errors.Wrapf(err, "error parsing footer")
 		}

@@ -244,7 +244,7 @@ func (r *LayerManager) resolveLayer(ctx context.Context, refspec reference.Spec,
 	// Resolve this layer.
 	var esgzOpts []estargz.OpenOption
 	if target.Annotations != nil {
-		if tocOffsetStr, ok := target.Annotations[zstdchunked.ZstdChunkedManifestPositionAnnotation]; ok {
+		if tocOffsetStr, ok := target.Annotations[zstdchunked.ManifestPositionAnnotation]; ok {
 			if parts := strings.Split(tocOffsetStr, ":"); len(parts) == 4 {
 				tocOffset, err := strconv.ParseInt(parts[0], 10, 64)
 				if err == nil {
