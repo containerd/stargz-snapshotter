@@ -335,6 +335,11 @@ func (gr *reader) cacheWithReader(ctx context.Context, currentDepth int, eg *err
 	return
 }
 
+func (gr *reader) putBuffer(b *bytes.Buffer) {
+	b.Reset()
+	gr.bufPool.Put(b)
+}
+
 type file struct {
 	name   string
 	digest string
@@ -406,11 +411,10 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 
 		// Use temporally buffer for aligning this chunk
 		b := sf.gr.bufPool.Get().(*bytes.Buffer)
-		b.Reset()
 		b.Grow(int(ce.ChunkSize))
 		ip := b.Bytes()[:ce.ChunkSize]
 		if _, err := sf.ra.ReadAt(ip, ce.ChunkOffset); err != nil && err != io.EOF {
-			sf.gr.bufPool.Put(b)
+			sf.gr.putBuffer(b)
 			return 0, errors.Wrap(err, "failed to read data")
 		}
 
@@ -421,7 +425,7 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 
 		// Verify this chunk
 		if err := sf.verify(ip, ce); err != nil {
-			sf.gr.bufPool.Put(b)
+			sf.gr.putBuffer(b)
 			return 0, errors.Wrap(err, "invalid chunk")
 		}
 
@@ -435,7 +439,7 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 			w.Close()
 		}
 		n := copy(p[nr:], ip[lowerDiscard:ce.ChunkSize-upperDiscard])
-		sf.gr.bufPool.Put(b)
+		sf.gr.putBuffer(b)
 		if int64(n) != expectedSize {
 			return 0, fmt.Errorf("unexpected final data size %d; want %d", n, expectedSize)
 		}

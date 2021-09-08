@@ -192,6 +192,7 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 	}
 	dCache, fCache := lrucache.New(maxDataEntry), lrucache.New(maxFdEntry)
 	dCache.OnEvicted = func(key string, value interface{}) {
+		value.(*bytes.Buffer).Reset()
 		bufPool.Put(value)
 	}
 	fCache.OnEvicted = func(key string, value interface{}) {
