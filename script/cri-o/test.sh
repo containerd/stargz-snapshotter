@@ -22,7 +22,8 @@ REPO="${CONTEXT}../../"
 source "${CONTEXT}/const.sh"
 source "${REPO}/script/util/utils.sh"
 
-CRI_TOOLS_VERSION=v$(get_version_from_arg "${REPO}/Dockerfile" "CRI_TOOLS_VERSION")
+CRI_TOOLS_VERSION=$(get_version_from_arg "${REPO}/Dockerfile" "CRI_TOOLS_VERSION")
+GINKGO_VERSION=v1.16.4
 
 if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
@@ -51,14 +52,14 @@ ARG TARGETARCH
 
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
-RUN apt install -y --no-install-recommends git make && \
-    curl https://dl.google.com/go/go1.17.linux-\${TARGETARCH:-amd64}.tar.gz \
-    | tar -C /usr/local -xz && \
-    go get -u github.com/onsi/ginkgo/ginkgo && \
-    git clone https://github.com/kubernetes-sigs/cri-tools \
-              \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
+# Do not install git and its dependencies here which will cause failure of building the image
+RUN apt-get update && apt-get install -y --no-install-recommends make && \
+    curl -Ls https://dl.google.com/go/go1.17.linux-\${TARGETARCH:-amd64}.tar.gz | tar -C /usr/local -xz && \
+    go install github.com/onsi/ginkgo/ginkgo@${GINKGO_VERSION} && \
+    mkdir -p \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools /tmp/cri-tools && \
+    curl -sL https://github.com/kubernetes-sigs/cri-tools/archive/refs/tags/v${CRI_TOOLS_VERSION}.tar.gz | tar -C /tmp/cri-tools -xz && \
+    mv /tmp/cri-tools/cri-tools-${CRI_TOOLS_VERSION}/* \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools/ && \
     cd \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
-    git checkout ${CRI_TOOLS_VERSION} && \
     make && make install -e BINDIR=\${GOPATH}/bin
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
