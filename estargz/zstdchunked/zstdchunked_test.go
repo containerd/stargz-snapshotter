@@ -178,10 +178,14 @@ func checkZstdChunkedFooter(t *testing.T, off, size, cSize int64) {
 	if len(footer) != FooterSize {
 		t.Fatalf("for offset %v, footer length was %d, not expected %d. got bytes: %q", off, len(footer), FooterSize, footer)
 	}
-	gotOff, gotSize, err := (&Decompressor{}).ParseFooter(footer)
+	gotBlobPayloadSize, gotOff, gotSize, err := (&Decompressor{}).ParseFooter(footer)
 	if err != nil {
 		t.Fatalf("failed to parse footer for offset %d, footer: %x: err: %v",
 			off, footer, err)
+	}
+	if gotBlobPayloadSize != off-8 {
+		// 8 is the size of the zstd skippable frame header + the frame size (see WriteTOCAndFooter)
+		t.Fatalf("ParseFooter(footerBytes(offset %d)) = blobPayloadSize %d; want %d", off, gotBlobPayloadSize, off-8)
 	}
 	if gotOff != off {
 		t.Fatalf("ParseFooter(footerBytes(offset %d)) = off %d; want %d", off, gotOff, off)

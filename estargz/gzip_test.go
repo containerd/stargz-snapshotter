@@ -110,7 +110,7 @@ func checkFooter(t *testing.T, off int64) {
 	if len(footer) != FooterSize {
 		t.Fatalf("for offset %v, footer length was %d, not expected %d. got bytes: %q", off, len(footer), FooterSize, footer)
 	}
-	got, _, err := (&GzipDecompressor{}).ParseFooter(footer)
+	_, got, _, err := (&GzipDecompressor{}).ParseFooter(footer)
 	if err != nil {
 		t.Fatalf("failed to parse footer for offset %d, footer: %x: err: %v",
 			off, footer, err)
@@ -125,7 +125,7 @@ func checkLegacyFooter(t *testing.T, off int64) {
 	if len(footer) != legacyFooterSize {
 		t.Fatalf("for offset %v, footer length was %d, not expected %d. got bytes: %q", off, len(footer), legacyFooterSize, footer)
 	}
-	got, _, err := (&legacyGzipDecompressor{}).ParseFooter(footer)
+	_, got, _, err := (&legacyGzipDecompressor{}).ParseFooter(footer)
 	if err != nil {
 		t.Fatalf("failed to parse legacy footer for offset %d, footer: %x: err: %v",
 			off, footer, err)

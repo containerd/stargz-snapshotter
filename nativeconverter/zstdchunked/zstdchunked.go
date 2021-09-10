@@ -180,11 +180,11 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 		tocDgst := blob.TOCDigest().String()
 		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = tocDgst
 		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", c.Size())
-		if p, ok := metadata[zstdchunked.ZstdChunkedManifestChecksumAnnotation]; ok {
-			newDesc.Annotations[zstdchunked.ZstdChunkedManifestChecksumAnnotation] = p
+		if p, ok := metadata[zstdchunked.ManifestChecksumAnnotation]; ok {
+			newDesc.Annotations[zstdchunked.ManifestChecksumAnnotation] = p
 		}
-		if p, ok := metadata[zstdchunked.ZstdChunkedManifestPositionAnnotation]; ok {
-			newDesc.Annotations[zstdchunked.ZstdChunkedManifestPositionAnnotation] = p
+		if p, ok := metadata[zstdchunked.ManifestPositionAnnotation]; ok {
+			newDesc.Annotations[zstdchunked.ManifestPositionAnnotation] = p
 		}
 		return &newDesc, nil
 	}
