@@ -86,21 +86,21 @@ services:
     environment:
     - REGISTRY_CREDS=${DUMMYUSER}:${DUMMYPASS}
     volumes:
-    - "pullsecrets-prepare-containerd-data:/var/lib/containerd"
-    - "pullsecrets-prepare-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
+    - "kind-prepare-containerd-data:/var/lib/containerd"
+    - "kind-prepare-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
     - "${AUTH_DIR}/certs/domain.crt:/usr/local/share/ca-certificates/rgst.crt:ro"
     - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
     - "${MIRROR_TMP}:/tools/"
 volumes:
-  pullsecrets-prepare-containerd-data:
-  pullsecrets-prepare-containerd-stargz-grpc-data:
+  kind-prepare-containerd-data:
+  kind-prepare-containerd-stargz-grpc-data:
 networks:
   default:
     external:
       name: ${REGISTRY_NETWORK}
 EOF
 
-cp "${REPO}/script/pullsecrets/mirror.sh" "${MIRROR_TMP}/mirror.sh"
+cp "${REPO}/script/kind/mirror.sh" "${MIRROR_TMP}/mirror.sh"
 if ! ( cd "${CONTEXT}" && \
            docker network create "${REGISTRY_NETWORK}" && \
            docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
