@@ -68,9 +68,9 @@ jobs:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
       run: make test-optimize
 
-  test-pullsecrets:
+  test-kind:
     runs-on: ubuntu-20.04
-    name: PullSecrets
+    name: Kind
     strategy:
       fail-fast: false
       matrix:
@@ -87,7 +87,7 @@ jobs:
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
-      run: make test-pullsecrets
+      run: make test-kind
 
   test-criauth:
     runs-on: ubuntu-20.04
