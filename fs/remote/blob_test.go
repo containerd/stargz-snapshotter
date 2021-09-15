@@ -34,6 +34,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,12 +166,12 @@ func TestReadAt(t *testing.T) {
 								tr := multiRoundTripper(t, blob, allowMultiRange(trCond.allowMultiRange), exceptChunks(except))
 
 								// Check ReadAt method
-								bb1 := makeBlob(t, blobsize, sampleChunkSize, prefetchchunksize, tr)
+								bb1 := makeTestBlob(t, blobsize, sampleChunkSize, prefetchchunksize, tr)
 								cacheAll(t, bb1, cacheChunks)
 								checkRead(t, wantData, bb1, offset, size)
 
 								// Check Cache method
-								bb2 := makeBlob(t, blobsize, sampleChunkSize, prefetchchunksize, tr)
+								bb2 := makeTestBlob(t, blobsize, sampleChunkSize, prefetchchunksize, tr)
 								cacheAll(t, bb2, cacheChunks)
 								checkCache(t, bb2, offset, size)
 							})
@@ -259,7 +261,7 @@ func checkAllCached(t *testing.T, r *blob, offset, size int64) {
 func TestFailReadAt(t *testing.T) {
 
 	// test failed http respose.
-	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, failRoundTripper())
+	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, failRoundTripper())
 	respData := make([]byte, len(sampleData1))
 	_, err := r.ReadAt(respData, 0)
 	if err == nil || err == io.EOF {
@@ -278,12 +280,12 @@ func TestFailReadAt(t *testing.T) {
 
 func checkBrokenBody(t *testing.T, allowMultiRange bool) {
 	respData := make([]byte, len(sampleData1))
-	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	if _, err := r.ReadAt(respData, 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken full body but err=%v (allowMultiRange=%v)", err, allowMultiRange)
 		return
 	}
-	r = makeBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	r = makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	if _, err := r.ReadAt(respData[0:len(sampleData1)/2], 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken multipart body but err=%v (allowMultiRange=%v)", err, allowMultiRange)
 		return
@@ -291,7 +293,7 @@ func checkBrokenBody(t *testing.T, allowMultiRange bool) {
 }
 
 func checkBrokenHeader(t *testing.T, allowMultiRange bool) {
-	r := makeBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenHeaderRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenHeaderRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	respData := make([]byte, len(sampleData1))
 	if _, err := r.ReadAt(respData[0:len(sampleData1)/2], 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken multipart header but err=%v (allowMultiRange=%v)", err, allowMultiRange)
@@ -299,19 +301,283 @@ func checkBrokenHeader(t *testing.T, allowMultiRange bool) {
 	}
 }
 
-func makeBlob(t *testing.T, size int64, chunkSize int64, prefetchChunkSize int64, fn RoundTripFunc) *blob {
-	return &blob{
-		fetcher: &fetcher{
+func TestParallelDownloadingBehavior(t *testing.T) {
+	type regionsBoundaries struct {
+		regions []region
+		start   int64
+		end     int64
+	}
+
+	type testData struct {
+		name           string
+		regions        [3]regionsBoundaries
+		roundtripCount int64
+		chunkSize      int64
+		content        string
+	}
+
+	tests := []testData{
+		{
+			name:           "no_data",
+			regions:        [3]regionsBoundaries{},
+			roundtripCount: 0,
+			chunkSize:      4,
+		},
+		{
+			name: "same_regions",
+			regions: [3]regionsBoundaries{
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+					},
+					start: 0,
+					end:   3,
+				},
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+					},
+					start: 0,
+					end:   3,
+				},
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+					},
+					start: 0,
+					end:   3,
+				},
+			},
+			roundtripCount: 1,
+			chunkSize:      4,
+			content:        "test",
+		},
+		{
+			name: "same_regions_multiple_values",
+			regions: [3]regionsBoundaries{
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+						{
+							b: 4,
+							e: 7,
+						},
+					},
+					start: 0,
+					end:   7,
+				},
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+						{
+							b: 4,
+							e: 7,
+						},
+					},
+					start: 0,
+					end:   7,
+				},
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+						{
+							b: 4,
+							e: 7,
+						},
+					},
+					start: 0,
+					end:   7,
+				},
+			},
+			roundtripCount: 1,
+			chunkSize:      4,
+			content:        "test1234",
+		},
+		{
+			name: "different_regions",
+			regions: [3]regionsBoundaries{
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+					},
+					start: 0,
+					end:   3,
+				},
+				{
+					regions: []region{
+						{
+							b: 4,
+							e: 7,
+						},
+					},
+					start: 4,
+					end:   7,
+				},
+				{
+					regions: []region{
+						{
+							b: 8,
+							e: 11,
+						},
+					},
+					start: 8,
+					end:   11,
+				},
+			},
+			roundtripCount: 3,
+			chunkSize:      4,
+			content:        "test12345678",
+		},
+		{
+			name: "some_overlap",
+			regions: [3]regionsBoundaries{
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+					},
+					start: 0,
+					end:   3,
+				},
+				{
+					regions: []region{
+						{
+							b: 0,
+							e: 3,
+						},
+					},
+					start: 0,
+					end:   3,
+				},
+				{
+					regions: []region{
+						{
+							b: 4,
+							e: 7,
+						},
+					},
+					start: 4,
+					end:   7,
+				},
+			},
+			roundtripCount: 2,
+			chunkSize:      4,
+			content:        "test1234",
+		},
+	}
+
+	var wg sync.WaitGroup
+	// we always run 3 routines
+	routines := 3
+
+	for _, tst := range tests {
+		var (
+			tr = &callsCountRoundTripper{
+				content: tst.content,
+			}
+			b = &blob{
+				fetcher: &fetcher{
+					url: "test",
+					tr:  tr,
+				},
+				chunkSize: tst.chunkSize,
+				size:      int64(len(tst.content)),
+				cache:     cache.NewMemoryCache(),
+			}
+		)
+
+		start := make(chan struct{})
+		wg.Add(routines)
+		var contentBytes [3][]byte
+
+		for i := 0; i < routines; i++ {
+			p := make([]byte, len(tst.content))
+			contentBytes[i] = p
+			allData := make(map[region]io.Writer)
+			if i < len(tst.regions) {
+				offset := int64(0)
+				for j := range tst.regions[i].regions {
+					r := tst.regions[i].regions[j]
+					var (
+						base         = positive(r.b - offset)
+						lowerUnread  = positive(offset - r.b)
+						upperUnread  = positive(r.e + 1 - (offset + int64(len(p))))
+						expectedSize = r.size() - upperUnread - lowerUnread
+					)
+					allData[tst.regions[i].regions[j]] = newBytesWriter(p[base:base+expectedSize], lowerUnread)
+				}
+			}
+
+			go func() {
+				<-start // by blocking on channel start we can ensure that the goroutines will run at approximately the same time
+				defer wg.Done()
+				b.fetchRange(allData, &options{})
+			}()
+		}
+		close(start) // starting
+		wg.Wait()
+
+		// We expect the number of round trip calls to be 1, since we are making 5 calls to fetchRange with
+		// overlapping intervals.
+		if tr.count != tst.roundtripCount {
+			t.Errorf("%v test failed: the round trip count should be %v, but was %v", tst.name, tst.roundtripCount, tr.count)
+		}
+		// Check for contents
+		for j := range contentBytes {
+			start := tst.regions[j].start
+			end := tst.regions[j].end
+			for i := start; i < end; i++ {
+				if contentBytes[j][i] != []byte(tst.content)[i] {
+					t.Errorf("%v test failed: the output sequence is wrong, wanted %v, got %v", tst.name, []byte(tst.content)[start:end], contentBytes[j][start:end])
+					break
+				}
+			}
+		}
+	}
+}
+
+func makeTestBlob(t *testing.T, size int64, chunkSize int64, prefetchChunkSize int64, fn RoundTripFunc) *blob {
+	var (
+		lastCheck     time.Time
+		checkInterval time.Duration
+	)
+
+	return makeBlob(
+		&fetcher{
 			url: testURL,
 			tr:  fn,
 		},
-		size:              size,
-		chunkSize:         chunkSize,
-		prefetchChunkSize: prefetchChunkSize,
-		cache:             cache.NewMemoryCache(),
-		resolver:          &Resolver{},
-		fetchTimeout:      time.Duration(defaultFetchTimeoutSec) * time.Second,
-	}
+		size,
+		chunkSize,
+		prefetchChunkSize,
+		cache.NewMemoryCache(),
+		lastCheck,
+		checkInterval,
+		&Resolver{},
+		time.Duration(defaultFetchTimeoutSec)*time.Second)
 }
 
 func TestCheckInterval(t *testing.T) {
@@ -364,6 +630,24 @@ func TestCheckInterval(t *testing.T) {
 	if _, called := check("third time", 0); !called {
 		t.Error("must be called for the third time")
 	}
+}
+
+type callsCountRoundTripper struct {
+	count   int64
+	content string
+}
+
+func (c *callsCountRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	atomic.AddInt64(&c.count, 1)
+	time.Sleep(50 * time.Millisecond) // sleep for 50 milliseconds to emulate the http call and to make sure that we can run tests on parallel goroutines
+	convertBody := func(r io.ReadCloser) io.ReadCloser { return r }
+	header := make(http.Header)
+	header.Add("Content-Length", fmt.Sprintf("%d", len(c.content)))
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     header,
+		Body:       convertBody(ioutil.NopCloser(bytes.NewReader([]byte(c.content)))),
+	}, nil
 }
 
 type calledRoundTripper struct {
