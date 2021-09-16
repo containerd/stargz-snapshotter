@@ -16,7 +16,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/hanwen/go-fuse/v2 v2.1.0
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/klauspost/compress v1.13.5
+	github.com/klauspost/compress v1.13.6
 	github.com/moby/sys/mountinfo v0.4.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.2-0.20210819154149-5ad6f50d6283
