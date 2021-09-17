@@ -27,12 +27,16 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	digest "github.com/opencontainers/go-digest"
+	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -51,31 +55,32 @@ func TestFailReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build sample estargz")
 	}
-	br := &breakReaderAt{
-		ReaderAt: stargzFile,
-		success:  true,
-	}
-	bev := &testTOCEntryVerifier{true}
-	mcache := cache.NewMemoryCache()
-	gr, _, err := newReader(io.NewSectionReader(br, 0, stargzFile.Size()), mcache, bev)
-	if err != nil {
-		t.Fatalf("Failed to open stargz file: %v", err)
-	}
-
-	// tests for opening file
-	_, err = gr.OpenFile("dummy")
-	if err == nil {
-		t.Errorf("succeeded to open file but wanted to fail")
-		return
-	}
-
-	fr, err := gr.OpenFile(testFileName)
-	if err != nil {
-		t.Errorf("failed to open file but wanted to succeed: %v", err)
-	}
 
 	for _, rs := range []bool{true, false} {
 		for _, vs := range []bool{true, false} {
+			br := &breakReaderAt{
+				ReaderAt: stargzFile,
+				success:  true,
+			}
+			bev := &testTOCEntryVerifier{true}
+			mcache := cache.NewMemoryCache()
+			vr, gr, _, err := newReader(io.NewSectionReader(br, 0, stargzFile.Size()), mcache, bev)
+			if err != nil {
+				t.Fatalf("Failed to open stargz file: %v", err)
+			}
+
+			// tests for opening file
+			_, err = gr.OpenFile("dummy")
+			if err == nil {
+				t.Errorf("succeeded to open file but wanted to fail")
+				return
+			}
+
+			fr, err := gr.OpenFile(testFileName)
+			if err != nil {
+				t.Errorf("failed to open file but wanted to succeed: %v", err)
+			}
+
 			mcache.(*cache.MemoryCache).Membuf = map[string]*bytes.Buffer{}
 			br.success = rs
 			bev.success = vs
@@ -95,18 +100,28 @@ func TestFailReader(t *testing.T) {
 				}
 			}
 
+			mcache.(*cache.MemoryCache).Membuf = map[string]*bytes.Buffer{}
+
 			// tests for caching reader
-			err = gr.Cache()
-			if rs && vs {
-				if err != nil {
-					t.Errorf("failed to cache reader but wanted to succeed")
+			cacheErr := vr.Cache()
+			verifyErr := vr.lastVerifyErr.Load()
+			if rs {
+				if vs {
+					if !(cacheErr == nil && verifyErr == nil) {
+						t.Errorf("failed to cache but wanted to succeed: %v; %v (reader:%v,verify:%v)", cacheErr, verifyErr, rs, vs)
+					}
+				} else {
+					if !(cacheErr == nil && verifyErr != nil) {
+						t.Errorf("cache reader: wanted: (cacheErr, verifyErr) = (nil, nonnil) but (%v,%v); (reader:%v,verify:%v)",
+							cacheErr, verifyErr, rs, vs)
+					}
 				}
 			} else {
-				if err == nil {
-					t.Errorf("succeeded to cache reader but wanted to fail (reader:%v,verify:%v)", rs, vs)
+				if !(cacheErr != nil && verifyErr != nil) {
+					t.Errorf("cache reader: wanted: (cacheErr, verifyErr) = (nonnil, nonnil) but (%v,%v); (reader:%v,verify:%v)",
+						cacheErr, verifyErr, rs, vs)
 				}
 			}
-
 		}
 	}
 }
@@ -309,7 +324,7 @@ func makeFile(t *testing.T, contents []byte, chunkSize int) *file {
 		t.Fatalf("failed to verify stargz: %v", err)
 	}
 
-	r, _, err := newReader(sr, cache.NewMemoryCache(), ev)
+	_, r, _, err := newReader(sr, cache.NewMemoryCache(), ev)
 	if err != nil {
 		t.Fatalf("Failed to open stargz file: %v", err)
 	}
@@ -324,17 +339,158 @@ func makeFile(t *testing.T, contents []byte, chunkSize int) *file {
 	return f
 }
 
-func newReader(sr *io.SectionReader, cache cache.BlobCache, ev estargz.TOCEntryVerifier) (*reader, *estargz.TOCEntry, error) {
+func newReader(sr *io.SectionReader, cache cache.BlobCache, ev estargz.TOCEntryVerifier) (*VerifiableReader, *reader, *estargz.TOCEntry, error) {
 	var r *reader
 	telemetry := &estargz.Telemetry{}
 	vr, err := NewReader(sr, cache, digest.FromString(""), telemetry)
 	if vr != nil {
 		r = vr.r
+		vr.verifier = ev
 		r.verifier = ev
 	}
 	root, ok := r.Lookup("")
 	if !ok {
-		return nil, nil, fmt.Errorf("failed to get root")
+		return nil, nil, nil, fmt.Errorf("failed to get root")
 	}
-	return r, root, err
+	return vr, r, root, err
+}
+
+func TestCacheVerify(t *testing.T) {
+	stargzFile, tocDgst, err := testutil.BuildEStargz([]testutil.TarEntry{
+		testutil.File("a", sampleData1+"a"),
+		testutil.File("b", sampleData1+"b"),
+	}, testutil.WithEStargzOptions(estargz.WithChunkSize(sampleChunkSize)))
+	if err != nil {
+		t.Fatalf("failed to build sample estargz")
+	}
+	for _, skipVerify := range [2]bool{true, false} {
+		for _, invalidTOC := range [2]bool{true, false} {
+			for _, invalidChunkBeforeVerify := range [2]bool{true, false} {
+				for _, invalidChunkAfterVerify := range [2]bool{true, false} {
+					name := fmt.Sprintf("test_cache_verify_%v_%v_%v_%v",
+						skipVerify, invalidTOC, invalidChunkBeforeVerify, invalidChunkAfterVerify)
+					t.Run(name, func(t *testing.T) {
+
+						// Determine the expected behaviour
+						var wantVerifyFail, wantCacheFail, wantCacheFail2 bool
+						if skipVerify {
+							// always no error if verification is disabled
+							wantVerifyFail, wantCacheFail, wantCacheFail2 = false, false, false
+						} else if invalidTOC || invalidChunkBeforeVerify {
+							// errors occurred before verifying TOC must be reported via VerifyTOC()
+							wantVerifyFail = true
+						} else if invalidChunkAfterVerify {
+							// errors occurred after verifying TOC must be reported via Cache()
+							wantVerifyFail, wantCacheFail, wantCacheFail2 = false, true, true
+						} else {
+							// otherwise no verification error
+							wantVerifyFail, wantCacheFail, wantCacheFail2 = false, false, false
+						}
+
+						// Prepare reader
+						vr, err := NewReader(stargzFile, cache.NewMemoryCache(), digest.FromString(""), &estargz.Telemetry{})
+						if err != nil {
+							t.Fatalf("failed to prepare reader %v", err)
+						}
+						defer vr.Close()
+						verifier := &failTOCEntryVerifier{}
+						vr.verifier = verifier
+						if invalidTOC {
+							vr.verifier = nopTOCEntryVerifier{}
+							vr.lastVerifyErr.Store(fmt.Errorf("invalidTOC"))
+						}
+
+						// Perform Cache() before verification
+						// 1. Either of "a" or "b" is read and verified
+						// 2. VerifyTOC/SkipVerify is called
+						// 3. Another entry ("a" or "b") is called
+						verifyDone := make(chan struct{})
+						var firstEntryCalled bool
+						var eg errgroup.Group
+						eg.Go(func() error {
+							return vr.Cache(WithFilter(func(ce *estargz.TOCEntry) bool {
+								if ce.Name == "a" || ce.Name == "b" {
+									if !firstEntryCalled {
+										firstEntryCalled = true
+										if invalidChunkBeforeVerify {
+											verifier.registerFails([]string{ce.Name})
+										}
+										return true
+									}
+									<-verifyDone
+									if invalidChunkAfterVerify {
+										verifier.registerFails([]string{ce.Name})
+									}
+									return true
+								}
+								return false
+							}))
+						})
+						time.Sleep(10 * time.Millisecond)
+
+						// Perform verification
+						if skipVerify {
+							vr.SkipVerify()
+						} else {
+							_, err = vr.VerifyTOC(tocDgst)
+						}
+						if checkErr := checkError(wantVerifyFail, err); checkErr != nil {
+							t.Errorf("verify: %v", checkErr)
+							return
+						}
+						if err != nil {
+							return
+						}
+						close(verifyDone)
+
+						// Check the result of Cache()
+						if checkErr := checkError(wantCacheFail, eg.Wait()); checkErr != nil {
+							t.Errorf("cache: %v", checkErr)
+							return
+						}
+
+						// Call Cache() again and check the result
+						if checkErr := checkError(wantCacheFail2, vr.Cache()); checkErr != nil {
+							t.Errorf("cache(2): %v", checkErr)
+							return
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+type failTOCEntryVerifier struct {
+	fails   []string
+	failsMu sync.Mutex
+}
+
+func (f *failTOCEntryVerifier) registerFails(fails []string) {
+	f.failsMu.Lock()
+	defer f.failsMu.Unlock()
+	f.fails = fails
+
+}
+
+func (f *failTOCEntryVerifier) Verifier(ce *estargz.TOCEntry) (digest.Verifier, error) {
+	f.failsMu.Lock()
+	defer f.failsMu.Unlock()
+	success := true
+	for _, n := range f.fails {
+		if n == ce.Name {
+			success = false
+			break
+		}
+	}
+	return &testVerifier{success}, nil
+}
+
+func checkError(wantFail bool, err error) error {
+	if wantFail && err == nil {
+		return fmt.Errorf("wanted to fail but succeeded")
+	} else if !wantFail && err != nil {
+		return errors.Wrapf(err, "wanted to succeed verification but failed")
+	}
+	return nil
 }

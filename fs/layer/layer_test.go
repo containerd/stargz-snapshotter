@@ -36,6 +36,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -123,7 +124,8 @@ func TestPrefetch(t *testing.T) {
 			}
 			l := newLayer(
 				&Resolver{
-					prefetchTimeout: time.Second,
+					prefetchTimeout:       time.Second,
+					backgroundTaskManager: task.NewBackgroundTaskManager(10, 5*time.Second),
 				},
 				ocispec.Descriptor{Digest: testStateLayerDigest},
 				&blobRef{blob, func() {}},
