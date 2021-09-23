@@ -27,7 +27,6 @@ import (
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/nativeconverter"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
@@ -165,9 +164,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		}
 		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(layerConvertFunc))
 
-		var docker2oci bool
 		if context.Bool("oci") {
-			docker2oci = true
 			convertOpts = append(convertOpts, converter.WithDockerToOCI(true))
 		}
 
@@ -177,10 +174,6 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		}
 		defer cancel()
 
-		convertOpts = append(convertOpts, converter.WithIndexConvertFunc(
-			// index converter patched for zstd compression
-			// TODO: upstream this to containerd/containerd
-			nativeconverter.IndexConvertFunc(layerConvertFunc, docker2oci, platformMC)))
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
 			return err

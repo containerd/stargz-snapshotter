@@ -33,7 +33,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/analyzer"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
-	"github.com/containerd/stargz-snapshotter/nativeconverter"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
@@ -120,9 +119,7 @@ var OptimizeCommand = cli.Command{
 		}
 		convertOpts = append(convertOpts, converter.WithPlatform(platformMC))
 
-		var docker2oci bool
 		if clicontext.Bool("oci") {
-			docker2oci = true
 			convertOpts = append(convertOpts, converter.WithDockerToOCI(true))
 		} else if clicontext.Bool("zstdchunked") {
 			return errors.New("option --zstdchunked must be used in conjunction with --oci")
@@ -161,10 +158,6 @@ var OptimizeCommand = cli.Command{
 		}
 		layerConvertFunc := logWrapper(f)
 		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(layerConvertFunc))
-		convertOpts = append(convertOpts, converter.WithIndexConvertFunc(
-			// index converter patched for zstd compression
-			// TODO: upstream this to containerd/containerd
-			nativeconverter.IndexConvertFunc(layerConvertFunc, docker2oci, platformMC)))
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
 			return err
