@@ -18,7 +18,6 @@ package recorder
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +26,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
@@ -93,7 +93,7 @@ func imageRecorderFromManifest(ctx context.Context, cs content.Store, manifestDe
 		defer readerAt.Close()
 		r := io.Reader(io.NewSectionReader(readerAt, 0, desc.Size))
 		if !uncompress.IsUncompressedType(desc.MediaType) {
-			r, err = gzip.NewReader(r)
+			r, err = compression.DecompressStream(r)
 			if err != nil {
 				return nil, errors.Wrapf(err, "cannot decompress layer %v", desc.Digest)
 			}
