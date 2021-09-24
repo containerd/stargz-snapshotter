@@ -117,7 +117,16 @@ func (b *blob) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec 
 	}
 
 	// refresh the fetcher
-	new, newSize, err := newFetcher(ctx, hosts, refspec, desc)
+	blobConfig := &b.resolver.blobConfig
+	fc := &fetcherConfig{
+		hosts:       hosts,
+		refspec:     refspec,
+		desc:        desc,
+		maxRetries:  blobConfig.MaxRetries,
+		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
+		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
+	}
+	new, newSize, err := newFetcher(ctx, fc)
 	if err != nil {
 		return err
 	} else if newSize != b.size {

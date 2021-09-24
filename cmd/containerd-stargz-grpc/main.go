@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	golog "log"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -82,6 +83,7 @@ type snapshotterConfig struct {
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	flag.Parse()
 	lvl, err := logrus.ParseLevel(*logLevel)
 	if err != nil {

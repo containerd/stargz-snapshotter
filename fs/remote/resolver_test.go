@@ -35,6 +35,7 @@ import (
 
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
+	rhttp "github.com/hashicorp/go-retryablehttp"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -163,7 +164,11 @@ func TestMirror(t *testing.T) {
 				}
 				return
 			}
-			fetcher, _, err := newFetcher(context.Background(), hosts, refspec, ocispec.Descriptor{Digest: blobDigest})
+			fetcher, _, err := newFetcher(context.Background(), &fetcherConfig{
+				hosts:   hosts,
+				refspec: refspec,
+				desc:    ocispec.Descriptor{Digest: blobDigest},
+			})
 			if err != nil {
 				if tt.error {
 					return
@@ -264,6 +269,65 @@ func (b *breakRoundTripper) RoundTrip(req *http.Request) (res *http.Response, er
 			StatusCode: http.StatusInternalServerError,
 			Header:     make(http.Header),
 			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		}
+	}
+	return
+}
+
+func TestRetry(t *testing.T) {
+	tr := &retryRoundTripper{}
+	rclient := rhttp.NewClient()
+	rclient.HTTPClient.Transport = tr
+	rclient.Backoff = backoffStrategy
+	f := &fetcher{
+		url: "test",
+		tr:  &rhttp.RoundTripper{Client: rclient},
+	}
+
+	regions := []region{{b: 0, e: 1}}
+
+	_, err := f.fetch(context.Background(), regions, true, &options{})
+
+	if err != nil {
+		t.Fatalf("unexpected error = %v", err)
+	}
+
+	if tr.retryCount != 4 {
+		t.Fatalf("unxpected retryCount; expected=4 got=%d", tr.retryCount)
+	}
+}
+
+type retryRoundTripper struct {
+	retryCount int
+}
+
+func (r *retryRoundTripper) RoundTrip(req *http.Request) (res *http.Response, err error) {
+	defer func() {
+		r.retryCount++
+	}()
+
+	switch r.retryCount {
+	case 0:
+		err = fmt.Errorf("dummy error")
+	case 1:
+		res = &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		}
+	case 2:
+		res = &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     make(http.Header),
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		}
+	default:
+		header := make(http.Header)
+		header.Add("Content-Length", "4")
+		res = &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     header,
+			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
 		}
 	}
 	return
