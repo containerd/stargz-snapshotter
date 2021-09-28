@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/cache"
@@ -49,7 +50,6 @@ const maxWalkDepth = 10000
 type Reader interface {
 	OpenFile(name string) (io.ReaderAt, error)
 	Lookup(name string) (*estargz.TOCEntry, bool)
-	Cache(opts ...CacheOption) error
 	Close() error
 	LastOnDemandReadTime() time.Time
 }
@@ -57,6 +57,14 @@ type Reader interface {
 // VerifiableReader produces a Reader with a given verifier.
 type VerifiableReader struct {
 	r *reader
+
+	verifier                estargz.TOCEntryVerifier
+	lastVerifyErr           atomic.Value
+	prohibitVerifyFailure   bool
+	prohibitVerifyFailureMu sync.RWMutex
+
+	closed   bool
+	closedMu sync.Mutex
 }
 
 func (vr *VerifiableReader) SkipVerify() Reader {
@@ -65,16 +73,200 @@ func (vr *VerifiableReader) SkipVerify() Reader {
 }
 
 func (vr *VerifiableReader) VerifyTOC(tocDigest digest.Digest) (Reader, error) {
-	v, err := vr.r.r.VerifyTOC(tocDigest)
-	if err != nil {
-		return nil, err
+	if vr.isClosed() {
+		return nil, fmt.Errorf("reader is already closed")
 	}
-	vr.r.verifier = v
+	vr.prohibitVerifyFailureMu.Lock()
+	vr.prohibitVerifyFailure = true
+	lastVerifyErr := vr.lastVerifyErr.Load()
+	vr.prohibitVerifyFailureMu.Unlock()
+	if err := lastVerifyErr; err != nil {
+		return nil, errors.Wrapf(err.(error), "content error occures during caching contents")
+	}
+	vr.r.verifier = vr.verifier
+	if actual := vr.r.r.TOCDigest(); actual != tocDigest {
+		return nil, fmt.Errorf("invalid TOC JSON %q; want %q", actual, tocDigest)
+	}
 	return vr.r, nil
 }
 
+func (vr *VerifiableReader) Lookup(name string) (*estargz.TOCEntry, bool) {
+	return vr.r.r.Lookup(name)
+}
+
+func (vr *VerifiableReader) Cache(opts ...CacheOption) (err error) {
+	if vr.isClosed() {
+		return fmt.Errorf("reader is already closed")
+	}
+
+	var cacheOpts cacheOptions
+	for _, o := range opts {
+		o(&cacheOpts)
+	}
+
+	gr := vr.r
+	r := gr.r
+	if cacheOpts.reader != nil {
+		if r, err = estargz.Open(cacheOpts.reader,
+			// TODO: apply other options used in NewReader when needed.
+			estargz.WithTelemetry(gr.telemetry),
+			estargz.WithDecompressors(new(zstdchunked.Decompressor)),
+		); err != nil {
+			return errors.Wrap(err, "failed to parse stargz")
+		}
+	}
+	root, ok := r.Lookup("")
+	if !ok {
+		return fmt.Errorf("failed to get a TOCEntry of the root")
+	}
+
+	filter := func(*estargz.TOCEntry) bool {
+		return true
+	}
+	if cacheOpts.filter != nil {
+		filter = cacheOpts.filter
+	}
+
+	eg, egCtx := errgroup.WithContext(context.Background())
+	eg.Go(func() error {
+		return vr.cacheWithReader(egCtx,
+			0, eg, semaphore.NewWeighted(int64(runtime.GOMAXPROCS(0))),
+			root, r, filter, cacheOpts.cacheOpts...)
+	})
+	return eg.Wait()
+}
+
+func (vr *VerifiableReader) cacheWithReader(ctx context.Context, currentDepth int, eg *errgroup.Group, sem *semaphore.Weighted, dir *estargz.TOCEntry, r *estargz.Reader, filter func(*estargz.TOCEntry) bool, opts ...cache.Option) (rErr error) {
+	gr := vr.r
+	if currentDepth > maxWalkDepth {
+		return fmt.Errorf("TOCEntry tree is too deep (depth:%d)", currentDepth)
+	}
+	dir.ForeachChild(func(_ string, e *estargz.TOCEntry) bool {
+		if e.Type == "dir" {
+			// Walk through all files on this stargz file.
+
+			// Ignore a TOCEntry of "./" (formated as "" by stargz lib) on root directory
+			// because this points to the root directory itself.
+			if e.Name == "" && dir.Name == "" {
+				return true
+			}
+
+			// Make sure the entry is the immediate child for avoiding loop.
+			if filepath.Dir(filepath.Clean(e.Name)) != filepath.Clean(dir.Name) {
+				rErr = fmt.Errorf("invalid child path %q; must be child of %q",
+					e.Name, dir.Name)
+				return false
+			}
+			if err := vr.cacheWithReader(ctx, currentDepth+1, eg, sem, e, r, filter, opts...); err != nil {
+				rErr = err
+				return false
+			}
+			return true
+		} else if e.Type != "reg" {
+			// Only cache regular files
+			return true
+		} else if !filter(e) {
+			// This entry need to be filtered out
+			return true
+		} else if e.Name == estargz.TOCTarName {
+			// We don't need to cache TOC json file
+			return true
+		}
+
+		sr, err := r.OpenFile(e.Name)
+		if err != nil {
+			rErr = err
+			return false
+		}
+
+		var nr int64
+		for nr < e.Size {
+			ce, ok := r.ChunkEntryForOffset(e.Name, nr)
+			if !ok {
+				break
+			}
+			nr += ce.ChunkSize
+
+			if err := sem.Acquire(ctx, 1); err != nil {
+				rErr = err
+				return false
+			}
+
+			eg.Go(func() (retErr error) {
+				defer sem.Release(1)
+				vr.prohibitVerifyFailureMu.RLock()
+				defer vr.prohibitVerifyFailureMu.RUnlock()
+
+				defer func() {
+					if retErr != nil {
+						vr.lastVerifyErr.Store(retErr)
+					}
+				}()
+
+				// Check if the target chunks exists in the cache
+				id := genID(e.Digest, ce.ChunkOffset, ce.ChunkSize)
+				if r, err := gr.cache.Get(id, opts...); err == nil {
+					return r.Close()
+				}
+
+				// missed cache, needs to fetch and add it to the cache
+				cr := io.NewSectionReader(sr, ce.ChunkOffset, ce.ChunkSize)
+				v, err := vr.verifier.Verifier(ce)
+				if err != nil {
+					if vr.prohibitVerifyFailure {
+						return errors.Wrapf(err, "verifier not found %q(off:%d,size:%d)", e.Name, ce.ChunkOffset, ce.ChunkSize)
+					}
+					vr.lastVerifyErr.Store(err)
+				}
+				br := bufio.NewReaderSize(io.TeeReader(cr, v), int(ce.ChunkSize))
+				if _, err := br.Peek(int(ce.ChunkSize)); err != nil {
+					return fmt.Errorf("cacheWithReader.peek: %v", err)
+				}
+				w, err := gr.cache.Add(id, opts...)
+				if err != nil {
+					return err
+				}
+				defer w.Close()
+				if _, err := io.CopyN(w, br, ce.ChunkSize); err != nil {
+					w.Abort()
+					return errors.Wrapf(err,
+						"failed to cache file payload of %q (offset:%d,size:%d)",
+						e.Name, ce.ChunkOffset, ce.ChunkSize)
+				}
+				if !v.Verified() {
+					err := fmt.Errorf("invalid chunk %q (offset:%d,size:%d)", e.Name, ce.ChunkOffset, ce.ChunkSize)
+					if vr.prohibitVerifyFailure {
+						w.Abort()
+						return err
+					}
+					vr.lastVerifyErr.Store(err)
+				}
+
+				return w.Commit()
+			})
+		}
+
+		return true
+	})
+
+	return
+}
+
 func (vr *VerifiableReader) Close() error {
+	vr.closedMu.Lock()
+	defer vr.closedMu.Unlock()
+	if vr.closed {
+		return nil
+	}
+	vr.closed = true
 	return vr.r.Close()
+}
+
+func (vr *VerifiableReader) isClosed() bool {
+	vr.closedMu.Lock()
+	closed := vr.closed
+	vr.closedMu.Unlock()
+	return closed
 }
 
 type nopTOCEntryVerifier struct{}
@@ -115,7 +307,14 @@ func NewReader(sr *io.SectionReader, cache cache.BlobCache, layerSha digest.Dige
 		telemetry: telemetry,
 	}
 
-	return &VerifiableReader{vr}, nil
+	res := &VerifiableReader{r: vr}
+	verifiers, err := r.Verifiers()
+	if err != nil {
+		verifiers = nopTOCEntryVerifier{}
+		res.lastVerifyErr.Store(err)
+	}
+	res.verifier = verifiers
+	return res, nil
 }
 
 type reader struct {
@@ -148,6 +347,10 @@ func (gr *reader) LastOnDemandReadTime() time.Time {
 	return t
 }
 
+func (gr *reader) Lookup(name string) (*estargz.TOCEntry, bool) {
+	return gr.r.Lookup(name)
+}
+
 func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
 	if gr.isClosed() {
 		return nil, fmt.Errorf("reader is already closed")
@@ -171,51 +374,6 @@ func (gr *reader) OpenFile(name string) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *reader) Lookup(name string) (*estargz.TOCEntry, bool) {
-	return gr.r.Lookup(name)
-}
-
-func (gr *reader) Cache(opts ...CacheOption) (err error) {
-	if gr.isClosed() {
-		return fmt.Errorf("reader is already closed")
-	}
-
-	var cacheOpts cacheOptions
-	for _, o := range opts {
-		o(&cacheOpts)
-	}
-
-	r := gr.r
-	if cacheOpts.reader != nil {
-		if r, err = estargz.Open(cacheOpts.reader,
-			// TODO: apply other options used in NewReader when needed.
-			estargz.WithTelemetry(gr.telemetry),
-			estargz.WithDecompressors(new(zstdchunked.Decompressor)),
-		); err != nil {
-			return errors.Wrap(err, "failed to parse stargz")
-		}
-	}
-	root, ok := r.Lookup("")
-	if !ok {
-		return fmt.Errorf("failed to get a TOCEntry of the root")
-	}
-
-	filter := func(*estargz.TOCEntry) bool {
-		return true
-	}
-	if cacheOpts.filter != nil {
-		filter = cacheOpts.filter
-	}
-
-	eg, egCtx := errgroup.WithContext(context.Background())
-	eg.Go(func() error {
-		return gr.cacheWithReader(egCtx,
-			0, eg, semaphore.NewWeighted(int64(runtime.GOMAXPROCS(0))),
-			root, r, filter, cacheOpts.cacheOpts...)
-	})
-	return eg.Wait()
-}
-
 func (gr *reader) Close() error {
 	gr.closedMu.Lock()
 	defer gr.closedMu.Unlock()
@@ -231,108 +389,6 @@ func (gr *reader) isClosed() bool {
 	closed := gr.closed
 	gr.closedMu.Unlock()
 	return closed
-}
-
-func (gr *reader) cacheWithReader(ctx context.Context, currentDepth int, eg *errgroup.Group, sem *semaphore.Weighted, dir *estargz.TOCEntry, r *estargz.Reader, filter func(*estargz.TOCEntry) bool, opts ...cache.Option) (rErr error) {
-	if currentDepth > maxWalkDepth {
-		return fmt.Errorf("TOCEntry tree is too deep (depth:%d)", currentDepth)
-	}
-	dir.ForeachChild(func(_ string, e *estargz.TOCEntry) bool {
-		if e.Type == "dir" {
-			// Walk through all files on this stargz file.
-
-			// Ignore a TOCEntry of "./" (formated as "" by stargz lib) on root directory
-			// because this points to the root directory itself.
-			if e.Name == "" && dir.Name == "" {
-				return true
-			}
-
-			// Make sure the entry is the immediate child for avoiding loop.
-			if filepath.Dir(filepath.Clean(e.Name)) != filepath.Clean(dir.Name) {
-				rErr = fmt.Errorf("invalid child path %q; must be child of %q",
-					e.Name, dir.Name)
-				return false
-			}
-			if err := gr.cacheWithReader(ctx, currentDepth+1, eg, sem, e, r, filter, opts...); err != nil {
-				rErr = err
-				return false
-			}
-			return true
-		} else if e.Type != "reg" {
-			// Only cache regular files
-			return true
-		} else if !filter(e) {
-			// This entry need to be filtered out
-			return true
-		} else if e.Name == estargz.TOCTarName {
-			// We don't need to cache TOC json file
-			return true
-		}
-
-		sr, err := r.OpenFile(e.Name)
-		if err != nil {
-			rErr = err
-			return false
-		}
-
-		var nr int64
-		for nr < e.Size {
-			ce, ok := r.ChunkEntryForOffset(e.Name, nr)
-			if !ok {
-				break
-			}
-			nr += ce.ChunkSize
-
-			if err := sem.Acquire(ctx, 1); err != nil {
-				rErr = err
-				return false
-			}
-
-			eg.Go(func() (retErr error) {
-				defer sem.Release(1)
-
-				// Check if the target chunks exists in the cache
-				id := genID(e.Digest, ce.ChunkOffset, ce.ChunkSize)
-				if r, err := gr.cache.Get(id, opts...); err == nil {
-					return r.Close()
-				}
-
-				// missed cache, needs to fetch and add it to the cache
-				cr := io.NewSectionReader(sr, ce.ChunkOffset, ce.ChunkSize)
-				v, err := gr.verifier.Verifier(ce)
-				if err != nil {
-					return errors.Wrapf(err, "verifier not found %q(off:%d,size:%d)",
-						e.Name, ce.ChunkOffset, ce.ChunkSize)
-				}
-				br := bufio.NewReaderSize(io.TeeReader(cr, v), int(ce.ChunkSize))
-				if _, err := br.Peek(int(ce.ChunkSize)); err != nil {
-					return fmt.Errorf("cacheWithReader.peek: %v", err)
-				}
-				w, err := gr.cache.Add(id, opts...)
-				if err != nil {
-					return err
-				}
-				defer w.Close()
-				if _, err := io.CopyN(w, br, ce.ChunkSize); err != nil {
-					w.Abort()
-					return errors.Wrapf(err,
-						"failed to cache file payload of %q (offset:%d,size:%d)",
-						e.Name, ce.ChunkOffset, ce.ChunkSize)
-				}
-				if !v.Verified() {
-					w.Abort()
-					return fmt.Errorf("invalid chunk %q (offset:%d,size:%d)",
-						e.Name, ce.ChunkOffset, ce.ChunkSize)
-				}
-
-				return w.Commit()
-			})
-		}
-
-		return true
-	})
-
-	return
 }
 
 func (gr *reader) putBuffer(b *bytes.Buffer) {

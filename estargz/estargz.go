@@ -326,6 +326,10 @@ func (r *Reader) getOrCreateDir(d string) *TOCEntry {
 	return e
 }
 
+func (r *Reader) TOCDigest() digest.Digest {
+	return r.tocDigest
+}
+
 // VerifyTOC checks that the TOC JSON in the passed blob matches the
 // passed digests and that the TOC JSON contains digests for all chunks
 // contained in the blob. If the verification succceeds, this function
@@ -335,7 +339,12 @@ func (r *Reader) VerifyTOC(tocDigest digest.Digest) (TOCEntryVerifier, error) {
 	if r.tocDigest != tocDigest {
 		return nil, fmt.Errorf("invalid TOC JSON %q; want %q", r.tocDigest, tocDigest)
 	}
+	return r.Verifiers()
+}
 
+// Verifiers returns TOCEntryVerifier of this chunk. Use VerifyTOC instead in most cases
+// because this doesn't verify TOC.
+func (r *Reader) Verifiers() (TOCEntryVerifier, error) {
 	chunkDigestMap := make(map[int64]digest.Digest) // map from chunk offset to the chunk digest
 	regDigestMap := make(map[int64]digest.Digest)   // map from chunk offset to the reg file digest
 	var chunkDigestMapIncomplete bool
