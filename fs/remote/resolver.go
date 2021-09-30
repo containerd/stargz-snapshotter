@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -46,15 +47,21 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	rhttp "github.com/hashicorp/go-retryablehttp"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 const (
 	defaultChunkSize        = 50000
 	defaultValidIntervalSec = 60
 	defaultFetchTimeoutSec  = 300
+
+	defaultMaxRetries  = 5
+	defaultMinWaitMSec = 30
+	defaultMaxWaitMSec = 300000
 )
 
 func NewResolver(cfg config.BlobConfig) *Resolver {
@@ -70,6 +77,15 @@ func NewResolver(cfg config.BlobConfig) *Resolver {
 	if cfg.FetchTimeoutSec == 0 {
 		cfg.FetchTimeoutSec = defaultFetchTimeoutSec
 	}
+	if cfg.MaxRetries == 0 {
+		cfg.MaxRetries = defaultMaxRetries
+	}
+	if cfg.MinWaitMSec == 0 {
+		cfg.MinWaitMSec = defaultMinWaitMSec
+	}
+	if cfg.MaxWaitMSec == 0 {
+		cfg.MaxWaitMSec = defaultMaxWaitMSec
+	}
 
 	return &Resolver{
 		blobConfig: cfg,
@@ -81,36 +97,82 @@ type Resolver struct {
 }
 
 func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, blobCache cache.BlobCache) (Blob, error) {
-	fetcher, size, err := newFetcher(ctx, hosts, refspec, desc)
+	blobConfig := &r.blobConfig
+	fc := &fetcherConfig{
+		hosts:       hosts,
+		refspec:     refspec,
+		desc:        desc,
+		maxRetries:  blobConfig.MaxRetries,
+		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
+		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
+	}
+	fetcher, size, err := newFetcher(ctx, fc)
 	if err != nil {
 		return nil, err
 	}
 
-	if r.blobConfig.ForceSingleRangeMode {
+	if blobConfig.ForceSingleRangeMode {
 		fetcher.singleRangeMode()
 	}
 
 	return makeBlob(fetcher,
 		size,
-		r.blobConfig.ChunkSize,
-		r.blobConfig.PrefetchChunkSize,
+		blobConfig.ChunkSize,
+		blobConfig.PrefetchChunkSize,
 		blobCache,
 		time.Now(),
-		time.Duration(r.blobConfig.ValidInterval)*time.Second,
+		time.Duration(blobConfig.ValidInterval)*time.Second,
 		r,
-		time.Duration(r.blobConfig.FetchTimeoutSec)*time.Second), nil
+		time.Duration(blobConfig.FetchTimeoutSec)*time.Second), nil
 }
 
-func newFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (*fetcher, int64, error) {
-	reghosts, err := hosts(refspec)
+type fetcherConfig struct {
+	hosts       source.RegistryHosts
+	refspec     reference.Spec
+	desc        ocispec.Descriptor
+	maxRetries  int
+	minWaitMSec time.Duration
+	maxWaitMSec time.Duration
+}
+
+func jitter(duration time.Duration) time.Duration {
+	return time.Duration(rand.Int63n(int64(duration)) + int64(duration))
+}
+
+// backoffStrategy extends retryablehttp's DefaultBackoff to add a random jitter to avoid overwhelming the repository
+// when it comes back online
+// DefaultBackoff either tries to parse the 'Retry-After' header of the response; or, it uses an exponential backoff
+// 2 ^ numAttempts, limited by max
+func backoffStrategy(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
+	delayTime := rhttp.DefaultBackoff(min, max, attemptNum, resp)
+	return jitter(delayTime)
+}
+
+// retryStrategy extends retryablehttp's DefaultRetryPolicy to log the error and response when retrying
+// DefaultRetryPolicy retries whenever err is non-nil (except for some url errors) or if returned
+// status code is 429 or 5xx (except 501)
+func retryStrategy(ctx context.Context, resp *http.Response, err error) (bool, error) {
+	retry, err2 := rhttp.DefaultRetryPolicy(ctx, resp, err)
+	if retry {
+		log.G(ctx).WithFields(logrus.Fields{
+			"error":    err,
+			"response": resp,
+		}).Infof("Retrying request")
+	}
+	return retry, err2
+}
+
+func newFetcher(ctx context.Context, fc *fetcherConfig) (*fetcher, int64, error) {
+	reghosts, err := fc.hosts(fc.refspec)
 	if err != nil {
 		return nil, 0, err
 	}
+	desc := fc.desc
 	if desc.Digest.String() == "" {
 		return nil, 0, fmt.Errorf("Digest is mandatory in layer descriptor")
 	}
 	digest := desc.Digest
-	pullScope, err := repositoryScope(refspec, false)
+	pullScope, err := repositoryScope(fc.refspec, false)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -120,13 +182,22 @@ func newFetcher(ctx context.Context, hosts source.RegistryHosts, refspec referen
 	for _, host := range reghosts {
 		if host.Host == "" || strings.Contains(host.Host, "/") {
 			rErr = errors.Wrapf(rErr, "invalid destination (host %q, ref:%q, digest:%q)",
-				host.Host, refspec, digest)
+				host.Host, fc.refspec, digest)
 			continue // Try another
 
 		}
 
 		// Prepare transport with authorization functionality
 		tr := host.Client.Transport
+
+		if rt, ok := tr.(*rhttp.RoundTripper); ok {
+			rt.Client.RetryMax = fc.maxRetries
+			rt.Client.RetryWaitMin = fc.minWaitMSec
+			rt.Client.RetryWaitMax = fc.maxWaitMSec
+			rt.Client.Backoff = backoffStrategy
+			rt.Client.CheckRetry = retryStrategy
+		}
+
 		timeout := host.Client.Timeout
 		if host.Authorizer != nil {
 			tr = &transport{
@@ -140,12 +211,12 @@ func newFetcher(ctx context.Context, hosts source.RegistryHosts, refspec referen
 		blobURL := fmt.Sprintf("%s://%s/%s/blobs/%s",
 			host.Scheme,
 			path.Join(host.Host, host.Path),
-			strings.TrimPrefix(refspec.Locator, refspec.Hostname()+"/"),
+			strings.TrimPrefix(fc.refspec.Locator, fc.refspec.Hostname()+"/"),
 			digest)
 		url, err := redirect(ctx, blobURL, tr, timeout)
 		if err != nil {
 			rErr = errors.Wrapf(rErr, "failed to redirect (host %q, ref:%q, digest:%q): %v",
-				host.Host, refspec, digest, err)
+				host.Host, fc.refspec, digest, err)
 			continue // Try another
 		}
 
@@ -156,7 +227,7 @@ func newFetcher(ctx context.Context, hosts source.RegistryHosts, refspec referen
 		commonmetrics.MeasureLatency(commonmetrics.StargzHeaderGet, digest, start) // time to get layer header
 		if err != nil {
 			rErr = errors.Wrapf(rErr, "failed to get size (host %q, ref:%q, digest:%q): %v",
-				host.Host, refspec, digest, err)
+				host.Host, fc.refspec, digest, err)
 			continue // Try another
 		}
 

@@ -69,6 +69,10 @@ type BlobConfig struct {
 	// If PrefetchChunkSize < ChunkSize prefetch bytes will be fetched as a single http GET,
 	// else total GET requests for prefetch = ceil(PrefetchSize / PrefetchChunkSize).
 	PrefetchChunkSize int64 `toml:"prefetch_chunk_size"`
+
+	MaxRetries  int `toml:"max_retries"`
+	MinWaitMSec int `toml:"min_wait_msec"`
+	MaxWaitMSec int `toml:"max_wait_msec"`
 }
 
 type DirectoryCacheConfig struct {
