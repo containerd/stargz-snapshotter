@@ -280,13 +280,13 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	// define telemetry hooks to measure latency metrics inside estargz package
 	telemetry := estargz.Telemetry{
 		GetFooterLatency: func(start time.Time) {
-			commonmetrics.MeasureLatency(commonmetrics.StargzFooterGet, desc.Digest, start)
+			commonmetrics.MeasureLatencyInMilliseconds(commonmetrics.StargzFooterGet, desc.Digest, start)
 		},
 		GetTocLatency: func(start time.Time) {
-			commonmetrics.MeasureLatency(commonmetrics.StargzTocGet, desc.Digest, start)
+			commonmetrics.MeasureLatencyInMilliseconds(commonmetrics.StargzTocGet, desc.Digest, start)
 		},
 		DeserializeTocLatency: func(start time.Time) {
-			commonmetrics.MeasureLatency(commonmetrics.DeserializeTocJSON, desc.Digest, start)
+			commonmetrics.MeasureLatencyInMilliseconds(commonmetrics.DeserializeTocJSON, desc.Digest, start)
 		},
 	}
 	vr, err := reader.NewReader(sr, fsCache, desc.Digest, &telemetry, esgzOpts...)
@@ -530,7 +530,7 @@ func (l *layer) backgroundFetch(ctx context.Context) error {
 	br := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (retN int, retErr error) {
 		l.resolver.backgroundTaskManager.InvokeBackgroundTask(func(ctx context.Context) {
 			// Measuring the time to download background fetch data (in milliseconds)
-			defer commonmetrics.MeasureLatency(commonmetrics.BackgroundFetchDownload, l.desc.Digest, time.Now()) // time to download background fetch data
+			defer commonmetrics.MeasureLatencyInMilliseconds(commonmetrics.BackgroundFetchDownload, l.Info().Digest, time.Now()) // time to download background fetch data
 			retN, retErr = l.blob.ReadAt(
 				p,
 				offset,
