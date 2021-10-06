@@ -224,7 +224,7 @@ func newFetcher(ctx context.Context, fc *fetcherConfig) (*fetcher, int64, error)
 		// TODO: we should try to use the Size field in the descriptor here.
 		start := time.Now() // start time before getting layer header
 		size, err := getSize(ctx, url, tr, timeout)
-		commonmetrics.MeasureLatency(commonmetrics.StargzHeaderGet, digest, start) // time to get layer header
+		commonmetrics.MeasureLatencyInMilliseconds(commonmetrics.StargzHeaderGet, digest, start) // time to get layer header
 		if err != nil {
 			rErr = errors.Wrapf(rErr, "failed to get size (host %q, ref:%q, digest:%q): %v",
 				host.Host, fc.refspec, digest, err)
@@ -438,7 +438,7 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *opti
 	// Recording the roundtrip latency for remote registry GET operation.
 	start := time.Now()
 	res, err := tr.RoundTrip(req) // NOT DefaultClient; don't want redirects
-	commonmetrics.MeasureLatency(commonmetrics.RemoteRegistryGet, f.digest, start)
+	commonmetrics.MeasureLatencyInMilliseconds(commonmetrics.RemoteRegistryGet, f.digest, start)
 	if err != nil {
 		return nil, err
 	}

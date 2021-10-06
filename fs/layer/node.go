@@ -89,9 +89,9 @@ var _ = (fusefs.InodeEmbedder)((*node)(nil))
 var _ = (fusefs.NodeReaddirer)((*node)(nil))
 
 func (n *node) Readdir(ctx context.Context) (fusefs.DirStream, syscall.Errno) {
-	// Measure how long node_readdir operation takes.
+	// Measure how long node_readdir operation takes (in microseconds).
 	start := time.Now() // set start time
-	defer commonmetrics.MeasureLatency(commonmetrics.NodeReaddir, n.layerSha, start)
+	defer commonmetrics.MeasureLatencyInMicroseconds(commonmetrics.NodeReaddir, n.layerSha, start)
 
 	var ents []fuse.DirEntry
 	whiteouts := map[string]*estargz.TOCEntry{}
@@ -272,8 +272,8 @@ type file struct {
 var _ = (fusefs.FileReader)((*file)(nil))
 
 func (f *file) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	defer commonmetrics.MeasureLatency(commonmetrics.ReadOnDemand, f.n.layerSha, time.Now())   // measure time for on-demand file reads (in milliseconds)
-	defer commonmetrics.IncOperationCount(commonmetrics.OnDemandReadAccessCount, f.n.layerSha) // increment the counter for on-demand file accesses
+	defer commonmetrics.MeasureLatencyInMicroseconds(commonmetrics.ReadOnDemand, f.n.layerSha, time.Now()) // measure time for on-demand file reads (in microseconds)
+	defer commonmetrics.IncOperationCount(commonmetrics.OnDemandReadAccessCount, f.n.layerSha)             // increment the counter for on-demand file accesses
 	n, err := f.ra.ReadAt(dest, off)
 	if err != nil && err != io.EOF {
 		f.n.s.report(fmt.Errorf("failed to read node: %v", err))
