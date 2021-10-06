@@ -96,7 +96,7 @@ function run {
 
     # Create argo cluster
     k3d cluster create "${K3S_CLUSTER_NAME}" --image="${K3S_NODE_IMAGE}" \
-        --k3s-server-arg=--snapshotter="${SNAPSHOTTER}" --k3s-agent-arg=--snapshotter="${SNAPSHOTTER}"
+        --k3s-arg='--snapshotter='"${SNAPSHOTTER}"'@server:*;agent:*'
     kubectl create ns argo
     kubectl apply -n argo -f "${CUSTOM_ARGOYAML}"
 
