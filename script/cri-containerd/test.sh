@@ -113,6 +113,9 @@ cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${NODE_BASE_IMAGE_NAME}
 ARG TARGETARCH
 
+# see https://medium.com/nttlabs/ubuntu-21-10-and-fedora-35-do-not-work-on-docker-20-10-9-1cd439d9921
+SHELL ["/clone3-workaround", "/bin/sh", "-c"]
+
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
 # Do not install git and its dependencies here which will cause failure of building the image
