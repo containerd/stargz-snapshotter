@@ -64,6 +64,7 @@ const (
 	defaultPrefetchTimeoutSec = 10
 	memoryCacheType           = "memory"
 	memoryMetadataType        = "memory"
+	dbMetadataType            = "db"
 )
 
 // Layer represents a layer.
@@ -170,9 +171,10 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	}
 
 	var newReader func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error)
-	if cfg.MetadataStore == memoryMetadataType {
+	switch cfg.MetadataStore {
+	case memoryMetadataType:
 		newReader = memorymetadata.NewReader
-	} else {
+	case dbMetadataType:
 		bOpts := bolt.Options{
 			NoFreelistSync:  true,
 			InitialMmapSize: 64 * 1024 * 1024,
@@ -185,6 +187,9 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 		newReader = func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
 			return dbmetadata.NewReader(db, sr, opts...)
 		}
+	default:
+		return nil, fmt.Errorf("unknown metadata store type: %v; must be %v or %v",
+			cfg.MetadataStore, memoryMetadataType, dbMetadataType)
 	}
 
 	return &Resolver{
