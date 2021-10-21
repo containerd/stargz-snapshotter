@@ -172,7 +172,7 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 
 	var newReader func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error)
 	switch cfg.MetadataStore {
-	case memoryMetadataType:
+	case "", memoryMetadataType:
 		newReader = memorymetadata.NewReader
 	case dbMetadataType:
 		bOpts := bolt.Options{
