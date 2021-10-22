@@ -56,6 +56,8 @@ In the following table, image names listed in `Image Name` contain the following
 |`ghcr.io/stargz-containers/wordpress:5.7-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
 |`ghcr.io/stargz-containers/mariadb:10.5-org`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
 |`ghcr.io/stargz-containers/mariadb:10.5-esgz`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
+|`ghcr.io/stargz-containers/php:8-apache-buster-org`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/php:8-apache-buster-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
 
 ## lazy-pulling-enabled KinD node image
 

@@ -114,6 +114,7 @@ class BenchRunner:
                     'mariadb:10.5': RunArgs(waitline='mysqld: ready for connections',
                                             env={'MYSQL_ROOT_PASSWORD': 'abc'}),
                     'wordpress:5.7': RunArgs(waitline='apache2 -D FOREGROUND'),
+                    'php:8-apache-buster': RunArgs(waitline='apache2 -D FOREGROUND'),
     }
 
     CMD_STDIN = {'php:7.3.8':  RunArgs(stdin='php -r "echo \\\"hello\\n\\\";"; exit\n'),
@@ -152,6 +153,7 @@ class BenchRunner:
                  Bench('node:13.13.0'),
                  Bench('tomcat:10.0.0-jdk15-openjdk-buster', 'web-server'),
                  Bench('wordpress:5.7', 'web-server'),
+                 Bench('php:8-apache-buster', 'web-server'),
              ]])
 
     def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER, runtime="containerd", profile=0):
