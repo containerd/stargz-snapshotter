@@ -68,6 +68,7 @@ version = 2
   runtime_type = "io.containerd.runc.v2"
 [plugins."io.containerd.snapshotter.v1.stargz"]
 cri_keychain_image_service_path = "${SNAPSHOTTER_SOCK_PATH}"
+metadata_store = "memory"
 [plugins."io.containerd.snapshotter.v1.stargz".cri_keychain]
 enable_keychain = true
 EOF
@@ -105,6 +106,16 @@ cat <<EOF > "${TMP_CONTEXT}/test.conflist"
 }
 EOF
 
+USE_METADATA_STORE="memory"
+if [ "${METADATA_STORE:-}" != "" ] ; then
+    USE_METADATA_STORE="${METADATA_STORE}"
+fi
+
+SNAPSHOTTER_CONFIG_FILE=/etc/containerd-stargz-grpc/config.toml
+if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+    SNAPSHOTTER_CONFIG_FILE=/etc/containerd/config.toml
+fi
+
 # Prepare the testing node
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
@@ -133,6 +144,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends make && \
 COPY ./test.conflist /etc/cni/net.d/test.conflist
 
 ${BUILTIN_HACK_INST}
+
+RUN sed -i 's/^metadata_store.*/metadata_store = "${USE_METADATA_STORE}"/g' "${SNAPSHOTTER_CONFIG_FILE}"
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
 EOF

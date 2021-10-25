@@ -44,6 +44,16 @@ if [ "${INTEGRATION_NO_RECREATE:-}" != "true" ] ; then
            "${REPO}"
 fi
 
+USE_METADATA_STORE="memory"
+if [ "${METADATA_STORE:-}" != "" ] ; then
+    USE_METADATA_STORE="${METADATA_STORE}"
+fi
+
+SNAPSHOTTER_CONFIG_FILE=/etc/containerd-stargz-grpc/config.toml
+if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
+    SNAPSHOTTER_CONFIG_FILE=/etc/containerd/config.toml
+fi
+
 DOCKER_COMPOSE_YAML=$(mktemp)
 AUTH_DIR=$(mktemp -d)
 SS_ROOT_DIR=$(mktemp -d)
@@ -74,6 +84,8 @@ RUN apt-get update -y && \
 COPY ./containerd/config.containerd.toml /etc/containerd/config.toml
 COPY ./containerd/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
 COPY ./containerd/entrypoint.sh ./utils.sh /
+
+RUN sed -i 's/^metadata_store.*/metadata_store = "${USE_METADATA_STORE}"/g' "${SNAPSHOTTER_CONFIG_FILE}"
 
 ENV CONTAINERD_SNAPSHOTTER=""
 

@@ -20,9 +20,11 @@ import (
 	"context"
 	"flag"
 	golog "log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/stargz-snapshotter/fs/config"
@@ -65,6 +67,7 @@ type KubeconfigKeychainConfig struct {
 type ResolverConfig resolver.Config
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	flag.Parse()
 	mountPoint := flag.Arg(0)
 	lvl, err := logrus.ParseLevel(*logLevel)

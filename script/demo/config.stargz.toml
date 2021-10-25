@@ -3,3 +3,5 @@ disable_verification = true
 [[resolver.host."registry2:5000".mirrors]]
 host = "registry2:5000"
 insecure = true
+[directory_cache]
+direct = true

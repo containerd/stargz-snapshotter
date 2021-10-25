@@ -1,3 +1,5 @@
+metadata_store = "memory"
+
 [blob]
 check_always = true
 

@@ -56,14 +56,17 @@ def exit(status):
     shutil.rmtree(TMP_DIR)
     sys.exit(status)
 
-def tmp_dir():
-    tmp_dir.nxt += 1
-    return os.path.join(TMP_DIR, str(tmp_dir.nxt))
-tmp_dir.nxt = 0
+def tmp_path():
+    tmp_path.nxt += 1
+    return os.path.join(TMP_DIR, str(tmp_path.nxt))
+tmp_path.nxt = 0
 
 def tmp_copy(src):
-    dst = tmp_dir()
-    shutil.copytree(src, dst)
+    dst = tmp_path()
+    if os.path.isdir(src):
+        shutil.copytree(src, dst)
+    else:
+        shutil.copyfile(src, dst)
     return dst
 
 def genargs_for_optimization(arg):
@@ -115,6 +118,9 @@ class BenchRunner:
                                             env={'MYSQL_ROOT_PASSWORD': 'abc'}),
                     'wordpress:5.7': RunArgs(waitline='apache2 -D FOREGROUND'),
                     'php:8-apache-buster': RunArgs(waitline='apache2 -D FOREGROUND'),
+                    'rabbitmq:3.9.4': RunArgs(waitline='Server startup complete'),
+                    'elasticsearch:7.14.0': RunArgs(waitline='"started"',
+                                                    mount=[('elasticsearch/elasticsearch.yml', '/usr/share/elasticsearch/config/elasticsearch.yml')]),
     }
 
     CMD_STDIN = {'php:7.3.8':  RunArgs(stdin='php -r "echo \\\"hello\\n\\\";"; exit\n'),
@@ -154,6 +160,8 @@ class BenchRunner:
                  Bench('tomcat:10.0.0-jdk15-openjdk-buster', 'web-server'),
                  Bench('wordpress:5.7', 'web-server'),
                  Bench('php:8-apache-buster', 'web-server'),
+                 Bench('rabbitmq:3.9.4'),
+                 Bench('elasticsearch:7.14.0'),
              ]])
 
     def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER, runtime="containerd", profile=0):
@@ -303,10 +311,15 @@ class BenchRunner:
         assert(rc == 0)
 
     def convert_cmd_arg_wait(self, src, dest, runargs, option):
+        mounts = ''
+        for a,b in runargs.mount:
+            a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
+            a = tmp_copy(a)
+            mounts += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
         period = 90
         env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s %s -cni -period %s %s %s %s %s' %
-               (self.optimizer, option, period, env, genargs_for_optimization(runargs.arg), src, dest))
+        cmd = ('%s -cni -period %s %s %s %s %s %s' %
+               (self.optimizer, period, mounts, env, genargs_for_optimization(runargs.arg), src, dest))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
@@ -422,8 +435,12 @@ class ContainerdController:
         if self.is_lazypull:
             snapshotter_opt = "--snapshotter=stargz"
         env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s c create --net-host %s %s -- %s %s %s' %
-               (CTR, snapshotter_opt, env, image, cid, runargs.arg))
+        cmd = '%s c create --net-host %s %s '% (CTR, snapshotter_opt, env)
+        for a,b in runargs.mount:
+            a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
+            a = tmp_copy(a)
+            cmd += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
+        cmd += '-- %s %s %s' % (image, cid, runargs.arg)
         print cmd
         return cmd
 
@@ -493,8 +510,12 @@ class PodmanController:
 
     def create_cmd_arg_wait_cmd(self, image, cid, runargs):
         env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s create %s --name %s docker://%s %s ' %
-               (PODMAN, env, cid, image, runargs.arg))
+        cmd = '%s create %s --name %s '% (PODMAN, env, cid)
+        for a,b in runargs.mount:
+            a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
+            a = tmp_copy(a)
+            cmd += '--mount type=bind,src=%s,dst=%s ' % (a,b)
+        cmd += ' docker://%s %s ' % (image, runargs.arg)
         print cmd
         return cmd
 

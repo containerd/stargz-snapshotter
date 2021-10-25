@@ -32,6 +32,11 @@ if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
     docker build ${DOCKER_BUILD_ARGS:-} -t "${PREPARE_NODE_IMAGE}" --target containerd-base "${REPO}"
 fi
 
+USE_METADATA_STORE="memory"
+if [ "${METADATA_STORE:-}" != "" ] ; then
+    USE_METADATA_STORE="${METADATA_STORE}"
+fi
+
 TMP_CONTEXT=$(mktemp -d)
 IMAGE_LIST=$(mktemp)
 function cleanup {
@@ -61,6 +66,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends make && \
     mv /tmp/cri-tools/cri-tools-${CRI_TOOLS_VERSION}/* \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools/ && \
     cd \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools && \
     make && make install -e BINDIR=\${GOPATH}/bin
+
+RUN echo "metadata_store = \"${USE_METADATA_STORE}\"" >> /etc/stargz-store/config.toml
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 EOF

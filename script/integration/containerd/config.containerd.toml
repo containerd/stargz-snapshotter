@@ -3,6 +3,7 @@ version = 2
 [plugins."io.containerd.snapshotter.v1.stargz"]
 root_path = "/var/lib/containerd-stargz-grpc/"
 disable_verification = false
+metadata_store = "memory"
 
 [plugins."io.containerd.snapshotter.v1.stargz".blob]
 check_always = true

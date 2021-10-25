@@ -25,15 +25,24 @@ import (
 )
 
 type buildEStargzOptions struct {
-	estargzOptions []estargz.Option
+	estargzOptions  []estargz.Option
+	buildTarOptions []BuildTarOption
 }
 
 type BuildEStargzOption func(o *buildEStargzOptions) error
 
-// WithEStargzOptions specifies options for estargz.Build.
+// WithEStargzOptions specifies options for estargz lib
 func WithEStargzOptions(eo ...estargz.Option) BuildEStargzOption {
 	return func(o *buildEStargzOptions) error {
 		o.estargzOptions = eo
+		return nil
+	}
+}
+
+// WithBuildTarOptions option specifies the options for tar creation
+func WithBuildTarOptions(to ...BuildTarOption) BuildEStargzOption {
+	return func(o *buildEStargzOptions) error {
+		o.buildTarOptions = to
 		return nil
 	}
 }
@@ -44,7 +53,7 @@ func BuildEStargz(ents []TarEntry, opts ...BuildEStargzOption) (*io.SectionReade
 		o(&beOpts)
 	}
 	tarBuf := new(bytes.Buffer)
-	if _, err := io.Copy(tarBuf, BuildTar(ents)); err != nil {
+	if _, err := io.Copy(tarBuf, BuildTar(ents, beOpts.buildTarOptions...)); err != nil {
 		return nil, "", err
 	}
 	tarData := tarBuf.Bytes()

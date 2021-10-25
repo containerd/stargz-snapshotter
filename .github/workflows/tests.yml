@@ -39,9 +39,14 @@ jobs:
       matrix:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
+        metadata-store: ["memory", "db"]
         exclude:
         - buildargs: ""
           builtin: "true"
+        - metadata-store: "db"
+          builtin: "true"
+        - metadata-store: "db"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -50,6 +55,7 @@ jobs:
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
+        METADATA_STORE: ${{ matrix.metadata-store }}
       run: make integration
 
   test-optimize:
@@ -118,23 +124,35 @@ jobs:
       matrix:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
+        metadata-store: ["memory", "db"]
         exclude:
         - buildargs: ""
           builtin: "true"
+        - metadata-store: "db"
+          builtin: "true"
+        - metadata-store: "db"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - uses: actions/checkout@v2
     - name: Validate containerd through CRI
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
+        METADATA_STORE: ${{ matrix.metadata-store }}
       run: make test-cri-containerd
 
   test-cri-cri-o:
     runs-on: ubuntu-20.04
     name: CRIValidationCRIO
+    strategy:
+      fail-fast: false
+      matrix:
+        metadata-store: ["memory", "db"]
     steps:
     - uses: actions/checkout@v2
     - name: Validate CRI-O through CRI
+      env:
+        METADATA_STORE: ${{ matrix.metadata-store }}
       run: make test-cri-o
 
   test-k3s:

@@ -46,6 +46,7 @@ type Config struct {
 	DisableVerification bool   `toml:"disable_verification"`
 	MaxConcurrency      int64  `toml:"max_concurrency"`
 	NoPrometheus        bool   `toml:"no_prometheus"`
+	MetadataStore       string `toml:"metadata_store" default:"memory"`
 
 	// BlobConfig is config for layer blob management.
 	BlobConfig `toml:"blob"`
@@ -79,7 +80,7 @@ type DirectoryCacheConfig struct {
 	MaxLRUCacheEntry int  `toml:"max_lru_cache_entry"`
 	MaxCacheFds      int  `toml:"max_cache_fds"`
 	SyncAdd          bool `toml:"sync_add"`
-	Direct           bool `toml:"direct"`
+	Direct           bool `toml:"direct" default:"true"`
 }
 
 type FuseConfig struct {

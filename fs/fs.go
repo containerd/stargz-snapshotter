@@ -267,7 +267,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		// Verification must be done. Don't mount this layer.
 		return fmt.Errorf("digest of TOC JSON must be passed")
 	}
-	node, err := l.RootNode()
+	node, err := l.RootNode(0)
 	if err != nil {
 		log.G(ctx).WithError(err).Warnf("Failed to get root node")
 		return errors.Wrapf(err, "failed to get root node")

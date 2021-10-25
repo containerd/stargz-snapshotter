@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -42,10 +43,15 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/metadata"
+	dbmetadata "github.com/containerd/stargz-snapshotter/metadata/db"
+	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/hashicorp/go-multierror"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
 
@@ -56,6 +62,11 @@ const (
 
 // Tests Read method of each file node.
 func TestNodeRead(t *testing.T) {
+	testNodeRead(t, "db", newDBReader)
+	testNodeRead(t, "mem", newMemoryReader)
+}
+
+func testNodeRead(t *testing.T, name string, factory readerFactory) {
 	sizeCond := map[string]int64{
 		"single_chunk": sampleChunkSize - sampleMiddleOffset,
 		"multi_chunks": sampleChunkSize + sampleMiddleOffset,
@@ -78,7 +89,7 @@ func TestNodeRead(t *testing.T) {
 		for in, innero := range innerOffsetCond {
 			for bo, baseo := range baseOffsetCond {
 				for fn, filesize := range fileSizeCond {
-					t.Run(fmt.Sprintf("reading_%s_%s_%s_%s", sn, in, bo, fn), func(t *testing.T) {
+					t.Run(fmt.Sprintf("reading_%s_%s_%s_%s_%s", name, sn, in, bo, fn), func(t *testing.T) {
 						if filesize > int64(len(sampleData1)) {
 							t.Fatal("sample file size is larger than sample data")
 						}
@@ -102,7 +113,8 @@ func TestNodeRead(t *testing.T) {
 						}
 
 						// data we get from the file node.
-						f := makeNodeReader(t, []byte(sampleData1)[:filesize], sampleChunkSize)
+						f, closeFn := makeNodeReader(t, []byte(sampleData1)[:filesize], sampleChunkSize, factory)
+						defer closeFn()
 						tmpbuf := make([]byte, size) // fuse library can request bigger than remain
 						rr, errno := f.Read(context.Background(), tmpbuf, offset)
 						if errno != 0 {
@@ -110,7 +122,7 @@ func TestNodeRead(t *testing.T) {
 							return
 						}
 						if rsize := rr.Size(); int64(rsize) != wantN {
-							t.Errorf("read size: %d; want: %d", rsize, wantN)
+							t.Errorf("read size: %d; want: %d; passed %d", rsize, wantN, size)
 							return
 						}
 						tmpbuf = make([]byte, len(tmpbuf))
@@ -131,30 +143,34 @@ func TestNodeRead(t *testing.T) {
 	}
 }
 
-func makeNodeReader(t *testing.T, contents []byte, chunkSize int) *file {
+func makeNodeReader(t *testing.T, contents []byte, chunkSize int, factory readerFactory) (_ *file, closeFn func() error) {
 	testName := "test"
-	sgz, _, err := testutil.BuildEStargz(
+	sr, _, err := testutil.BuildEStargz(
 		[]testutil.TarEntry{testutil.File(testName, string(contents))},
 		testutil.WithEStargzOptions(estargz.WithChunkSize(chunkSize)),
 	)
 	if err != nil {
 		t.Fatalf("failed to build sample eStargz: %v", err)
 	}
-	r, err := estargz.Open(sgz)
+	r, closeFn, err := factory(sr)
 	if err != nil {
-		t.Fatal("failed to make stargz")
+		t.Fatalf("failed to create reader: %v", err)
 	}
+	var closes closeFuncs
+	closes = append(closes, r.Close, closeFn)
 	rootNode := getRootNode(t, r)
 	var eo fuse.EntryOut
 	inode, errno := rootNode.Lookup(context.Background(), testName, &eo)
 	if errno != 0 {
+		closes.close()
 		t.Fatalf("failed to lookup test node; errno: %v", errno)
 	}
 	f, _, errno := inode.Operations().(fusefs.NodeOpener).Open(context.Background(), 0)
 	if errno != 0 {
+		closes.close()
 		t.Fatalf("failed to open test file; errno: %v", errno)
 	}
-	return f.(*file)
+	return f.(*file), closes.close
 }
 
 func TestExistence(t *testing.T) {
@@ -289,26 +305,31 @@ func TestExistence(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sgz, _, err := testutil.BuildEStargz(tt.in)
-			if err != nil {
-				t.Fatalf("failed to build sample eStargz: %v", err)
-			}
-			r, err := estargz.Open(sgz)
-			if err != nil {
-				t.Fatalf("stargz.Open: %v", err)
-			}
-			rootNode := getRootNode(t, r)
-			for _, want := range tt.want {
-				want(t, rootNode)
-			}
-		})
+	for readerName, factory := range map[string]readerFactory{"db": newDBReader, "mem": newMemoryReader} {
+		for _, tt := range tests {
+			t.Run(tt.name+"-"+readerName, func(t *testing.T) {
+				sgz, _, err := testutil.BuildEStargz(tt.in)
+				if err != nil {
+					t.Fatalf("failed to build sample eStargz: %v", err)
+				}
+
+				r, closeFn, err := factory(sgz)
+				if err != nil {
+					t.Fatalf("failed to create reader: %v", err)
+				}
+				defer r.Close()
+				defer closeFn()
+				rootNode := getRootNode(t, r)
+				for _, want := range tt.want {
+					want(t, rootNode)
+				}
+			})
+		}
 	}
 }
 
-func getRootNode(t *testing.T, r *estargz.Reader) *node {
-	rootNode, err := newNode(testStateLayerDigest, &testReader{r}, &testBlobState{10, 5})
+func getRootNode(t *testing.T, r metadata.Reader) *node {
+	rootNode, err := newNode(testStateLayerDigest, &testReader{r}, &testBlobState{10, 5}, 100)
 	if err != nil {
 		t.Fatalf("failed to get root node: %v", err)
 	}
@@ -317,14 +338,14 @@ func getRootNode(t *testing.T, r *estargz.Reader) *node {
 }
 
 type testReader struct {
-	r *estargz.Reader
+	r metadata.Reader
 }
 
-func (tr *testReader) OpenFile(name string) (io.ReaderAt, error)    { return tr.r.OpenFile(name) }
-func (tr *testReader) Lookup(name string) (*estargz.TOCEntry, bool) { return tr.r.Lookup(name) }
-func (tr *testReader) Cache(opts ...reader.CacheOption) error       { return nil }
-func (tr *testReader) Close() error                                 { return nil }
-func (tr *testReader) LastOnDemandReadTime() time.Time              { return time.Now() }
+func (tr *testReader) OpenFile(id uint32) (io.ReaderAt, error) { return tr.r.OpenFile(id) }
+func (tr *testReader) Metadata() metadata.Reader               { return tr.r }
+func (tr *testReader) Cache(opts ...reader.CacheOption) error  { return nil }
+func (tr *testReader) Close() error                            { return nil }
+func (tr *testReader) LastOnDemandReadTime() time.Time         { return time.Now() }
 
 type testBlobState struct {
 	size        int64
@@ -353,14 +374,31 @@ func fileNotExist(file string) check {
 	}
 }
 
-func hasFileDigest(file string, digest string) check {
+func hasFileDigest(filename string, digest string) check {
 	return func(t *testing.T, root *node) {
-		_, n, err := getDirentAndNode(t, root, file)
+		_, n, err := getDirentAndNode(t, root, filename)
 		if err != nil {
-			t.Fatalf("failed to get node %q: %v", file, err)
+			t.Fatalf("failed to get node %q: %v", filename, err)
 		}
-		if ndgst := n.Operations().(*node).e.Digest; ndgst != digest {
-			t.Fatalf("Digest(%q) = %q, want %q", file, ndgst, digest)
+		ni := n.Operations().(*node)
+		attr, err := ni.fs.r.Metadata().GetAttr(ni.id)
+		if err != nil {
+			t.Fatalf("failed to get attr %q(%d): %v", filename, ni.id, err)
+		}
+		fh, _, errno := ni.Open(context.Background(), 0)
+		if errno != 0 {
+			t.Fatalf("failed to open node %q: %v", filename, errno)
+		}
+		rr, errno := fh.(*file).Read(context.Background(), make([]byte, attr.Size), 0)
+		if errno != 0 {
+			t.Fatalf("failed to read node %q: %v", filename, errno)
+		}
+		res, status := rr.Bytes(make([]byte, attr.Size))
+		if status != fuse.OK {
+			t.Fatalf("failed to get read result of node %q: %v", filename, status)
+		}
+		if ndgst := digestFor(string(res)); ndgst != digest {
+			t.Fatalf("Digest(%q) = %q, want %q", filename, ndgst, digest)
 		}
 	}
 }
@@ -528,7 +566,7 @@ func hasStateFile(t *testing.T, id string) check {
 		wantErr := fmt.Errorf("test-%d", rand.Int63())
 
 		// report the data
-		root.s.report(wantErr)
+		root.fs.s.report(wantErr)
 
 		// obtain file size (check later)
 		var ao fuse.AttrOut
@@ -636,4 +674,48 @@ func extraModeToTarMode(fm os.FileMode) (tm int64) {
 		tm |= cISVTX
 	}
 	return
+}
+
+type readerFactory func(sr *io.SectionReader) (mr metadata.Reader, close func() error, err error)
+
+func newDBReader(sr *io.SectionReader) (metadata.Reader, func() error, error) {
+	var closes closeFuncs
+	f, err := ioutil.TempFile("", "readertest")
+	if err != nil {
+		return nil, nil, err
+	}
+	closes = append(closes, func() error { return os.Remove(f.Name()) })
+	db, err := bolt.Open(f.Name(), 0666, nil)
+	if err != nil {
+		closes.close()
+		return nil, nil, err
+	}
+	closes = append(closes, db.Close)
+	mr, err := dbmetadata.NewReader(db, sr)
+	if err != nil {
+		closes.close()
+		return nil, nil, err
+	}
+	closes = append(closes, mr.Close)
+	return mr, closes.close, nil
+}
+
+func newMemoryReader(sr *io.SectionReader) (metadata.Reader, func() error, error) {
+	mr, err := memorymetadata.NewReader(sr)
+	if err != nil {
+		return nil, nil, err
+	}
+	return mr, func() error { return nil }, err
+}
+
+type closeFuncs []func() error
+
+func (fs closeFuncs) close() error {
+	var allErr error
+	for _, f := range fs {
+		if err := f(); err != nil {
+			allErr = multierror.Append(allErr, err)
+		}
+	}
+	return allErr
 }
