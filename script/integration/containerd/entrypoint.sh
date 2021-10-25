@@ -39,6 +39,8 @@ USR_NORMALSN_ZSTD=$(mktemp -d)
 USR_STARGZSN_ZSTD=$(mktemp -d)
 USR_NORMALSN_PLAIN_STARGZ=$(mktemp -d)
 USR_STARGZSN_PLAIN_STARGZ=$(mktemp -d)
+USR_NORMALSN_IPFS=$(mktemp -d)
+USR_STARGZSN_IPFS=$(mktemp -d)
 LOG_FILE=$(mktemp)
 function cleanup {
     ORG_EXIT_CODE="${1}"
@@ -53,6 +55,8 @@ function cleanup {
     rm -rf "${USR_STARGZSN_PLAIN_STARGZ}" || true
     rm -rf "${USR_NORMALSN_ZSTD}" || true
     rm -rf "${USR_STARGZSN_ZSTD}" || true
+    rm -rf "${USR_NORMALSN_IPFS}" || true
+    rm -rf "${USR_STARGZSN_IPFS}" || true
     rm "${LOG_FILE}"
     exit "${ORG_EXIT_CODE}"
 }
@@ -208,6 +212,9 @@ if [ "${OK}" != "ok" ] ; then
     exit 1
 fi
 
+ipfs init
+ipfs daemon &
+
 echo "Preparing images..."
 copy docker.io/library/ubuntu:18.04 "${REGISTRY_HOST}/ubuntu:18.04"
 copy docker.io/library/alpine:3.10.2 "${REGISTRY_HOST}/alpine:3.10.2"
@@ -216,6 +223,29 @@ optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:esgz"
 optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:zstdchunked"
 optimize "${REGISTRY_HOST}/alpine:3.10.2" "${REGISTRY_HOST}/alpine:esgz"
 optimize "${REGISTRY_HOST}/alpine:3.10.2" "${REGISTRY_ALT_HOST}:5000/alpine:esgz" --plain-http
+
+############
+# Tests with IPFS
+echo "Testing with IPFS..."
+
+# stargz snapshotter
+ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
+CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:18.04")
+reboot_containerd
+echo -n "" > "${LOG_FILE}"
+ctr-remote i rpull --ipfs "${CID}"
+check_remote_snapshots "${LOG_FILE}"
+ctr-remote run --rm --snapshotter=stargz "${CID}" test tar -c /usr | tar -xC "${USR_STARGZSN_IPFS}"
+
+# overlayfs snapshotter
+ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
+CID=$(ctr-remote i ipfs-push --estargz=false "${REGISTRY_HOST}/ubuntu:18.04")
+reboot_containerd
+ctr-remote i rpull --snapshotter=overlayfs --ipfs "${CID}"
+ctr-remote run --rm --snapshotter=overlayfs "${CID}" test tar -c /usr | tar -xC "${USR_NORMALSN_IPFS}"
+
+echo "Diffing between two root filesystems(normal vs stargz snapshotter, IPFS rootfs)"
+diff --no-dereference -qr "${USR_NORMALSN_IPFS}/" "${USR_STARGZSN_IPFS}/"
 
 ############
 # Tests for refreshing and mirror
@@ -277,7 +307,7 @@ dump_dir "${REGISTRY_HOST}/ubuntu:18.04" "/usr" "overlayfs" "false" "${USR_NORMA
 echo "Getting normal image with stargz snapshotter..."
 dump_dir "${REGISTRY_HOST}/ubuntu:18.04" "/usr" "stargz" "false" "${USR_STARGZSN_UNSTARGZ}"
 
-echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, normal rootfs)"
+echo "Diffing between two root filesystems(normal vs stargz snapshotter, normal rootfs)"
 diff --no-dereference -qr "${USR_NORMALSN_UNSTARGZ}/" "${USR_STARGZSN_UNSTARGZ}/"
 
 # Test with an eStargz image
@@ -288,7 +318,7 @@ dump_dir "${REGISTRY_HOST}/ubuntu:esgz" "/usr" "overlayfs" "false" "${USR_NORMAL
 echo "Getting eStargz image with stargz snapshotter..."
 dump_dir "${REGISTRY_HOST}/ubuntu:esgz" "/usr" "stargz" "true" "${USR_STARGZSN_STARGZ}"
 
-echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, eStargz rootfs)"
+echo "Diffing between two root filesystems(normal vs stargz snapshotter, eStargz rootfs)"
 diff --no-dereference -qr "${USR_NORMALSN_STARGZ}/" "${USR_STARGZSN_STARGZ}/"
 
 # Test with a zstd:chunked image
@@ -299,7 +329,7 @@ dump_dir "${REGISTRY_HOST}/ubuntu:zstdchunked" "/usr" "overlayfs" "false" "${USR
 echo "Getting zstd:chunked image with stargz snapshotter..."
 dump_dir "${REGISTRY_HOST}/ubuntu:zstdchunked" "/usr" "stargz" "true" "${USR_STARGZSN_ZSTD}"
 
-echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, zstd:cunked rootfs)"
+echo "Diffing between two root filesystems(normal vs stargz snapshotter, zstd:cunked rootfs)"
 diff --no-dereference -qr "${USR_NORMALSN_ZSTD}/" "${USR_STARGZSN_ZSTD}/"
 
 ############
@@ -325,7 +355,7 @@ fi
 CONTAINERD_CONFIG="${TEST_CONTAINERD_CONFIG}" SNAPSHOTTER_CONFIG="${TEST_SNAPSHOTTER_CONFIG}" \
                  dump_dir "${REGISTRY_HOST}/ubuntu:sgz" "/usr" "stargz" "true" "${USR_STARGZSN_PLAIN_STARGZ}"
 
-echo "Diffing bitween two root filesystems(normal vs stargz snapshotter, plain stargz rootfs)"
+echo "Diffing between two root filesystems(normal vs stargz snapshotter, plain stargz rootfs)"
 diff --no-dereference -qr "${USR_NORMALSN_PLAIN_STARGZ}/" "${USR_STARGZSN_PLAIN_STARGZ}/"
 
 ############

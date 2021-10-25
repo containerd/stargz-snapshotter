@@ -164,7 +164,7 @@ func TestMirror(t *testing.T) {
 				}
 				return
 			}
-			fetcher, _, err := newFetcher(context.Background(), &fetcherConfig{
+			fetcher, _, err := newHTTPFetcher(context.Background(), &fetcherConfig{
 				hosts:   hosts,
 				refspec: refspec,
 				desc:    ocispec.Descriptor{Digest: blobDigest},
@@ -238,7 +238,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 
 func TestCheck(t *testing.T) {
 	tr := &breakRoundTripper{}
-	f := &fetcher{
+	f := &httpFetcher{
 		url: "test",
 		tr:  tr,
 	}
@@ -279,14 +279,14 @@ func TestRetry(t *testing.T) {
 	rclient := rhttp.NewClient()
 	rclient.HTTPClient.Transport = tr
 	rclient.Backoff = backoffStrategy
-	f := &fetcher{
+	f := &httpFetcher{
 		url: "test",
 		tr:  &rhttp.RoundTripper{Client: rclient},
 	}
 
 	regions := []region{{b: 0, e: 1}}
 
-	_, err := f.fetch(context.Background(), regions, true, &options{})
+	_, err := f.fetch(context.Background(), regions, true)
 
 	if err != nil {
 		t.Fatalf("unexpected error = %v", err)

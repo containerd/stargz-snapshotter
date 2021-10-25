@@ -46,6 +46,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
+	"github.com/containerd/stargz-snapshotter/fs/remote/ipfs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	rhttp "github.com/hashicorp/go-retryablehttp"
 	digest "github.com/opencontainers/go-digest"
@@ -96,6 +97,12 @@ type Resolver struct {
 	blobConfig config.BlobConfig
 }
 
+type fetcher interface {
+	fetch(ctx context.Context, rs []region, retry bool) (multipartReadCloser, error)
+	check() error
+	genID(reg region) string
+}
+
 func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, blobCache cache.BlobCache) (Blob, error) {
 	blobConfig := &r.blobConfig
 	fc := &fetcherConfig{
@@ -106,16 +113,31 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
 		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
 	}
-	fetcher, size, err := newFetcher(ctx, fc)
-	if err != nil {
-		return nil, err
+
+	var f fetcher
+	var size int64
+	if ipfs.Supported(desc) {
+		r, s, err := ipfs.NewReader(ctx, desc)
+		if err != nil {
+			return nil, err
+		}
+		f = &ipfsFetcher{r}
+		size = s
+	}
+	if f == nil {
+		var hf *httpFetcher
+		var err error
+		hf, size, err = newHTTPFetcher(ctx, fc)
+		if err != nil {
+			return nil, err
+		}
+		if blobConfig.ForceSingleRangeMode {
+			hf.singleRangeMode()
+		}
+		f = hf
 	}
 
-	if blobConfig.ForceSingleRangeMode {
-		fetcher.singleRangeMode()
-	}
-
-	return makeBlob(fetcher,
+	return makeBlob(f,
 		size,
 		blobConfig.ChunkSize,
 		blobConfig.PrefetchChunkSize,
@@ -162,7 +184,7 @@ func retryStrategy(ctx context.Context, resp *http.Response, err error) (bool, e
 	return retry, err2
 }
 
-func newFetcher(ctx context.Context, fc *fetcherConfig) (*fetcher, int64, error) {
+func newHTTPFetcher(ctx context.Context, fc *fetcherConfig) (*httpFetcher, int64, error) {
 	reghosts, err := fc.hosts(fc.refspec)
 	if err != nil {
 		return nil, 0, err
@@ -232,7 +254,7 @@ func newFetcher(ctx context.Context, fc *fetcherConfig) (*fetcher, int64, error)
 		}
 
 		// Hit one destination
-		return &fetcher{
+		return &httpFetcher{
 			url:     url,
 			tr:      tr,
 			blobURL: blobURL,
@@ -372,7 +394,7 @@ func getSize(ctx context.Context, url string, tr http.RoundTripper, timeout time
 		headStatusCode, res.StatusCode)
 }
 
-type fetcher struct {
+type httpFetcher struct {
 	url           string
 	urlMu         sync.Mutex
 	tr            http.RoundTripper
@@ -388,7 +410,7 @@ type multipartReadCloser interface {
 	Close() error
 }
 
-func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *options) (multipartReadCloser, error) {
+func (f *httpFetcher) fetch(ctx context.Context, rs []region, retry bool) (multipartReadCloser, error) {
 	if len(rs) == 0 {
 		return nil, fmt.Errorf("no request queried")
 	}
@@ -397,13 +419,6 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *opti
 		tr              = f.tr
 		singleRangeMode = f.isSingleRangeMode()
 	)
-
-	if opts.ctx != nil {
-		ctx = opts.ctx
-	}
-	if opts.tr != nil {
-		tr = opts.tr
-	}
 
 	// squash requesting chunks for reducing the total size of request header
 	// (servers generally have limits for the size of headers)
@@ -448,7 +463,7 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *opti
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to parse Content-Length")
 		}
-		return singlePartReader(region{0, size - 1}, res.Body), nil
+		return newSinglePartReader(region{0, size - 1}, res.Body), nil
 	} else if res.StatusCode == http.StatusPartialContent {
 		mediaType, params, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
 		if err != nil {
@@ -456,7 +471,7 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *opti
 		}
 		if strings.HasPrefix(mediaType, "multipart/") {
 			// We are getting a set of chunks as a multipart body.
-			return multiPartReader(res.Body, params["boundary"]), nil
+			return newMultiPartReader(res.Body, params["boundary"]), nil
 		}
 
 		// We are getting single range
@@ -464,7 +479,7 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *opti
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to parse Content-Range")
 		}
-		return singlePartReader(reg, res.Body), nil
+		return newSinglePartReader(reg, res.Body), nil
 	} else if retry && res.StatusCode == http.StatusForbidden {
 		log.G(ctx).Infof("Received status code: %v. Refreshing URL and retrying...", res.Status)
 
@@ -472,19 +487,19 @@ func (f *fetcher) fetch(ctx context.Context, rs []region, retry bool, opts *opti
 		if err := f.refreshURL(ctx); err != nil {
 			return nil, errors.Wrapf(err, "failed to refresh URL on %v", res.Status)
 		}
-		return f.fetch(ctx, rs, false, opts)
+		return f.fetch(ctx, rs, false)
 	} else if retry && res.StatusCode == http.StatusBadRequest && !singleRangeMode {
 		log.G(ctx).Infof("Received status code: %v. Setting single range mode and retrying...", res.Status)
 
 		// gcr.io (https://storage.googleapis.com) returns 400 on multi-range request (2020 #81)
-		f.singleRangeMode()                  // fallbacks to singe range request mode
-		return f.fetch(ctx, rs, false, opts) // retries with the single range mode
+		f.singleRangeMode()            // fallbacks to singe range request mode
+		return f.fetch(ctx, rs, false) // retries with the single range mode
 	}
 
 	return nil, fmt.Errorf("unexpected status code: %v", res.Status)
 }
 
-func (f *fetcher) check() error {
+func (f *httpFetcher) check() error {
 	ctx := context.Background()
 	if f.timeout > 0 {
 		var cancel context.CancelFunc
@@ -527,7 +542,7 @@ func (f *fetcher) check() error {
 	return fmt.Errorf("unexpected status code %v", res.StatusCode)
 }
 
-func (f *fetcher) refreshURL(ctx context.Context) error {
+func (f *httpFetcher) refreshURL(ctx context.Context) error {
 	newURL, err := redirect(ctx, f.blobURL, f.tr, f.timeout)
 	if err != nil {
 		return err
@@ -538,25 +553,25 @@ func (f *fetcher) refreshURL(ctx context.Context) error {
 	return nil
 }
 
-func (f *fetcher) genID(reg region) string {
+func (f *httpFetcher) genID(reg region) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.blobURL, reg.b, reg.e)))
 	return fmt.Sprintf("%x", sum)
 }
 
-func (f *fetcher) singleRangeMode() {
+func (f *httpFetcher) singleRangeMode() {
 	f.singleRangeMu.Lock()
 	f.singleRange = true
 	f.singleRangeMu.Unlock()
 }
 
-func (f *fetcher) isSingleRangeMode() bool {
+func (f *httpFetcher) isSingleRangeMode() bool {
 	f.singleRangeMu.Lock()
 	r := f.singleRange
 	f.singleRangeMu.Unlock()
 	return r
 }
 
-func singlePartReader(reg region, rc io.ReadCloser) multipartReadCloser {
+func newSinglePartReader(reg region, rc io.ReadCloser) multipartReadCloser {
 	return &singlepartReader{
 		r:      rc,
 		Closer: rc,
@@ -579,7 +594,7 @@ func (sr *singlepartReader) Next() (region, io.Reader, error) {
 	return region{}, nil, io.EOF
 }
 
-func multiPartReader(rc io.ReadCloser, boundary string) multipartReadCloser {
+func newMultiPartReader(rc io.ReadCloser, boundary string) multipartReadCloser {
 	return &multipartReader{
 		m:      multipart.NewReader(rc, boundary),
 		Closer: rc,
@@ -628,19 +643,12 @@ type Option func(*options)
 
 type options struct {
 	ctx       context.Context
-	tr        http.RoundTripper
 	cacheOpts []cache.Option
 }
 
 func WithContext(ctx context.Context) Option {
 	return func(opts *options) {
 		opts.ctx = ctx
-	}
-}
-
-func WithRoundTripper(tr http.RoundTripper) Option {
-	return func(opts *options) {
-		opts.tr = tr
 	}
 }
 
@@ -666,4 +674,29 @@ func repositoryScope(refspec reference.Spec, push bool) (string, error) {
 		s += ",push"
 	}
 	return s, nil
+}
+
+type ipfsFetcher struct {
+	r *ipfs.Reader
+}
+
+func (r *ipfsFetcher) fetch(ctx context.Context, rs []region, retry bool) (multipartReadCloser, error) {
+	var s regionSet
+	for _, reg := range rs {
+		s.add(reg)
+	}
+	reg := superRegion(s.rs)
+	rc, err := r.r.Reader(ctx, reg.b, reg.size())
+	if err != nil {
+		return nil, err
+	}
+	return newSinglePartReader(reg, rc), nil
+}
+
+func (r *ipfsFetcher) check() error {
+	return r.r.Check()
+}
+
+func (r *ipfsFetcher) genID(reg region) string {
+	return r.r.GenID(reg.b, reg.size())
 }

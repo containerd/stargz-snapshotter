@@ -35,6 +35,7 @@ import (
 
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/stargz-snapshotter/cache"
+	"github.com/containerd/stargz-snapshotter/fs/remote/ipfs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -55,7 +56,7 @@ type Blob interface {
 }
 
 type blob struct {
-	fetcher   *fetcher
+	fetcher   fetcher
 	fetcherMu sync.Mutex
 
 	size              int64
@@ -78,7 +79,7 @@ type blob struct {
 	closedMu sync.Mutex
 }
 
-func makeBlob(fetcher *fetcher, size int64, chunkSize int64, prefetchChunkSize int64,
+func makeBlob(fetcher fetcher, size int64, chunkSize int64, prefetchChunkSize int64,
 	blobCache cache.BlobCache, lastCheck time.Time, checkInterval time.Duration,
 	r *Resolver, fetchTimeout time.Duration) *blob {
 	return &blob{
@@ -126,16 +127,36 @@ func (b *blob) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec 
 		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
 		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
 	}
-	new, newSize, err := newFetcher(ctx, fc)
-	if err != nil {
-		return err
-	} else if newSize != b.size {
+
+	var f fetcher
+	var newSize int64
+	if ipfs.Supported(desc) {
+		r, size, err := ipfs.NewReader(ctx, desc)
+		if err != nil {
+			return err
+		}
+		f = &ipfsFetcher{r}
+		newSize = size
+	}
+	if f == nil {
+		var hf *httpFetcher
+		var err error
+		hf, newSize, err = newHTTPFetcher(ctx, fc)
+		if err != nil {
+			return err
+		}
+		if blobConfig.ForceSingleRangeMode {
+			hf.singleRangeMode()
+		}
+		f = hf
+	}
+	if newSize != b.size {
 		return fmt.Errorf("Invalid size of new blob %d; want %d", newSize, b.size)
 	}
 
 	// update the blob's fetcher with new one
 	b.fetcherMu.Lock()
-	b.fetcher = new
+	b.fetcher = f
 	b.fetcherMu.Unlock()
 	b.lastCheckMu.Lock()
 	b.lastCheck = time.Now()
@@ -194,7 +215,7 @@ func makeSyncKey(allData map[region]io.Writer) string {
 	return strings.Join(keys, ",")
 }
 
-func (b *blob) cacheAt(offset int64, size int64, fr *fetcher, cacheOpts *options) error {
+func (b *blob) cacheAt(offset int64, size int64, fr fetcher, cacheOpts *options) error {
 	fetchReg := region{floor(offset, b.chunkSize), ceil(offset+size-1, b.chunkSize) - 1}
 	discard := make(map[region]io.Writer)
 
@@ -336,9 +357,12 @@ func (b *blob) fetchRegions(allData map[region]io.Writer, fetched map[region]boo
 		fetched[reg] = false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), b.fetchTimeout)
+	fetchCtx, cancel := context.WithTimeout(context.Background(), b.fetchTimeout)
 	defer cancel()
-	mr, err := fr.fetch(ctx, req, true, opts)
+	if opts.ctx != nil {
+		fetchCtx = opts.ctx
+	}
+	mr, err := fr.fetch(fetchCtx, req, true)
 
 	if err != nil {
 		return err

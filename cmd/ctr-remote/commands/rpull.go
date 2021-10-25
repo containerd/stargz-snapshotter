@@ -28,6 +28,7 @@ import (
 	"github.com/containerd/containerd/snapshots"
 	fsconfig "github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/ipfs"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli"
 )
@@ -47,12 +48,16 @@ var RpullCommand = cli.Command{
 After pulling an image, it should be ready to use the same reference in a run
 command. 
 `,
-	Flags: append(commands.RegistryFlags, commands.LabelFlag,
+	Flags: append(append(commands.RegistryFlags, commands.LabelFlag,
 		cli.BoolFlag{
 			Name:  skipContentVerifyOpt,
 			Usage: "Skip content verification for layers contained in this image.",
 		},
-	),
+		cli.BoolFlag{
+			Name:  "ipfs",
+			Usage: "Pull image from IPFS. Specify an IPFS CID as a reference. (experimental)",
+		},
+	), commands.SnapshotterFlags...),
 	Action: func(context *cli.Context) error {
 		var (
 			ref    = context.Args().First()
@@ -84,13 +89,28 @@ command.
 			config.skipVerify = true
 		}
 
+		if context.Bool("ipfs") {
+			r, err := ipfs.NewResolver(ipfs.ResolverOptions{
+				Scheme: "ipfs",
+			})
+			if err != nil {
+				return err
+			}
+			config.Resolver = r
+		}
+		config.snapshotter = remoteSnapshotterName
+		if sn := context.String("snapshotter"); sn != "" {
+			config.snapshotter = sn
+		}
+
 		return pull(ctx, client, ref, config)
 	},
 }
 
 type rPullConfig struct {
 	*content.FetchConfig
-	skipVerify bool
+	skipVerify  bool
+	snapshotter string
 }
 
 func pull(ctx context.Context, client *containerd.Client, ref string, config *rPullConfig) error {
@@ -118,7 +138,7 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *rP
 		containerd.WithImageHandler(h),
 		containerd.WithSchema1Conversion,
 		containerd.WithPullUnpack,
-		containerd.WithPullSnapshotter(remoteSnapshotterName, snOpts...),
+		containerd.WithPullSnapshotter(config.snapshotter, snOpts...),
 		containerd.WithImageHandlerWrapper(source.AppendDefaultLabelsHandlerWrapper(ref, 10*1024*1024)),
 	}...); err != nil {
 		return err

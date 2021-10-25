@@ -36,6 +36,7 @@ func main() {
 		commands.OptimizeCommand,
 		commands.ConvertCommand,
 		commands.GetTOCDigestCommand,
+		commands.IPFSPushCommand,
 	}
 	app := app.New()
 	for i := range app.Commands {

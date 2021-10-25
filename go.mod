@@ -18,6 +18,11 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.1.1-0.20210825171523-3ab5d95a30ae
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-retryablehttp v0.7.0
+	github.com/ipfs/go-cid v0.1.0
+	github.com/ipfs/go-ipfs-files v0.0.9
+	github.com/ipfs/go-ipfs-http-client v0.1.0
+	github.com/ipfs/go-path v0.1.2 // indirect
+	github.com/ipfs/interface-go-ipfs-core v0.5.2
 	github.com/klauspost/compress v1.13.6
 	github.com/moby/sys/mountinfo v0.4.1
 	github.com/opencontainers/go-digest v1.0.0
