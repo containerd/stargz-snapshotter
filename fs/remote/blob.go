@@ -33,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/fs/remote/ipfs"
@@ -130,7 +131,8 @@ func (b *blob) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec 
 
 	var f fetcher
 	var newSize int64
-	if ipfs.Supported(desc) {
+	log.G(ctx).WithField("ipfs enabled", blobConfig.IPFS).Debugf("refreshing layer")
+	if blobConfig.IPFS && ipfs.Supported(desc) {
 		r, size, err := ipfs.NewReader(ctx, desc)
 		if err != nil {
 			return err

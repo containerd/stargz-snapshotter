@@ -116,7 +116,8 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 
 	var f fetcher
 	var size int64
-	if ipfs.Supported(desc) {
+	log.G(ctx).WithField("ipfs enabled", r.blobConfig.IPFS).Debugf("resolving layer")
+	if r.blobConfig.IPFS && ipfs.Supported(desc) {
 		r, s, err := ipfs.NewReader(ctx, desc)
 		if err != nil {
 			return nil, err
