@@ -121,6 +121,9 @@ func (c *defaultConverter) convert(ctx context.Context, cs content.Store, desc o
 	}
 
 	// TODO: patch upstream to allow this as a callback hook
+	if newDesc == nil {
+		newDesc = copyDesc(desc)
+	}
 	ra, err := cs.ReaderAt(ctx, *newDesc)
 	if err != nil {
 		return nil, err
