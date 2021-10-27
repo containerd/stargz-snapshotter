@@ -23,7 +23,7 @@ source "${CONTEXT}/const.sh"
 source "${REPO}/script/util/utils.sh"
 
 CRI_TOOLS_VERSION=$(get_version_from_arg "${REPO}/Dockerfile" "CRI_TOOLS_VERSION")
-GINKGO_VERSION=v1.16.4
+GINKGO_VERSION=v1.16.5
 
 if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
