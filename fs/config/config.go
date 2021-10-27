@@ -74,6 +74,9 @@ type BlobConfig struct {
 	MaxRetries  int `toml:"max_retries"`
 	MinWaitMSec int `toml:"min_wait_msec"`
 	MaxWaitMSec int `toml:"max_wait_msec"`
+
+	// IPFS is an option to allow snapshotter mounting layers from IPFS.
+	IPFS bool `toml:"ipfs"`
 }
 
 type DirectoryCacheConfig struct {

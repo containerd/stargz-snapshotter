@@ -39,6 +39,8 @@ We are constantly measuring the performance of this snapshotter so you can get t
 Please note that we sometimes see dispersion among the results because of the NW condition on the internet and the location of the instance in the Github Actions, etc.
 Our benchmarking method is based on [HelloBench](https://github.com/Tintri/hello-bench).
 
+:nerd_face: You can also run containers on IPFS with lazy pulling. This is an experimental feature. See [`./docs/ipfs.md`](./docs/ipfs.md) for more details.
+
 Stargz Snapshotter is a **non-core** sub-project of containerd.
 
 ## Quick Start with Kubernetes

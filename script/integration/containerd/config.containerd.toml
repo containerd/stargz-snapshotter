@@ -7,6 +7,7 @@ metadata_store = "memory"
 
 [plugins."io.containerd.snapshotter.v1.stargz".blob]
 check_always = true
+ipfs = true
 
 [plugins."io.containerd.snapshotter.v1.stargz".registry.mirrors."registry-integration.test"]
 endpoint = ["http://registry-alt.test:5000"]

@@ -27,6 +27,8 @@ CONTAINERD_NODE=testenv_integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
+IPFS_VERSION=v0.10.0
+
 source "${REPO}/script/util/utils.sh"
 
 if [ "${INTEGRATION_NO_RECREATE:-}" != "true" ] ; then
@@ -79,7 +81,11 @@ RUN apt-get update -y && \
     git clone https://github.com/google/crfs \${GOPATH}/src/github.com/google/crfs && \
     cd \${GOPATH}/src/github.com/google/crfs && \
     git checkout 71d77da419c90be7b05d12e59945ac7a8c94a543 && \
-    GO111MODULE=on go get github.com/google/crfs/stargz/stargzify
+    GO111MODULE=on go get github.com/google/crfs/stargz/stargzify && \
+    wget https://dist.ipfs.io/go-ipfs/${IPFS_VERSION}/go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
+    tar -xvzf go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
+    cd go-ipfs && \
+    bash install.sh
 
 COPY ./containerd/config.containerd.toml /etc/containerd/config.toml
 COPY ./containerd/config.stargz.toml /etc/containerd-stargz-grpc/config.toml

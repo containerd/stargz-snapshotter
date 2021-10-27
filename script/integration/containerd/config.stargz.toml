@@ -2,6 +2,7 @@ metadata_store = "memory"
 
 [blob]
 check_always = true
+ipfs = true
 
 [[resolver.host."registry-integration.test".mirrors]]
 host = "registry-alt.test:5000"
