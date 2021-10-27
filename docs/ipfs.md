@@ -11,13 +11,13 @@ ipfs = true
 
 ## IPFS-enabled OCI Image
 
-For obtaining IPFS-enabled OCI Image, each descriptor in an OCI image must contain the following URL in `urls` field.
+For obtaining IPFS-enabled OCI Image, each descriptor in an OCI image must contain the following [IPFS URL](https://docs.ipfs.io/how-to/address-ipfs-on-web/#native-urls) in `urls` field.
 
 ```
 ipfs://<CID>
 ```
 
-`<CID>` is the IPFS CID of the blob that the descriptor points to
+`<CID>` is the Base32 case-insensitive CIDv1 of the blob that the descriptor points to.
 
 An image is represented as a CID pointing to the OCI descriptor of the top-level blob of the image (i.e. image index).
 
