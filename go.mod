@@ -4,7 +4,8 @@ go 1.16
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/containerd/containerd v1.5.7
+	github.com/containerd/containerd v1.6.0-beta.1
+	github.com/containerd/containerd/api v1.6.0-beta.1
 	github.com/containerd/continuity v0.2.1
 	github.com/containerd/go-cni v1.1.0
 	github.com/containerd/stargz-snapshotter/estargz v0.9.0
@@ -36,7 +37,7 @@ require (
 	github.com/urfave/cli v1.22.4
 	go.etcd.io/bbolt v1.3.6
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
+	golang.org/x/sys v0.0.0-20210915083310-ed5796bab164
 	google.golang.org/grpc v1.41.0
 	k8s.io/api v0.22.3
 	k8s.io/apimachinery v0.22.3
