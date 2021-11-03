@@ -36,6 +36,8 @@ import (
 	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/sys"
+	ipfs "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/ipfs"
+	"github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
@@ -80,6 +82,9 @@ type snapshotterConfig struct {
 
 	// DebugAddress is a Unix domain socket address where the snapshotter exposes /debug/ endpoints.
 	DebugAddress string `toml:"debug_address"`
+
+	// IPFS is a flag to enbale lazy pulling from IPFS.
+	IPFS bool `toml:"ipfs"`
 }
 
 func main() {
@@ -162,7 +167,12 @@ func main() {
 		runtime.RegisterImageServiceServer(rpc, criServer)
 		credsFuncs = append(credsFuncs, f)
 	}
-	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config.Config, service.WithCredsFuncs(credsFuncs...))
+	var fsOpts []fs.Option
+	if config.IPFS {
+		fsOpts = append(fsOpts, fs.WithResolveHandler("ipfs", new(ipfs.ResolveHandler)))
+	}
+	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config.Config,
+		service.WithCredsFuncs(credsFuncs...), service.WithFilesystemOptions(fsOpts...))
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
 	}

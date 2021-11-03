@@ -133,7 +133,7 @@ type Resolver struct {
 }
 
 // NewResolver returns a new layer resolver.
-func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager, cfg config.Config) (*Resolver, error) {
+func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager, cfg config.Config, resolveHandlers map[string]remote.Handler) (*Resolver, error) {
 	resolveResultEntry := cfg.ResolveResultEntry
 	if resolveResultEntry == 0 {
 		resolveResultEntry = defaultResolveResultEntry
@@ -194,7 +194,7 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 
 	return &Resolver{
 		rootDir:               root,
-		resolver:              remote.NewResolver(cfg.BlobConfig),
+		resolver:              remote.NewResolver(cfg.BlobConfig, resolveHandlers),
 		layerCache:            layerCache,
 		blobCache:             blobCache,
 		prefetchTimeout:       prefetchTimeout,

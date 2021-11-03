@@ -33,10 +33,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/stargz-snapshotter/cache"
-	"github.com/containerd/stargz-snapshotter/fs/remote/ipfs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -119,38 +117,9 @@ func (b *blob) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec 
 	}
 
 	// refresh the fetcher
-	blobConfig := &b.resolver.blobConfig
-	fc := &fetcherConfig{
-		hosts:       hosts,
-		refspec:     refspec,
-		desc:        desc,
-		maxRetries:  blobConfig.MaxRetries,
-		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
-		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
-	}
-
-	var f fetcher
-	var newSize int64
-	log.G(ctx).WithField("ipfs enabled", blobConfig.IPFS).Debugf("refreshing layer")
-	if blobConfig.IPFS && ipfs.Supported(desc) {
-		r, size, err := ipfs.NewReader(ctx, desc)
-		if err != nil {
-			return err
-		}
-		f = &ipfsFetcher{r}
-		newSize = size
-	}
-	if f == nil {
-		var hf *httpFetcher
-		var err error
-		hf, newSize, err = newHTTPFetcher(ctx, fc)
-		if err != nil {
-			return err
-		}
-		if blobConfig.ForceSingleRangeMode {
-			hf.singleRangeMode()
-		}
-		f = hf
+	f, newSize, err := b.resolver.resolveFetcher(ctx, hosts, refspec, desc)
+	if err != nil {
+		return err
 	}
 	if newSize != b.size {
 		return fmt.Errorf("Invalid size of new blob %d; want %d", newSize, b.size)

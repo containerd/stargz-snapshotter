@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/ipfs"
 	httpapi "github.com/ipfs/go-ipfs-http-client"
 	iface "github.com/ipfs/interface-go-ipfs-core"
@@ -29,17 +30,9 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-type Reader struct {
-	api  iface.CoreAPI
-	path ipath.Path
-}
+type ResolveHandler struct{}
 
-func Supported(desc ocispec.Descriptor) bool {
-	_, err := ipfs.GetPath(desc)
-	return err == nil
-}
-
-func NewReader(ctx context.Context, desc ocispec.Descriptor) (*Reader, int64, error) {
+func (r *ResolveHandler) Handle(ctx context.Context, desc ocispec.Descriptor) (remote.Fetcher, int64, error) {
 	p, err := ipfs.GetPath(desc)
 	if err != nil {
 		return nil, 0, err
@@ -62,11 +55,16 @@ func NewReader(ctx context.Context, desc ocispec.Descriptor) (*Reader, int64, er
 	if err != nil {
 		return nil, 0, err
 	}
-	return &Reader{client, p}, s, nil
+	return &fetcher{client, p}, s, nil
 }
 
-func (r *Reader) Reader(ctx context.Context, off int64, size int64) (io.ReadCloser, error) {
-	n, err := r.api.Unixfs().Get(ctx, r.path)
+type fetcher struct {
+	api  iface.CoreAPI
+	path ipath.Path
+}
+
+func (f *fetcher) Fetch(ctx context.Context, off int64, size int64) (io.ReadCloser, error) {
+	n, err := f.api.Unixfs().Get(ctx, f.path)
 	if err != nil {
 		return nil, err
 	}
@@ -76,14 +74,14 @@ func (r *Reader) Reader(ctx context.Context, off int64, size int64) (io.ReadClos
 	if !ok {
 		return nil, fmt.Errorf("ReaderAt is not implemented")
 	}
-	return &reader{
+	return &readCloser{
 		Reader:    io.NewSectionReader(ra, off, size),
 		closeFunc: n.Close,
 	}, nil
 }
 
-func (r *Reader) Check() error {
-	n, err := r.api.Unixfs().Get(context.Background(), r.path)
+func (f *fetcher) Check() error {
+	n, err := f.api.Unixfs().Get(context.Background(), f.path)
 	if err != nil {
 		return err
 	}
@@ -95,14 +93,14 @@ func (r *Reader) Check() error {
 	return n.Close()
 }
 
-func (r *Reader) GenID(off int64, size int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", r.path.String(), off, size)))
+func (f *fetcher) GenID(off int64, size int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.path.String(), off, size)))
 	return fmt.Sprintf("%x", sum)
 }
 
-type reader struct {
+type readCloser struct {
 	io.Reader
 	closeFunc func() error
 }
 
-func (r *reader) Close() error { return r.closeFunc() }
+func (r *readCloser) Close() error { return r.closeFunc() }

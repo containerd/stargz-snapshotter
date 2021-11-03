@@ -5,7 +5,6 @@ You can run OCI-compatible container images on IPFS with lazy pulling.
 To enable this feature, add the following configuration to `config.toml` of Stargz Snapsohtter (typically located at `/etc/containerd-stargz-grpc/config.toml`).
 
 ```toml
-[blob]
 ipfs = true
 ```
 
