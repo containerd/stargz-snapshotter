@@ -224,28 +224,31 @@ optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:zstdchunked"
 optimize "${REGISTRY_HOST}/alpine:3.10.2" "${REGISTRY_HOST}/alpine:esgz"
 optimize "${REGISTRY_HOST}/alpine:3.10.2" "${REGISTRY_ALT_HOST}:5000/alpine:esgz" --plain-http
 
-############
-# Tests with IPFS
-echo "Testing with IPFS..."
+if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
 
-# stargz snapshotter
-ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
-CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:18.04")
-reboot_containerd
-echo -n "" > "${LOG_FILE}"
-ctr-remote i rpull --ipfs "${CID}"
-check_remote_snapshots "${LOG_FILE}"
-ctr-remote run --rm --snapshotter=stargz "${CID}" test tar -c /usr | tar -xC "${USR_STARGZSN_IPFS}"
+    ############
+    # Tests with IPFS if standalone snapshotter
+    echo "Testing with IPFS..."
 
-# overlayfs snapshotter
-ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
-CID=$(ctr-remote i ipfs-push --estargz=false "${REGISTRY_HOST}/ubuntu:18.04")
-reboot_containerd
-ctr-remote i rpull --snapshotter=overlayfs --ipfs "${CID}"
-ctr-remote run --rm --snapshotter=overlayfs "${CID}" test tar -c /usr | tar -xC "${USR_NORMALSN_IPFS}"
+    # stargz snapshotter
+    ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
+    CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:18.04")
+    reboot_containerd
+    echo -n "" > "${LOG_FILE}"
+    ctr-remote i rpull --ipfs "${CID}"
+    check_remote_snapshots "${LOG_FILE}"
+    ctr-remote run --rm --snapshotter=stargz "${CID}" test tar -c /usr | tar -xC "${USR_STARGZSN_IPFS}"
 
-echo "Diffing between two root filesystems(normal vs stargz snapshotter, IPFS rootfs)"
-diff --no-dereference -qr "${USR_NORMALSN_IPFS}/" "${USR_STARGZSN_IPFS}/"
+    # overlayfs snapshotter
+    ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
+    CID=$(ctr-remote i ipfs-push --estargz=false "${REGISTRY_HOST}/ubuntu:18.04")
+    reboot_containerd
+    ctr-remote i rpull --snapshotter=overlayfs --ipfs "${CID}"
+    ctr-remote run --rm --snapshotter=overlayfs "${CID}" test tar -c /usr | tar -xC "${USR_NORMALSN_IPFS}"
+
+    echo "Diffing between two root filesystems(normal vs stargz snapshotter, IPFS rootfs)"
+    diff --no-dereference -qr "${USR_NORMALSN_IPFS}/" "${USR_STARGZSN_IPFS}/"
+fi
 
 ############
 # Tests for refreshing and mirror

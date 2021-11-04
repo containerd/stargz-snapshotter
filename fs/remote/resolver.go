@@ -46,8 +46,8 @@ import (
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
-	"github.com/containerd/stargz-snapshotter/fs/remote/ipfs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/hashicorp/go-multierror"
 	rhttp "github.com/hashicorp/go-retryablehttp"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -65,7 +65,7 @@ const (
 	defaultMaxWaitMSec = 300000
 )
 
-func NewResolver(cfg config.BlobConfig) *Resolver {
+func NewResolver(cfg config.BlobConfig, handlers map[string]Handler) *Resolver {
 	if cfg.ChunkSize == 0 { // zero means "use default chunk size"
 		cfg.ChunkSize = defaultChunkSize
 	}
@@ -90,11 +90,13 @@ func NewResolver(cfg config.BlobConfig) *Resolver {
 
 	return &Resolver{
 		blobConfig: cfg,
+		handlers:   handlers,
 	}
 }
 
 type Resolver struct {
 	blobConfig config.BlobConfig
+	handlers   map[string]Handler
 }
 
 type fetcher interface {
@@ -104,40 +106,11 @@ type fetcher interface {
 }
 
 func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, blobCache cache.BlobCache) (Blob, error) {
+	f, size, err := r.resolveFetcher(ctx, hosts, refspec, desc)
+	if err != nil {
+		return nil, err
+	}
 	blobConfig := &r.blobConfig
-	fc := &fetcherConfig{
-		hosts:       hosts,
-		refspec:     refspec,
-		desc:        desc,
-		maxRetries:  blobConfig.MaxRetries,
-		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
-		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
-	}
-
-	var f fetcher
-	var size int64
-	log.G(ctx).WithField("ipfs enabled", r.blobConfig.IPFS).Debugf("resolving layer")
-	if r.blobConfig.IPFS && ipfs.Supported(desc) {
-		r, s, err := ipfs.NewReader(ctx, desc)
-		if err != nil {
-			return nil, err
-		}
-		f = &ipfsFetcher{r}
-		size = s
-	}
-	if f == nil {
-		var hf *httpFetcher
-		var err error
-		hf, size, err = newHTTPFetcher(ctx, fc)
-		if err != nil {
-			return nil, err
-		}
-		if blobConfig.ForceSingleRangeMode {
-			hf.singleRangeMode()
-		}
-		f = hf
-	}
-
 	return makeBlob(f,
 		size,
 		blobConfig.ChunkSize,
@@ -147,6 +120,40 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		time.Duration(blobConfig.ValidInterval)*time.Second,
 		r,
 		time.Duration(blobConfig.FetchTimeoutSec)*time.Second), nil
+}
+
+func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (f fetcher, size int64, err error) {
+	blobConfig := &r.blobConfig
+	fc := &fetcherConfig{
+		hosts:       hosts,
+		refspec:     refspec,
+		desc:        desc,
+		maxRetries:  blobConfig.MaxRetries,
+		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
+		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
+	}
+	var handlersErr error
+	for name, p := range r.handlers {
+		// TODO: allow to configure the selection of readers based on the hostname in refspec
+		r, size, err := p.Handle(ctx, desc)
+		if err != nil {
+			handlersErr = multierror.Append(handlersErr, err)
+			continue
+		}
+		log.G(ctx).WithField("handler name", name).WithField("ref", refspec.String).WithField("digest", desc.Digest).
+			Debugf("contents is provided by a handler")
+		return &remoteFetcher{r}, size, nil
+	}
+
+	log.G(ctx).WithError(handlersErr).WithField("ref", refspec.String).WithField("digest", desc.Digest).Debugf("using default handler")
+	hf, size, err := newHTTPFetcher(ctx, fc)
+	if err != nil {
+		return nil, 0, err
+	}
+	if blobConfig.ForceSingleRangeMode {
+		hf.singleRangeMode()
+	}
+	return hf, size, err
 }
 
 type fetcherConfig struct {
@@ -677,27 +684,37 @@ func repositoryScope(refspec reference.Spec, push bool) (string, error) {
 	return s, nil
 }
 
-type ipfsFetcher struct {
-	r *ipfs.Reader
+type remoteFetcher struct {
+	r Fetcher
 }
 
-func (r *ipfsFetcher) fetch(ctx context.Context, rs []region, retry bool) (multipartReadCloser, error) {
+func (r *remoteFetcher) fetch(ctx context.Context, rs []region, retry bool) (multipartReadCloser, error) {
 	var s regionSet
 	for _, reg := range rs {
 		s.add(reg)
 	}
 	reg := superRegion(s.rs)
-	rc, err := r.r.Reader(ctx, reg.b, reg.size())
+	rc, err := r.r.Fetch(ctx, reg.b, reg.size())
 	if err != nil {
 		return nil, err
 	}
 	return newSinglePartReader(reg, rc), nil
 }
 
-func (r *ipfsFetcher) check() error {
+func (r *remoteFetcher) check() error {
 	return r.r.Check()
 }
 
-func (r *ipfsFetcher) genID(reg region) string {
+func (r *remoteFetcher) genID(reg region) string {
 	return r.r.GenID(reg.b, reg.size())
+}
+
+type Handler interface {
+	Handle(ctx context.Context, desc ocispec.Descriptor) (fetcher Fetcher, size int64, err error)
+}
+
+type Fetcher interface {
+	Fetch(ctx context.Context, off int64, size int64) (io.ReadCloser, error)
+	Check() error
+	GenID(off int64, size int64) string
 }

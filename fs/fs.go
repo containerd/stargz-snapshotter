@@ -53,6 +53,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	layermetrics "github.com/containerd/stargz-snapshotter/fs/metrics/layer"
+	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/task"
@@ -73,12 +74,22 @@ const (
 type Option func(*options)
 
 type options struct {
-	getSources source.GetSources
+	getSources      source.GetSources
+	resolveHandlers map[string]remote.Handler
 }
 
 func WithGetSources(s source.GetSources) Option {
 	return func(opts *options) {
 		opts.getSources = s
+	}
+}
+
+func WithResolveHandler(name string, handler remote.Handler) Option {
+	return func(opts *options) {
+		if opts.resolveHandlers == nil {
+			opts.resolveHandlers = make(map[string]remote.Handler)
+		}
+		opts.resolveHandlers[name] = handler
 	}
 }
 
@@ -109,7 +120,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		})
 	}
 	tm := task.NewBackgroundTaskManager(maxConcurrency, 5*time.Second)
-	r, err := layer.NewResolver(root, tm, cfg)
+	r, err := layer.NewResolver(root, tm, cfg, fsOpts.resolveHandlers)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to setup resolver")
 	}

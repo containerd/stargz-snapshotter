@@ -16,7 +16,7 @@
 # Base path used to install.
 CMD_DESTDIR ?= /usr/local
 GO111MODULE_VALUE=auto
-PREFIX ?= out/
+PREFIX ?= $(CURDIR)/out/
 
 PKG=github.com/containerd/stargz-snapshotter
 VERSION=$(shell git describe --match 'v[0-9]*' --dirty='.m' --always --tags)
@@ -27,7 +27,7 @@ CMD=containerd-stargz-grpc ctr-remote stargz-store
 
 CMD_BINARIES=$(addprefix $(PREFIX),$(CMD))
 
-.PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-kind test-cri-containerd test-cri-o test-criauth generate validate-generated test-k3s test-k3s-argo-workflow
+.PHONY: all build check install-check-tools install uninstall clean test test-root test-all integration test-optimize benchmark test-kind test-cri-containerd test-cri-o test-criauth generate validate-generated test-k3s test-k3s-argo-workflow vendor
 
 all: build
 
@@ -36,18 +36,20 @@ build: $(CMD)
 FORCE:
 
 containerd-stargz-grpc: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/containerd-stargz-grpc
+	cd cmd/ ; GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./containerd-stargz-grpc
 
 ctr-remote: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/ctr-remote
+	cd cmd/ ; GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./ctr-remote
 
 stargz-store: FORCE
-	GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./cmd/stargz-store
+	cd cmd/ ; GO111MODULE=$(GO111MODULE_VALUE) go build -o $(PREFIX)$@ $(GO_BUILD_FLAGS) $(GO_LD_FLAGS) -v ./stargz-store
 
 check:
 	@echo "$@"
 	@GO111MODULE=$(GO111MODULE_VALUE) $(shell go env GOPATH)/bin/golangci-lint run
 	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) $(shell go env GOPATH)/bin/golangci-lint run
+	@cd ./cmd ; GO111MODULE=$(GO111MODULE_VALUE) $(shell go env GOPATH)/bin/golangci-lint run
+	@cd ./ipfs ; GO111MODULE=$(GO111MODULE_VALUE) $(shell go env GOPATH)/bin/golangci-lint run
 
 install-check-tools:
 	@curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(shell go env GOPATH)/bin v1.42.1
@@ -71,10 +73,18 @@ generate:
 validate-generated:
 	@./script/generated-files/generate.sh validate
 
+vendor:
+	@GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
+	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
+	@cd ./cmd ; GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
+	@cd ./ipfs ; GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
+
 test:
 	@echo "$@"
 	@GO111MODULE=$(GO111MODULE_VALUE) go test -race ./...
-	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) go test -timeout 20m -race ./...
+	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) go test -timeout 30m -race ./...
+	@cd ./cmd ; GO111MODULE=$(GO111MODULE_VALUE) go test -timeout 20m -race ./...
+	@cd ./ipfs ; GO111MODULE=$(GO111MODULE_VALUE) go test -timeout 20m -race ./...
 
 test-root:
 	@echo "$@"
