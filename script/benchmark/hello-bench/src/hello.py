@@ -318,8 +318,8 @@ class BenchRunner:
             mounts += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
         period = 90
         env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
-        cmd = ('%s -cni -period %s %s %s %s %s %s' %
-               (self.optimizer, period, mounts, env, genargs_for_optimization(runargs.arg), src, dest))
+        cmd = ('%s %s -cni -period %s %s %s %s %s %s' %
+               (self.optimizer, option, period, mounts, env, genargs_for_optimization(runargs.arg), src, dest))
         print cmd
         rc = os.system(cmd)
         assert(rc == 0)
