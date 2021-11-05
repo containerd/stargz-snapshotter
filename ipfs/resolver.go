@@ -26,7 +26,6 @@ import (
 	"github.com/containerd/containerd/remotes"
 	"github.com/ipfs/go-cid"
 	files "github.com/ipfs/go-ipfs-files"
-	httpapi "github.com/ipfs/go-ipfs-http-client"
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	ipath "github.com/ipfs/interface-go-ipfs-core/path"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -39,26 +38,21 @@ type resolver struct {
 }
 
 type ResolverOptions struct {
-	// Scheme is a scheme to fetch the specified IPFS content.
-	// ipfs or ipns : https://docs.ipfs.io/how-to/address-ipfs-on-web/#native-urls
+	// Scheme is the scheme to fetch the specified IPFS content. "ipfs" or "ipns".
 	Scheme string
 }
 
-func NewResolver(options ResolverOptions) (remotes.Resolver, error) {
+func NewResolver(client iface.CoreAPI, options ResolverOptions) (remotes.Resolver, error) {
 	s := options.Scheme
 	if s != "ipfs" && s != "ipns" {
 		return nil, fmt.Errorf("unsupported scheme %q", s)
-	}
-	client, err := httpapi.NewLocalApi()
-	if err != nil {
-		return nil, err
 	}
 	return &resolver{client, s}, nil
 }
 
 // Resolve resolves the provided ref for IPFS. ref must be a CID.
-// TODO: Allow specifying `/ip[f|n]s`-prefixed path. This requires to modify `reference` pkg of containerd because
-//       it's incompatbile to the current reference specification used by containerd.
+// TODO: Allow specifying IPFS path or URL. This requires to modify `reference` pkg because
+//       it's incompatbile to the current reference specification.
 func (r *resolver) Resolve(ctx context.Context, ref string) (name string, desc ocispec.Descriptor, err error) {
 	c, err := cid.Decode(ref)
 	if err != nil {
@@ -68,7 +62,6 @@ func (r *resolver) Resolve(ctx context.Context, ref string) (name string, desc o
 	if err := p.IsValid(); err != nil {
 		return "", ocispec.Descriptor{}, err
 	}
-	// Should we have namespaces based on the ref?
 	n, err := r.api.Unixfs().Get(ctx, p)
 	if err != nil {
 		return "", ocispec.Descriptor{}, err
@@ -103,7 +96,7 @@ func (f *fetcher) Fetch(ctx context.Context, desc ocispec.Descriptor) (io.ReadCl
 	}
 	n, err := f.r.api.Unixfs().Get(ctx, p)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get unixfs node %q", p.String())
+		return nil, errors.Wrapf(err, "failed to get file %q", p.String())
 	}
 	return files.ToFile(n), nil
 }
