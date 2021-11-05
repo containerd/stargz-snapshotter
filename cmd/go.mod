@@ -6,9 +6,9 @@ require (
 	github.com/containerd/containerd v1.6.0-beta.1.0.20211101005050-f0d3ea96cf8c
 	github.com/containerd/containerd/api v1.6.0-beta.1.0.20211101005050-f0d3ea96cf8c
 	github.com/containerd/go-cni v1.1.0
-	github.com/containerd/stargz-snapshotter v0.9.0
-	github.com/containerd/stargz-snapshotter/estargz v0.9.0
-	github.com/containerd/stargz-snapshotter/ipfs v0.9.0
+	github.com/containerd/stargz-snapshotter v0.10.0
+	github.com/containerd/stargz-snapshotter/estargz v0.10.0
+	github.com/containerd/stargz-snapshotter/ipfs v0.10.0
 	github.com/coreos/go-systemd/v22 v22.3.2
 	github.com/docker/go-metrics v0.0.1
 	github.com/hashicorp/go-multierror v1.1.1
