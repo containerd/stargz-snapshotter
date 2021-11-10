@@ -17,10 +17,10 @@ ARG RUNC_VERSION=v1.0.2
 ARG CNI_PLUGINS_VERSION=v1.0.1
 ARG NERDCTL_VERSION=0.13.0
 
-ARG PODMAN_VERSION=v3.4.0
+ARG PODMAN_VERSION=v3.4.1
 ARG CRIO_VERSION=8d4df4ea25cd6446f91ee9944ac92c1c726cf475
-ARG CONMON_VERSION=v2.0.29
-ARG COMMON_VERSION=v0.42.1
+ARG CONMON_VERSION=v2.0.30
+ARG COMMON_VERSION=v0.44.3
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=k8s.gcr.io/pause:3.5
 
 # Used in CI
@@ -115,7 +115,7 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
 # Build conmon
 FROM golang-base AS conmon-dev
 ARG CONMON_VERSION
-RUN apt-get update -y && apt-get install -y gcc git libc6-dev libglib2.0-dev pkg-config make && \
+RUN apt-get update -y && apt-get install -y gcc git libc6-dev libglib2.0-dev pkg-config make libseccomp-dev && \
     git clone -b ${CONMON_VERSION} --depth 1 \
               https://github.com/containers/conmon $GOPATH/src/github.com/containers/conmon && \
     cd $GOPATH/src/github.com/containers/conmon && \
