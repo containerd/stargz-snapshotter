@@ -3,9 +3,9 @@ module github.com/containerd/stargz-snapshotter/cmd
 go 1.16
 
 require (
-	github.com/containerd/containerd v1.6.0-beta.1.0.20211101005050-f0d3ea96cf8c
-	github.com/containerd/containerd/api v1.6.0-beta.1.0.20211101005050-f0d3ea96cf8c
-	github.com/containerd/go-cni v1.1.0
+	github.com/containerd/containerd v1.6.0-beta.2
+	github.com/containerd/containerd/api v1.6.0-beta.1.0.20211111224154-bd81f8a39d85
+	github.com/containerd/go-cni v1.1.1-0.20211026134925-aa8bf14323a5
 	github.com/containerd/stargz-snapshotter v0.10.0
 	github.com/containerd/stargz-snapshotter/estargz v0.10.0
 	github.com/containerd/stargz-snapshotter/ipfs v0.10.0
@@ -22,9 +22,9 @@ require (
 	github.com/rs/xid v1.3.0
 	github.com/sirupsen/logrus v1.8.1
 	github.com/urfave/cli v1.22.4
-	golang.org/x/sys v0.0.0-20210915083310-ed5796bab164
+	golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359
 	google.golang.org/grpc v1.42.0
-	k8s.io/cri-api v0.22.3
+	k8s.io/cri-api v0.23.0-alpha.4
 )
 
 replace (

@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/containerd/containerd v1.6.0-beta.1.0.20211101005050-f0d3ea96cf8c
+	github.com/containerd/containerd v1.6.0-beta.2
 	github.com/containerd/continuity v0.2.1
 	github.com/containerd/stargz-snapshotter/estargz v0.10.0
 	github.com/docker/cli v20.10.10+incompatible
@@ -17,7 +17,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-retryablehttp v0.7.0
 	github.com/klauspost/compress v1.13.6
-	github.com/moby/sys/mountinfo v0.4.2-0.20211022201527-95edfa939201
+	github.com/moby/sys/mountinfo v0.5.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.2-0.20210819154149-5ad6f50d6283
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
@@ -29,13 +29,13 @@ require (
 	go.etcd.io/bbolt v1.3.6
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210915083310-ed5796bab164
+	golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359
 	google.golang.org/grpc v1.42.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	k8s.io/api v0.22.3
 	k8s.io/apimachinery v0.22.3
 	k8s.io/client-go v0.22.3
-	k8s.io/cri-api v0.22.3
+	k8s.io/cri-api v0.23.0-alpha.4
 )
 
 replace (
