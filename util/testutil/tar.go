@@ -88,7 +88,7 @@ type dirOpts struct {
 	modTime time.Time
 }
 
-// WithFileModTime specifies the modtime of the dir.
+// WithDirModTime specifies the modtime of the dir.
 func WithDirModTime(modTime time.Time) DirectoryBuildTarOption {
 	return func(o *dirOpts) {
 		o.modTime = modTime
