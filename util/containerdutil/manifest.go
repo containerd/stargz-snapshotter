@@ -19,6 +19,7 @@ package containerdutil
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 
 	"github.com/containerd/containerd/content"
@@ -40,6 +41,9 @@ func ManifestDesc(ctx context.Context, provider content.Provider, image ocispec.
 		case images.MediaTypeDockerSchema2Manifest, ocispec.MediaTypeImageManifest:
 			p, err := content.ReadBlob(ctx, provider, desc)
 			if err != nil {
+				return nil, err
+			}
+			if err := ValidateMediaType(p, desc.MediaType); err != nil {
 				return nil, err
 			}
 			var manifest ocispec.Manifest
@@ -69,6 +73,9 @@ func ManifestDesc(ctx context.Context, provider content.Provider, image ocispec.
 		case images.MediaTypeDockerSchema2ManifestList, ocispec.MediaTypeImageIndex:
 			p, err := content.ReadBlob(ctx, provider, desc)
 			if err != nil {
+				return nil, err
+			}
+			if err := ValidateMediaType(p, desc.MediaType); err != nil {
 				return nil, err
 			}
 			var idx ocispec.Index
@@ -108,4 +115,45 @@ func ManifestDesc(ctx context.Context, provider content.Provider, image ocispec.
 		return ocispec.Descriptor{}, err
 	}
 	return m[0], nil
+}
+
+// Forked from github.com/containerd/containerd/images/image.go
+// commit: a776a27af54a803657d002e7574a4425b3949f56
+
+// unknownDocument represents a manifest, manifest list, or index that has not
+// yet been validated.
+type unknownDocument struct {
+	MediaType string          `json:"mediaType,omitempty"`
+	Config    json.RawMessage `json:"config,omitempty"`
+	Layers    json.RawMessage `json:"layers,omitempty"`
+	Manifests json.RawMessage `json:"manifests,omitempty"`
+	FSLayers  json.RawMessage `json:"fsLayers,omitempty"` // schema 1
+}
+
+// ValidateMediaType returns an error if the byte slice is invalid JSON or if
+// the media type identifies the blob as one format but it contains elements of
+// another format.
+func ValidateMediaType(b []byte, mt string) error {
+	var doc unknownDocument
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return err
+	}
+	if len(doc.FSLayers) != 0 {
+		return fmt.Errorf("media-type: schema 1 not supported")
+	}
+	switch mt {
+	case images.MediaTypeDockerSchema2Manifest, ocispec.MediaTypeImageManifest:
+		if len(doc.Manifests) != 0 ||
+			doc.MediaType == images.MediaTypeDockerSchema2ManifestList ||
+			doc.MediaType == ocispec.MediaTypeImageIndex {
+			return fmt.Errorf("media-type: expected manifest but found index (%s)", mt)
+		}
+	case images.MediaTypeDockerSchema2ManifestList, ocispec.MediaTypeImageIndex:
+		if len(doc.Config) != 0 || len(doc.Layers) != 0 ||
+			doc.MediaType == images.MediaTypeDockerSchema2Manifest ||
+			doc.MediaType == ocispec.MediaTypeImageManifest {
+			return fmt.Errorf("media-type: expected index but found manifest (%s)", mt)
+		}
+	}
+	return nil
 }
