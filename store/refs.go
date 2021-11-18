@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -32,6 +33,7 @@ import (
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/util/containerdutil"
 	"github.com/containerd/stargz-snapshotter/util/lrucache"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -250,10 +252,27 @@ func fetchManifestPlatform(ctx context.Context, fetcher remotes.Fetcher, desc oc
 	var manifest ocispec.Manifest
 	switch desc.MediaType {
 	case images.MediaTypeDockerSchema2Manifest, ocispec.MediaTypeImageManifest:
-		err = json.NewDecoder(r).Decode(&manifest)
+		p, err := ioutil.ReadAll(r)
+		if err != nil {
+			return ocispec.Manifest{}, err
+		}
+		if err := containerdutil.ValidateMediaType(p, desc.MediaType); err != nil {
+			return ocispec.Manifest{}, err
+		}
+		if err := json.Unmarshal(p, &manifest); err != nil {
+			return ocispec.Manifest{}, err
+		}
+		return manifest, nil
 	case images.MediaTypeDockerSchema2ManifestList, ocispec.MediaTypeImageIndex:
 		var index ocispec.Index
-		if err = json.NewDecoder(r).Decode(&index); err != nil {
+		p, err := ioutil.ReadAll(r)
+		if err != nil {
+			return ocispec.Manifest{}, err
+		}
+		if err := containerdutil.ValidateMediaType(p, desc.MediaType); err != nil {
+			return ocispec.Manifest{}, err
+		}
+		if err = json.Unmarshal(p, &index); err != nil {
 			return ocispec.Manifest{}, err
 		}
 		var target ocispec.Descriptor
@@ -273,9 +292,7 @@ func fetchManifestPlatform(ctx context.Context, fetcher remotes.Fetcher, desc oc
 		if !found {
 			return ocispec.Manifest{}, fmt.Errorf("no manifest found for platform")
 		}
-		manifest, err = fetchManifestPlatform(ctx, fetcher, target, platform)
-	default:
-		err = fmt.Errorf("unknown mediatype %q", desc.MediaType)
+		return fetchManifestPlatform(ctx, fetcher, target, platform)
 	}
-	return manifest, err
+	return ocispec.Manifest{}, fmt.Errorf("unknown mediatype %q", desc.MediaType)
 }
