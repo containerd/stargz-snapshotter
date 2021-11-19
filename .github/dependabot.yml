@@ -18,6 +18,18 @@ updates:
     schedule:
       interval: "daily"
 
+  # Automatic upgrade for go modules of ipfs package.
+  - package-ecosystem: "gomod"
+    directory: "/ipfs"
+    schedule:
+      interval: "daily"
+
+  # Automatic upgrade for go modules of cmd package.
+  - package-ecosystem: "gomod"
+    directory: "/cmd"
+    schedule:
+      interval: "daily"
+
   # Automatic upgrade for base images used in the Dockerfile
   - package-ecosystem: "docker"
     directory: "/"
