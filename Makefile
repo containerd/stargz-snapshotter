@@ -74,10 +74,10 @@ validate-generated:
 	@./script/generated-files/generate.sh validate
 
 vendor:
-	@GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
 	@cd ./estargz ; GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
-	@cd ./cmd ; GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
 	@cd ./ipfs ; GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
+	@GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
+	@cd ./cmd ; GO111MODULE=$(GO111MODULE_VALUE) go mod tidy
 
 test:
 	@echo "$@"
