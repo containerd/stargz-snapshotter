@@ -21,6 +21,14 @@ jobs:
     - name: Test all
       run: ./script/util/make.sh test-all -j2
 
+  test-coverage:
+    runs-on: ubuntu-20.04
+    name: Coveralls
+    steps:
+    - uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
   linter:
     runs-on: ubuntu-20.04
     name: Linter
