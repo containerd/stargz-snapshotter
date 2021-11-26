@@ -140,12 +140,12 @@ func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHost
 			handlersErr = multierror.Append(handlersErr, err)
 			continue
 		}
-		log.G(ctx).WithField("handler name", name).WithField("ref", refspec.String).WithField("digest", desc.Digest).
+		log.G(ctx).WithField("handler name", name).WithField("ref", refspec.String()).WithField("digest", desc.Digest).
 			Debugf("contents is provided by a handler")
 		return &remoteFetcher{r}, size, nil
 	}
 
-	log.G(ctx).WithError(handlersErr).WithField("ref", refspec.String).WithField("digest", desc.Digest).Debugf("using default handler")
+	log.G(ctx).WithError(handlersErr).WithField("ref", refspec.String()).WithField("digest", desc.Digest).Debugf("using default handler")
 	hf, size, err := newHTTPFetcher(ctx, fc)
 	if err != nil {
 		return nil, 0, err
