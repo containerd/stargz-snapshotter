@@ -24,7 +24,7 @@ require (
 	github.com/urfave/cli v1.22.5
 	golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359
 	google.golang.org/grpc v1.42.0
-	k8s.io/cri-api v0.23.0-alpha.4
+	k8s.io/cri-api v0.24.0-alpha.0
 )
 
 replace (
