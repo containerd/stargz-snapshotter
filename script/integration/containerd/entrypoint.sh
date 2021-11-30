@@ -157,6 +157,21 @@ function copy {
     ctr-remote i push -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
 }
 
+function copy_out_dir {
+    local IMAGE="${1}"
+    local TARGETDIR="${2}"
+    local DEST="${3}"
+    local SNAPSHOTTER="${4}"
+
+    TMPFILE=$(mktemp)
+
+    UNIQUE=$(date +%s%N | shasum | base64 | fold -w 10 | head -1)
+    ctr-remote run --snapshotter="${SNAPSHOTTER}" "${IMAGE}" "${UNIQUE}" tar -c "${TARGETDIR}" > "${TMPFILE}"
+    tar -C "${DEST}" -xf "${TMPFILE}"
+    ctr-remote c rm "${UNIQUE}" || true
+    rm "${TMPFILE}"
+}
+
 function dump_dir {
     local IMAGE="${1}"
     local TARGETDIR="${2}"
@@ -172,8 +187,7 @@ function dump_dir {
     else
         ctr-remote images pull --snapshotter="${SNAPSHOTTER}" --user "${DUMMYUSER}:${DUMMYPASS}" "${IMAGE}"
     fi
-    ctr-remote run --rm --snapshotter="${SNAPSHOTTER}" "${IMAGE}" test tar -c "${TARGETDIR}" \
-        | tar -xC "${DEST}"
+    copy_out_dir "${IMAGE}" "${TARGETDIR}" "${DEST}" "${SNAPSHOTTER}"
 }
 
 echo "===== VERSION INFORMATION ====="
@@ -237,14 +251,14 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     echo -n "" > "${LOG_FILE}"
     ctr-remote i rpull --ipfs "${CID}"
     check_remote_snapshots "${LOG_FILE}"
-    ctr-remote run --rm --snapshotter=stargz "${CID}" test tar -c /usr | tar -xC "${USR_STARGZSN_IPFS}"
+    copy_out_dir "${CID}" "/usr" "${USR_STARGZSN_IPFS}" "stargz"
 
     # overlayfs snapshotter
     ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
     CID=$(ctr-remote i ipfs-push --estargz=false "${REGISTRY_HOST}/ubuntu:18.04")
     reboot_containerd
     ctr-remote i rpull --snapshotter=overlayfs --ipfs "${CID}"
-    ctr-remote run --rm --snapshotter=overlayfs "${CID}" test tar -c /usr | tar -xC "${USR_NORMALSN_IPFS}"
+    copy_out_dir "${CID}" "/usr" "${USR_NORMALSN_IPFS}" "overlayfs"
 
     echo "Diffing between two root filesystems(normal vs stargz snapshotter, IPFS rootfs)"
     diff --no-dereference -qr "${USR_NORMALSN_IPFS}/" "${USR_STARGZSN_IPFS}/"
@@ -257,7 +271,7 @@ echo "Testing refreshing and mirror..."
 reboot_containerd
 echo "Getting image with normal snapshotter..."
 ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
-ctr-remote run --rm "${REGISTRY_HOST}/alpine:esgz" test tar -c /usr | tar -xC "${USR_ORG}"
+copy_out_dir "${REGISTRY_HOST}/alpine:esgz" "/usr" "${USR_ORG}" "overlayfs"
 
 echo "Getting image with stargz snapshotter..."
 echo -n "" > "${LOG_FILE}"
@@ -270,15 +284,13 @@ REGISTRY_ALT_HOST_IP=$(getent hosts "${REGISTRY_ALT_HOST}" | awk '{ print $1 }')
 echo "Disabling source registry and check if mirroring is working for stargz snapshotter..."
 iptables -A OUTPUT -d "${REGISTRY_HOST_IP}" -j DROP
 iptables -L
-ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}/alpine:esgz" test tar -c /usr \
-    | tar -xC "${USR_MIRROR}"
+copy_out_dir "${REGISTRY_HOST}/alpine:esgz" "/usr" "${USR_MIRROR}" "stargz"
 iptables -D OUTPUT -d "${REGISTRY_HOST_IP}" -j DROP
 
 echo "Disabling mirror registry and check if refreshing works for stargz snapshotter..."
 iptables -A OUTPUT -d "${REGISTRY_ALT_HOST_IP}" -j DROP
 iptables -L
-ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}/alpine:esgz" test tar -c /usr \
-    | tar -xC "${USR_REFRESH}"
+copy_out_dir "${REGISTRY_HOST}/alpine:esgz" "/usr" "${USR_REFRESH}" "stargz"
 iptables -D OUTPUT -d "${REGISTRY_ALT_HOST_IP}" -j DROP
 
 echo "Disabling all registries and running container should fail"
