@@ -71,7 +71,7 @@ func gzipCompressionWithLevel(compressionLevel int) compression {
 	return gzipCompression{estargz.NewGzipCompressorWithLevel(compressionLevel), &estargz.GzipDecompressor{}}
 }
 
-type ReaderFactory func(sr *io.SectionReader, opts ...Option) (r TestableReader, done func() error, err error)
+type ReaderFactory func(sr *io.SectionReader, opts ...Option) (r TestableReader, err error)
 
 type TestableReader interface {
 	Reader
@@ -241,12 +241,12 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 					}
 
 					telemetry, checkCalled := newCalledTelemetry()
-					r, done, err := factory(esgz,
+					r, err := factory(esgz,
 						WithDecompressors(new(zstdchunked.Decompressor)), WithTelemetry(telemetry))
 					if err != nil {
 						t.Fatalf("failed to create new reader: %v", err)
 					}
-					defer done()
+					defer r.Close()
 					t.Logf("vvvvv Node tree vvvvv")
 					t.Logf("[%d] ROOT", r.RootID())
 					dumpNodes(t, r, r.RootID(), 1)

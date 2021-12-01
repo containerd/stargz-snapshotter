@@ -20,6 +20,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	golog "log"
 	"math/rand"
 	"net"
@@ -36,8 +37,11 @@ import (
 	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/sys"
+	dbmetadata "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/db"
 	ipfs "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/ipfs"
 	"github.com/containerd/stargz-snapshotter/fs"
+	"github.com/containerd/stargz-snapshotter/metadata"
+	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
@@ -49,6 +53,7 @@ import (
 	"github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -85,6 +90,9 @@ type snapshotterConfig struct {
 
 	// IPFS is a flag to enbale lazy pulling from IPFS.
 	IPFS bool `toml:"ipfs"`
+
+	// MetadataStore is the type of the metadata store to use.
+	MetadataStore string `toml:"metadata_store" default:"memory"`
 }
 
 func main() {
@@ -171,6 +179,11 @@ func main() {
 	if config.IPFS {
 		fsOpts = append(fsOpts, fs.WithResolveHandler("ipfs", new(ipfs.ResolveHandler)))
 	}
+	mt, err := getMetadataStore(*rootDir, config)
+	if err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to configure metadata store")
+	}
+	fsOpts = append(fsOpts, fs.WithMetadataStore(mt))
 	rs, err := service.NewStargzSnapshotterService(ctx, *rootDir, &config.Config,
 		service.WithCredsFuncs(credsFuncs...), service.WithFilesystemOptions(fsOpts...))
 	if err != nil {
@@ -271,4 +284,32 @@ func serve(ctx context.Context, rpc *grpc.Server, addr string, rs snapshots.Snap
 		return true, nil // do cleanup on SIGINT
 	}
 	return false, nil
+}
+
+const (
+	memoryMetadataType = "memory"
+	dbMetadataType     = "db"
+)
+
+func getMetadataStore(rootDir string, config snapshotterConfig) (metadata.Store, error) {
+	switch config.MetadataStore {
+	case "", memoryMetadataType:
+		return memorymetadata.NewReader, nil
+	case dbMetadataType:
+		bOpts := bolt.Options{
+			NoFreelistSync:  true,
+			InitialMmapSize: 64 * 1024 * 1024,
+			FreelistType:    bolt.FreelistMapType,
+		}
+		db, err := bolt.Open(filepath.Join(rootDir, "metadata.db"), 0600, &bOpts)
+		if err != nil {
+			return nil, err
+		}
+		return func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
+			return dbmetadata.NewReader(db, sr, opts...)
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown metadata store type: %v; must be %v or %v",
+			config.MetadataStore, memoryMetadataType, dbMetadataType)
+	}
 }

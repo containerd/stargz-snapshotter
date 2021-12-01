@@ -55,6 +55,8 @@ import (
 	layermetrics "github.com/containerd/stargz-snapshotter/fs/metrics/layer"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/metadata"
+	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
 	"github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/task"
 	metrics "github.com/docker/go-metrics"
@@ -76,6 +78,7 @@ type Option func(*options)
 type options struct {
 	getSources      source.GetSources
 	resolveHandlers map[string]remote.Handler
+	metadataStore   metadata.Store
 }
 
 func WithGetSources(s source.GetSources) Option {
@@ -90,6 +93,12 @@ func WithResolveHandler(name string, handler remote.Handler) Option {
 			opts.resolveHandlers = make(map[string]remote.Handler)
 		}
 		opts.resolveHandlers[name] = handler
+	}
+}
+
+func WithMetadataStore(metadataStore metadata.Store) Option {
+	return func(opts *options) {
+		opts.metadataStore = metadataStore
 	}
 }
 
@@ -113,6 +122,11 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		entryTimeout = defaultFuseTimeout
 	}
 
+	metadataStore := fsOpts.metadataStore
+	if metadataStore == nil {
+		metadataStore = memorymetadata.NewReader
+	}
+
 	getSources := fsOpts.getSources
 	if getSources == nil {
 		getSources = source.FromDefaultLabels(func(refspec reference.Spec) (hosts []docker.RegistryHost, _ error) {
@@ -120,7 +134,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		})
 	}
 	tm := task.NewBackgroundTaskManager(maxConcurrency, 5*time.Second)
-	r, err := layer.NewResolver(root, tm, cfg, fsOpts.resolveHandlers)
+	r, err := layer.NewResolver(root, tm, cfg, fsOpts.resolveHandlers, metadataStore)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to setup resolver")
 	}

@@ -44,8 +44,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/metadata"
-	dbmetadata "github.com/containerd/stargz-snapshotter/metadata/db"
-	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/lrucache"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
@@ -54,7 +52,6 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	bolt "go.etcd.io/bbolt"
 )
 
 const (
@@ -63,8 +60,6 @@ const (
 	defaultMaxCacheFds        = 10
 	defaultPrefetchTimeoutSec = 10
 	memoryCacheType           = "memory"
-	memoryMetadataType        = "memory"
-	dbMetadataType            = "db"
 )
 
 // Layer represents a layer.
@@ -129,11 +124,11 @@ type Resolver struct {
 	backgroundTaskManager *task.BackgroundTaskManager
 	resolveLock           *namedmutex.NamedMutex
 	config                config.Config
-	newMetadataReader     func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error)
+	metadataStore         metadata.Store
 }
 
 // NewResolver returns a new layer resolver.
-func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager, cfg config.Config, resolveHandlers map[string]remote.Handler) (*Resolver, error) {
+func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager, cfg config.Config, resolveHandlers map[string]remote.Handler, metadataStore metadata.Store) (*Resolver, error) {
 	resolveResultEntry := cfg.ResolveResultEntry
 	if resolveResultEntry == 0 {
 		resolveResultEntry = defaultResolveResultEntry
@@ -170,28 +165,6 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 		return nil, err
 	}
 
-	var newReader func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error)
-	switch cfg.MetadataStore {
-	case "", memoryMetadataType:
-		newReader = memorymetadata.NewReader
-	case dbMetadataType:
-		bOpts := bolt.Options{
-			NoFreelistSync:  true,
-			InitialMmapSize: 64 * 1024 * 1024,
-			FreelistType:    bolt.FreelistMapType,
-		}
-		db, err := bolt.Open(filepath.Join(root, "metadata.db"), 0600, &bOpts)
-		if err != nil {
-			return nil, err
-		}
-		newReader = func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
-			return dbmetadata.NewReader(db, sr, opts...)
-		}
-	default:
-		return nil, fmt.Errorf("unknown metadata store type: %v; must be %v or %v",
-			cfg.MetadataStore, memoryMetadataType, dbMetadataType)
-	}
-
 	return &Resolver{
 		rootDir:               root,
 		resolver:              remote.NewResolver(cfg.BlobConfig, resolveHandlers),
@@ -201,7 +174,7 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 		backgroundTaskManager: backgroundTaskManager,
 		config:                cfg,
 		resolveLock:           new(namedmutex.NamedMutex),
-		newMetadataReader:     newReader,
+		metadataStore:         metadataStore,
 	}, nil
 }
 
@@ -324,7 +297,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 			commonmetrics.MeasureLatencyInMilliseconds(commonmetrics.DeserializeTocJSON, desc.Digest, start)
 		},
 	}
-	meta, err := r.newMetadataReader(sr,
+	meta, err := r.metadataStore(sr,
 		append(esgzOpts, metadata.WithTelemetry(&telemetry), metadata.WithDecompressors(new(zstdchunked.Decompressor)))...)
 	if err != nil {
 		return nil, err
