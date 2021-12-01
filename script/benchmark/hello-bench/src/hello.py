@@ -104,6 +104,7 @@ class Bench:
 
 class BenchRunner:
     ECHO_HELLO = set(['alpine:3.10.2',
+                      'nixos/nix:2.3.12',
                       'fedora:30',])
 
     CMD_ARG_WAIT = {'rethinkdb:2.3.6': RunArgs(waitline='Server ready'),
@@ -162,6 +163,9 @@ class BenchRunner:
                  Bench('php:8-apache-buster', 'web-server'),
                  Bench('rabbitmq:3.9.4'),
                  Bench('elasticsearch:7.14.0'),
+
+                 # needs "--srcrepository=docker.io"
+                 Bench('nixos/nix:2.3.12'),
              ]])
 
     def __init__(self, repository='docker.io/library', srcrepository='docker.io/library', mode=LEGACY_MODE, optimizer=DEFAULT_OPTIMIZER, puller=DEFAULT_PULLER, pusher=DEFAULT_PUSHER, runtime="containerd", profile=0):
