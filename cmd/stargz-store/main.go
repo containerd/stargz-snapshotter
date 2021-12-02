@@ -19,15 +19,21 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"io"
 	golog "log"
 	"math/rand"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/log"
+	dbmetadata "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/db"
 	"github.com/containerd/stargz-snapshotter/fs/config"
+	"github.com/containerd/stargz-snapshotter/metadata"
+	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
 	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
@@ -35,6 +41,7 @@ import (
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/pelletier/go-toml"
 	"github.com/sirupsen/logrus"
+	bolt "go.etcd.io/bbolt"
 )
 
 const (
@@ -57,6 +64,9 @@ type Config struct {
 
 	// ResolverConfig is config for resolving registries.
 	ResolverConfig `toml:"resolver"`
+
+	// MetadataStore is the type of the metadata store to use.
+	MetadataStore string `toml:"metadata_store" default:"memory"`
 }
 
 type KubeconfigKeychainConfig struct {
@@ -126,7 +136,11 @@ func main() {
 		log.G(ctx).Warnf("content verification is not supported; switching to non-verification mode")
 		config.Config.DisableVerification = true
 	}
-	layerManager, err := store.NewLayerManager(ctx, *rootDir, hosts, config.Config)
+	mt, err := getMetadataStore(*rootDir, config)
+	if err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to configure metadata store")
+	}
+	layerManager, err := store.NewLayerManager(ctx, *rootDir, hosts, mt, config.Config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to prepare pool")
 	}
@@ -157,4 +171,32 @@ func waitForSIGINT() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	<-c
+}
+
+const (
+	memoryMetadataType = "memory"
+	dbMetadataType     = "db"
+)
+
+func getMetadataStore(rootDir string, config Config) (metadata.Store, error) {
+	switch config.MetadataStore {
+	case "", memoryMetadataType:
+		return memorymetadata.NewReader, nil
+	case dbMetadataType:
+		bOpts := bolt.Options{
+			NoFreelistSync:  true,
+			InitialMmapSize: 64 * 1024 * 1024,
+			FreelistType:    bolt.FreelistMapType,
+		}
+		db, err := bolt.Open(filepath.Join(rootDir, "metadata.db"), 0600, &bOpts)
+		if err != nil {
+			return nil, err
+		}
+		return func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
+			return dbmetadata.NewReader(db, sr, opts...)
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown metadata store type: %v; must be %v or %v",
+			config.MetadataStore, memoryMetadataType, dbMetadataType)
+	}
 }

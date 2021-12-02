@@ -11,6 +11,7 @@ require (
 	github.com/containerd/stargz-snapshotter/ipfs v0.10.1
 	github.com/coreos/go-systemd/v22 v22.3.2
 	github.com/docker/go-metrics v0.0.1
+	github.com/goccy/go-json v0.7.10
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ipfs/go-ipfs-http-client v0.1.0
 	github.com/ipfs/interface-go-ipfs-core v0.5.2
@@ -22,6 +23,8 @@ require (
 	github.com/rs/xid v1.3.0
 	github.com/sirupsen/logrus v1.8.1
 	github.com/urfave/cli v1.22.5
+	go.etcd.io/bbolt v1.3.6
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359
 	google.golang.org/grpc v1.42.0
 	k8s.io/cri-api v0.24.0-alpha.0

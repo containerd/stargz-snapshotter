@@ -27,10 +27,10 @@ func TestReader(t *testing.T) {
 	metadata.TestReader(t, readerFactory)
 }
 
-func readerFactory(sr *io.SectionReader, opts ...metadata.Option) (metadata.TestableReader, func() error, error) {
+func readerFactory(sr *io.SectionReader, opts ...metadata.Option) (metadata.TestableReader, error) {
 	r, err := NewReader(sr, opts...)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return r.(*reader), func() error { return nil }, err
+	return r.(*reader), nil
 }

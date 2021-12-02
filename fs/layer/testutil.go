@@ -31,7 +31,9 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
+	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -39,34 +41,232 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/reference"
+	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/metadata"
-	dbmetadata "github.com/containerd/stargz-snapshotter/metadata/db"
-	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
+	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/hashicorp/go-multierror"
+	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
+
+const (
+	sampleChunkSize = 3
+	sampleData1     = "0123456789"
+	sampleData2     = "abcdefghij"
+)
+
+func TestSuiteLayer(t *testing.T, store metadata.Store) {
+	testPrefetch(t, store)
+	testNodeRead(t, store)
+	testExistence(t, store)
+}
+
+var testStateLayerDigest = digest.FromString("dummy")
+
+func testPrefetch(t *testing.T, factory metadata.Store) {
+	defaultPrefetchSize := int64(10000)
+	landmarkPosition := func(t *testing.T, l *layer) int64 {
+		if l.r == nil {
+			t.Fatalf("layer hasn't been verified yet")
+		}
+		if id, _, err := l.r.Metadata().GetChild(l.r.Metadata().RootID(), estargz.PrefetchLandmark); err == nil {
+			offset, err := l.r.Metadata().GetOffset(id)
+			if err != nil {
+				t.Fatalf("failed to get offset of prefetch landmark")
+			}
+			return offset
+		}
+		return defaultPrefetchSize
+	}
+	tests := []struct {
+		name             string
+		in               []testutil.TarEntry
+		wantNum          int      // number of chunks wanted in the cache
+		wants            []string // filenames to compare
+		prefetchSize     func(*testing.T, *layer) int64
+		prioritizedFiles []string
+	}{
+		{
+			name: "no_prefetch",
+			in: []testutil.TarEntry{
+				testutil.File("foo.txt", sampleData1),
+			},
+			wantNum:          0,
+			prioritizedFiles: nil,
+		},
+		{
+			name: "prefetch",
+			in: []testutil.TarEntry{
+				testutil.File("foo.txt", sampleData1),
+				testutil.File("bar.txt", sampleData2),
+			},
+			wantNum:          chunkNum(sampleData1),
+			wants:            []string{"foo.txt"},
+			prefetchSize:     landmarkPosition,
+			prioritizedFiles: []string{"foo.txt"},
+		},
+		{
+			name: "with_dir",
+			in: []testutil.TarEntry{
+				testutil.Dir("foo/"),
+				testutil.File("foo/bar.txt", sampleData1),
+				testutil.Dir("buz/"),
+				testutil.File("buz/buzbuz.txt", sampleData2),
+			},
+			wantNum:          chunkNum(sampleData1),
+			wants:            []string{"foo/bar.txt"},
+			prefetchSize:     landmarkPosition,
+			prioritizedFiles: []string{"foo/", "foo/bar.txt"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr, dgst, err := testutil.BuildEStargz(tt.in,
+				testutil.WithEStargzOptions(
+					estargz.WithChunkSize(sampleChunkSize),
+					estargz.WithPrioritizedFiles(tt.prioritizedFiles),
+				))
+			if err != nil {
+				t.Fatalf("failed to build eStargz: %v", err)
+			}
+			blob := newBlob(sr)
+			mcache := cache.NewMemoryCache()
+			mr, err := factory(sr)
+			if err != nil {
+				t.Fatalf("failed to create metadata reader: %v", err)
+			}
+			defer mr.Close()
+			vr, err := reader.NewReader(mr, mcache, digest.FromString(""))
+			if err != nil {
+				t.Fatalf("failed to create reader: %v", err)
+			}
+			l := newLayer(
+				&Resolver{
+					prefetchTimeout:       time.Second,
+					backgroundTaskManager: task.NewBackgroundTaskManager(10, 5*time.Second),
+				},
+				ocispec.Descriptor{Digest: testStateLayerDigest},
+				&blobRef{blob, func() {}},
+				vr,
+			)
+			if err := l.Verify(dgst); err != nil {
+				t.Errorf("failed to verify reader: %v", err)
+				return
+			}
+			prefetchSize := int64(0)
+			if tt.prefetchSize != nil {
+				prefetchSize = tt.prefetchSize(t, l)
+			}
+			if err := l.Prefetch(defaultPrefetchSize); err != nil {
+				t.Errorf("failed to prefetch: %v", err)
+				return
+			}
+			if blob.calledPrefetchOffset != 0 {
+				t.Errorf("invalid prefetch offset %d; want %d",
+					blob.calledPrefetchOffset, 0)
+			}
+			if blob.calledPrefetchSize != prefetchSize {
+				t.Errorf("invalid prefetch size %d; want %d",
+					blob.calledPrefetchSize, prefetchSize)
+			}
+			if cLen := len(mcache.(*cache.MemoryCache).Membuf); tt.wantNum != cLen {
+				t.Errorf("number of chunks in the cache %d; want %d: %v", cLen, tt.wantNum, err)
+				return
+			}
+
+			lr := l.r
+			if lr == nil {
+				t.Fatalf("failed to get reader from layer: %v", err)
+			}
+			for _, file := range tt.wants {
+				id, err := lookup(lr.Metadata(), file)
+				if err != nil {
+					t.Fatalf("failed to lookup %q: %v", file, err)
+				}
+				e, err := lr.Metadata().GetAttr(id)
+				if err != nil {
+					t.Fatalf("failed to get attr of %q: %v", file, err)
+				}
+				wantFile, err := lr.OpenFile(id)
+				if err != nil {
+					t.Fatalf("failed to open file %q", file)
+				}
+				blob.readCalled = false
+				if _, err := io.Copy(ioutil.Discard, io.NewSectionReader(wantFile, 0, e.Size)); err != nil {
+					t.Fatalf("failed to read file %q", file)
+				}
+				if blob.readCalled {
+					t.Errorf("chunks of file %q aren't cached", file)
+					return
+				}
+			}
+		})
+	}
+}
+
+func lookup(r metadata.Reader, name string) (uint32, error) {
+	name = strings.TrimPrefix(path.Clean("/"+name), "/")
+	if name == "" {
+		return r.RootID(), nil
+	}
+	dir, base := filepath.Split(name)
+	pid, err := lookup(r, dir)
+	if err != nil {
+		return 0, err
+	}
+	id, _, err := r.GetChild(pid, base)
+	return id, err
+}
+
+func chunkNum(data string) int {
+	return (len(data)-1)/sampleChunkSize + 1
+}
+
+func newBlob(sr *io.SectionReader) *sampleBlob {
+	return &sampleBlob{
+		r: sr,
+	}
+}
+
+type sampleBlob struct {
+	r                    *io.SectionReader
+	readCalled           bool
+	calledPrefetchOffset int64
+	calledPrefetchSize   int64
+}
+
+func (sb *sampleBlob) Authn(tr http.RoundTripper) (http.RoundTripper, error) { return nil, nil }
+func (sb *sampleBlob) Check() error                                          { return nil }
+func (sb *sampleBlob) Size() int64                                           { return sb.r.Size() }
+func (sb *sampleBlob) FetchedSize() int64                                    { return 0 }
+func (sb *sampleBlob) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
+	sb.readCalled = true
+	return sb.r.ReadAt(p, offset)
+}
+func (sb *sampleBlob) Cache(offset int64, size int64, option ...remote.Option) error {
+	sb.calledPrefetchOffset = offset
+	sb.calledPrefetchSize = size
+	return nil
+}
+func (sb *sampleBlob) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) error {
+	return nil
+}
+func (sb *sampleBlob) Close() error { return nil }
 
 const (
 	sampleMiddleOffset = sampleChunkSize / 2
 	lastChunkOffset1   = sampleChunkSize * (int64(len(sampleData1)) / sampleChunkSize)
 )
 
-// Tests Read method of each file node.
-func TestNodeRead(t *testing.T) {
-	testNodeRead(t, "db", newDBReader)
-	testNodeRead(t, "mem", newMemoryReader)
-}
-
-func testNodeRead(t *testing.T, name string, factory readerFactory) {
+func testNodeRead(t *testing.T, factory metadata.Store) {
 	sizeCond := map[string]int64{
 		"single_chunk": sampleChunkSize - sampleMiddleOffset,
 		"multi_chunks": sampleChunkSize + sampleMiddleOffset,
@@ -89,7 +289,7 @@ func testNodeRead(t *testing.T, name string, factory readerFactory) {
 		for in, innero := range innerOffsetCond {
 			for bo, baseo := range baseOffsetCond {
 				for fn, filesize := range fileSizeCond {
-					t.Run(fmt.Sprintf("reading_%s_%s_%s_%s_%s", name, sn, in, bo, fn), func(t *testing.T) {
+					t.Run(fmt.Sprintf("reading_%s_%s_%s_%s", sn, in, bo, fn), func(t *testing.T) {
 						if filesize > int64(len(sampleData1)) {
 							t.Fatal("sample file size is larger than sample data")
 						}
@@ -143,7 +343,7 @@ func testNodeRead(t *testing.T, name string, factory readerFactory) {
 	}
 }
 
-func makeNodeReader(t *testing.T, contents []byte, chunkSize int, factory readerFactory) (_ *file, closeFn func() error) {
+func makeNodeReader(t *testing.T, contents []byte, chunkSize int, factory metadata.Store) (_ *file, closeFn func() error) {
 	testName := "test"
 	sr, _, err := testutil.BuildEStargz(
 		[]testutil.TarEntry{testutil.File(testName, string(contents))},
@@ -152,28 +352,26 @@ func makeNodeReader(t *testing.T, contents []byte, chunkSize int, factory reader
 	if err != nil {
 		t.Fatalf("failed to build sample eStargz: %v", err)
 	}
-	r, closeFn, err := factory(sr)
+	r, err := factory(sr)
 	if err != nil {
 		t.Fatalf("failed to create reader: %v", err)
 	}
-	var closes closeFuncs
-	closes = append(closes, r.Close, closeFn)
 	rootNode := getRootNode(t, r)
 	var eo fuse.EntryOut
 	inode, errno := rootNode.Lookup(context.Background(), testName, &eo)
 	if errno != 0 {
-		closes.close()
+		r.Close()
 		t.Fatalf("failed to lookup test node; errno: %v", errno)
 	}
 	f, _, errno := inode.Operations().(fusefs.NodeOpener).Open(context.Background(), 0)
 	if errno != 0 {
-		closes.close()
+		r.Close()
 		t.Fatalf("failed to open test file; errno: %v", errno)
 	}
-	return f.(*file), closes.close
+	return f.(*file), r.Close
 }
 
-func TestExistence(t *testing.T) {
+func testExistence(t *testing.T, factory metadata.Store) {
 	tests := []struct {
 		name string
 		in   []testutil.TarEntry
@@ -305,26 +503,23 @@ func TestExistence(t *testing.T) {
 		},
 	}
 
-	for readerName, factory := range map[string]readerFactory{"db": newDBReader, "mem": newMemoryReader} {
-		for _, tt := range tests {
-			t.Run(tt.name+"-"+readerName, func(t *testing.T) {
-				sgz, _, err := testutil.BuildEStargz(tt.in)
-				if err != nil {
-					t.Fatalf("failed to build sample eStargz: %v", err)
-				}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sgz, _, err := testutil.BuildEStargz(tt.in)
+			if err != nil {
+				t.Fatalf("failed to build sample eStargz: %v", err)
+			}
 
-				r, closeFn, err := factory(sgz)
-				if err != nil {
-					t.Fatalf("failed to create reader: %v", err)
-				}
-				defer r.Close()
-				defer closeFn()
-				rootNode := getRootNode(t, r)
-				for _, want := range tt.want {
-					want(t, rootNode)
-				}
-			})
-		}
+			r, err := factory(sgz)
+			if err != nil {
+				t.Fatalf("failed to create reader: %v", err)
+			}
+			defer r.Close()
+			rootNode := getRootNode(t, r)
+			for _, want := range tt.want {
+				want(t, rootNode)
+			}
+		})
 	}
 }
 
@@ -674,48 +869,4 @@ func extraModeToTarMode(fm os.FileMode) (tm int64) {
 		tm |= cISVTX
 	}
 	return
-}
-
-type readerFactory func(sr *io.SectionReader) (mr metadata.Reader, close func() error, err error)
-
-func newDBReader(sr *io.SectionReader) (metadata.Reader, func() error, error) {
-	var closes closeFuncs
-	f, err := ioutil.TempFile("", "readertest")
-	if err != nil {
-		return nil, nil, err
-	}
-	closes = append(closes, func() error { return os.Remove(f.Name()) })
-	db, err := bolt.Open(f.Name(), 0666, nil)
-	if err != nil {
-		closes.close()
-		return nil, nil, err
-	}
-	closes = append(closes, db.Close)
-	mr, err := dbmetadata.NewReader(db, sr)
-	if err != nil {
-		closes.close()
-		return nil, nil, err
-	}
-	closes = append(closes, mr.Close)
-	return mr, closes.close, nil
-}
-
-func newMemoryReader(sr *io.SectionReader) (metadata.Reader, func() error, error) {
-	mr, err := memorymetadata.NewReader(sr)
-	if err != nil {
-		return nil, nil, err
-	}
-	return mr, func() error { return nil }, err
-}
-
-type closeFuncs []func() error
-
-func (fs closeFuncs) close() error {
-	var allErr error
-	for _, f := range fs {
-		if err := f(); err != nil {
-			allErr = multierror.Append(allErr, err)
-		}
-	}
-	return allErr
 }

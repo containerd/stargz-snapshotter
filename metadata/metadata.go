@@ -58,7 +58,10 @@ type Attr struct {
 	NumLink int
 }
 
-// TODO: docs
+// Store reads the provided eStargz blob and creates a metadata reader.
+type Store func(sr *io.SectionReader, opts ...Option) (Reader, error)
+
+// Reader provides access to file metadata of a blob.
 type Reader interface {
 	RootID() uint32
 	TOCDigest() digest.Digest
