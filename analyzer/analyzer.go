@@ -200,6 +200,10 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 	var fanotifierClosed bool
 	var fanotifierClosedMu sync.Mutex
 	go func() {
+		var successCount int
+		defer func() {
+			log.G(ctx).Debugf("success record %d path", successCount)
+		}()
 		for {
 			path, err := fanotifier.GetPath()
 			if err != nil {
@@ -217,6 +221,7 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 			if err := rc.Record(path); err != nil {
 				log.G(ctx).WithError(err).Debugf("failed to record %q", path)
 			}
+			successCount++
 		}
 	}()
 	if aOpts.terminal {
