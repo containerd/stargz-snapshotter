@@ -34,7 +34,7 @@ jobs:
         docker build ${BUILD_ARGS} --target release-binaries -o - . | gzip > "${OUTPUT_DIR}/${TAR_FILE_NAME}"
         ( cd ${OUTPUT_DIR}; sha256sum ${TAR_FILE_NAME} ) > "${OUTPUT_DIR}/${SHA256SUM_FILE_NAME}"
     - name: Save Binary
-      uses: actions/upload-artifact@v2.2.4
+      uses: actions/upload-artifact@v2.3.0
       with:
         name: builds-${{ matrix.arch }}
         path: ${{ env.OUTPUT_DIR }}/*
