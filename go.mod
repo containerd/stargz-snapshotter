@@ -7,7 +7,7 @@ require (
 	github.com/containerd/containerd v1.6.0-beta.2.0.20211117185425-a776a27af54a
 	github.com/containerd/continuity v0.2.1
 	github.com/containerd/stargz-snapshotter/estargz v0.10.1
-	github.com/docker/cli v20.10.11+incompatible
+	github.com/docker/cli v20.10.12+incompatible
 	github.com/docker/docker v20.10.7+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.6.4 // indirect
 	github.com/docker/go-metrics v0.0.1
