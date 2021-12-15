@@ -73,10 +73,12 @@ version = 2
 You can try our [prebuilt](/Dockerfile) [KinD](https://github.com/kubernetes-sigs/kind) node image that contains the above configuration.
 
 ```console
-$ kind create cluster --name stargz-demo --image ghcr.io/stargz-containers/estargz-kind-node:0.7.0
+$ kind create cluster --name stargz-demo --image ghcr.io/stargz-containers/estargz-kind-node:0.10.1
 ```
 
-> kind binary v0.11.x or newer is recommended for `estargz-kind-node:0.7.0`.
+:information_source: kind binary v0.11.x or newer is recommended.
+
+:information_source: You can get latest node images from [`ghcr.io/stargz-containers/estargz-kind-node`](https://github.com/orgs/stargz-containers/packages/container/package/estargz-kind-node).
 
 Then you can create eStargz pods on the cluster.
 In this example, we create a stargz-converted Node.js pod (`ghcr.io/stargz-containers/node:13.13.0-esgz`) as a demo.
@@ -105,7 +107,7 @@ spec:
 The following command lazily pulls `ghcr.io/stargz-containers/node:13.13.0-esgz` from Github Container Registry and creates the pod so the time to take for it is shorter than the original image `library/node:13.13`.
 
 ```console
-$ kubectl --context kind-stargz-demo apply -f stargz-pod.yaml && kubectl get po nodejs -w
+$ kubectl --context kind-stargz-demo apply -f stargz-pod.yaml && kubectl --context kind-stargz-demo get po nodejs -w
 $ kubectl --context kind-stargz-demo port-forward nodejs 8080:80 &
 $ curl 127.0.0.1:8080
 Hello World!
