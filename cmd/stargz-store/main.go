@@ -93,7 +93,7 @@ func main() {
 		config Config
 	)
 	// Streams log of standard lib (go-fuse uses this) into debug log
-	// Snapshotter should use "github.com/containerd/containerd/log" otherwize
+	// Snapshotter should use "github.com/containerd/containerd/log" otherwise
 	// logs are always printed as "debug" mode.
 	golog.SetOutput(log.G(ctx).WriterLevel(logrus.DebugLevel))
 

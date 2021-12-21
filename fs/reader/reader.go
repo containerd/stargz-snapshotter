@@ -83,7 +83,7 @@ func (vr *VerifiableReader) VerifyTOC(tocDigest digest.Digest) (Reader, error) {
 	lastVerifyErr := vr.lastVerifyErr.Load()
 	vr.prohibitVerifyFailureMu.Unlock()
 	if err := lastVerifyErr; err != nil {
-		return nil, errors.Wrapf(err.(error), "content error occures during caching contents")
+		return nil, errors.Wrapf(err.(error), "content error occurs during caching contents")
 	}
 	if actual := vr.r.r.TOCDigest(); actual != tocDigest {
 		return nil, fmt.Errorf("invalid TOC JSON %q; want %q", actual, tocDigest)
