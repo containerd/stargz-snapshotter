@@ -4,8 +4,8 @@ go 1.16
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/containerd/containerd v1.6.0-beta.2.0.20211117185425-a776a27af54a
-	github.com/containerd/continuity v0.2.1
+	github.com/containerd/containerd v1.6.0-beta.4
+	github.com/containerd/continuity v0.2.2-0.20211201162329-8e53e7cac79d
 	github.com/containerd/stargz-snapshotter/estargz v0.10.1
 	github.com/docker/cli v20.10.12+incompatible
 	github.com/docker/docker v20.10.7+incompatible // indirect
@@ -18,7 +18,7 @@ require (
 	github.com/klauspost/compress v1.13.6
 	github.com/moby/sys/mountinfo v0.5.0
 	github.com/opencontainers/go-digest v1.0.0
-	github.com/opencontainers/image-spec v1.0.2-0.20210819154149-5ad6f50d6283
+	github.com/opencontainers/image-spec v1.0.2-0.20211117181255-693428a734f5
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/pelletier/go-toml v1.9.4 // indirect
 	github.com/pkg/errors v0.9.1
