@@ -181,13 +181,17 @@ function dump_dir {
 
     reboot_containerd
     if [ "${REMOTE}" == "true" ] ; then
-        echo -n "" > "${LOG_FILE}"
-        ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${IMAGE}"
-        check_remote_snapshots "${LOG_FILE}"
+        run_and_check_remote_snapshots ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${IMAGE}"
     else
         ctr-remote images pull --snapshotter="${SNAPSHOTTER}" --user "${DUMMYUSER}:${DUMMYPASS}" "${IMAGE}"
     fi
     copy_out_dir "${IMAGE}" "${TARGETDIR}" "${DEST}" "${SNAPSHOTTER}"
+}
+
+function run_and_check_remote_snapshots {
+    echo -n "" > "${LOG_FILE}"
+    ${@:1}
+    check_remote_snapshots "${LOG_FILE}"
 }
 
 echo "===== VERSION INFORMATION ====="
@@ -226,12 +230,9 @@ if [ "${OK}" != "ok" ] ; then
     exit 1
 fi
 
-ipfs init
-ipfs daemon &
-
 echo "Preparing images..."
-copy docker.io/library/ubuntu:18.04 "${REGISTRY_HOST}/ubuntu:18.04"
-copy docker.io/library/alpine:3.10.2 "${REGISTRY_HOST}/alpine:3.10.2"
+copy ghcr.io/stargz-containers/ubuntu:20.04-org "${REGISTRY_HOST}/ubuntu:18.04"
+copy ghcr.io/stargz-containers/alpine:3.10.2-org "${REGISTRY_HOST}/alpine:3.10.2"
 stargzify "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:sgz"
 optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:esgz"
 optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:zstdchunked"
@@ -244,13 +245,15 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     # Tests with IPFS if standalone snapshotter
     echo "Testing with IPFS..."
 
+    ipfs init
+    ipfs daemon --offline &
+    retry curl -X POST localhost:5001/api/v0/version >/dev/null 2>&1 # wait for up
+
     # stargz snapshotter
     ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
     CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:18.04")
     reboot_containerd
-    echo -n "" > "${LOG_FILE}"
-    ctr-remote i rpull --ipfs "${CID}"
-    check_remote_snapshots "${LOG_FILE}"
+    run_and_check_remote_snapshots ctr-remote i rpull --ipfs "${CID}"
     copy_out_dir "${CID}" "/usr" "${USR_STARGZSN_IPFS}" "stargz"
 
     # overlayfs snapshotter
@@ -262,6 +265,8 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
 
     echo "Diffing between two root filesystems(normal vs stargz snapshotter, IPFS rootfs)"
     diff --no-dereference -qr "${USR_NORMALSN_IPFS}/" "${USR_STARGZSN_IPFS}/"
+
+    kill_all ipfs
 fi
 
 ############
@@ -274,9 +279,7 @@ ctr-remote images pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpi
 copy_out_dir "${REGISTRY_HOST}/alpine:esgz" "/usr" "${USR_ORG}" "overlayfs"
 
 echo "Getting image with stargz snapshotter..."
-echo -n "" > "${LOG_FILE}"
-ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
-check_remote_snapshots "${LOG_FILE}"
+run_and_check_remote_snapshots ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
 
 REGISTRY_HOST_IP=$(getent hosts "${REGISTRY_HOST}" | awk '{ print $1 }')
 REGISTRY_ALT_HOST_IP=$(getent hosts "${REGISTRY_ALT_HOST}" | awk '{ print $1 }')

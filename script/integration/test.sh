@@ -40,9 +40,13 @@ if [ "${INTEGRATION_NO_RECREATE:-}" != "true" ] ; then
     fi
 
     # Enable to check race
+    # Temporary disable race check until docker/cli fixing race issue
+    # https://github.com/docker/cli/pull/3264
+    # BUILD_FLAGS="-race"
+    BUILD_FLAGS=""
     docker build ${DOCKER_BUILD_ARGS:-} -t "${INTEGRATION_BASE_IMAGE_NAME}" \
            --target "${TARGET_STAGE}" \
-           --build-arg=SNAPSHOTTER_BUILD_FLAGS="-race" \
+           --build-arg=SNAPSHOTTER_BUILD_FLAGS="${BUILD_FLAGS}" \
            "${REPO}"
 fi
 
