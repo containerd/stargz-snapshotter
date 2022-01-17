@@ -3,9 +3,9 @@ module github.com/containerd/stargz-snapshotter/cmd
 go 1.16
 
 require (
-	github.com/containerd/containerd v1.6.0-beta.2.0.20211117185425-a776a27af54a
-	github.com/containerd/containerd/api v1.6.0-beta.2.0.20211117185425-a776a27af54a
-	github.com/containerd/go-cni v1.1.1-0.20211026134925-aa8bf14323a5
+	github.com/containerd/containerd v1.6.0-rc.0
+	github.com/containerd/containerd/api v1.6.0-beta.3.0.20220112172229-6e211a774ff0
+	github.com/containerd/go-cni v1.1.1
 	github.com/containerd/stargz-snapshotter v0.10.1
 	github.com/containerd/stargz-snapshotter/estargz v0.10.1
 	github.com/containerd/stargz-snapshotter/ipfs v0.10.1
@@ -16,7 +16,7 @@ require (
 	github.com/ipfs/go-ipfs-http-client v0.2.0
 	github.com/ipfs/interface-go-ipfs-core v0.5.2
 	github.com/opencontainers/go-digest v1.0.0
-	github.com/opencontainers/image-spec v1.0.2-0.20210819154149-5ad6f50d6283
+	github.com/opencontainers/image-spec v1.0.2-0.20211117181255-693428a734f5
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/pelletier/go-toml v1.9.4
 	github.com/pkg/errors v0.9.1
@@ -25,8 +25,8 @@ require (
 	github.com/urfave/cli v1.22.5
 	go.etcd.io/bbolt v1.3.6
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359
-	google.golang.org/grpc v1.42.0
+	golang.org/x/sys v0.0.0-20211216021012-1d35b9e2eb4e
+	google.golang.org/grpc v1.43.0
 	k8s.io/cri-api v0.24.0-alpha.1
 )
 

@@ -35,6 +35,7 @@ import (
 	"github.com/pkg/errors"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
 
@@ -98,7 +99,7 @@ func init() {
 						Backoff: backoffConfig,
 					}
 					gopts := []grpc.DialOption{
-						grpc.WithInsecure(),
+						grpc.WithTransportCredentials(insecure.NewCredentials()),
 						grpc.WithConnectParams(connParams),
 						grpc.WithContextDialer(dialer.ContextDialer),
 						grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
