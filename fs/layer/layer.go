@@ -59,6 +59,8 @@ const (
 	defaultMaxLRUCacheEntry         = 10
 	defaultMaxCacheFds              = 10
 	defaultPrefetchTimeoutSec       = 10
+	defaultResolveTimeoutSec        = 60
+	defaultResolveRequestTimeoutSec = 30
 	memoryCacheType                 = "memory"
 )
 
@@ -117,6 +119,8 @@ type Resolver struct {
 	rootDir               string
 	resolver              *remote.Resolver
 	prefetchTimeout       time.Duration
+	resolveTimeout        time.Duration
+	resolveRequestTimeout time.Duration
 	layerCache            *cacheutil.TTLCache
 	layerCacheMu          sync.Mutex
 	blobCache             *cacheutil.TTLCache
@@ -136,6 +140,14 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	prefetchTimeout := time.Duration(cfg.PrefetchTimeoutSec) * time.Second
 	if prefetchTimeout == 0 {
 		prefetchTimeout = defaultPrefetchTimeoutSec * time.Second
+	}
+	resolveTimeout := time.Duration(cfg.ResolveTimeoutSec) * time.Second
+	if resolveTimeout == 0 {
+		resolveTimeout = time.Duration(defaultResolveTimeoutSec) * time.Second
+	}
+	resolveRequestTimeout := time.Duration(cfg.ResolveRequestTimeoutSec) * time.Second
+	if resolveRequestTimeout == 0 {
+		resolveRequestTimeout = time.Duration(defaultResolveRequestTimeoutSec) * time.Second
 	}
 
 	// layerCache caches resolved layers for future use. This is useful in a use-case where
@@ -171,6 +183,8 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 		layerCache:            layerCache,
 		blobCache:             blobCache,
 		prefetchTimeout:       prefetchTimeout,
+		resolveTimeout:        resolveTimeout,
+		resolveRequestTimeout: resolveRequestTimeout,
 		backgroundTaskManager: backgroundTaskManager,
 		config:                cfg,
 		resolveLock:           new(namedmutex.NamedMutex),
@@ -236,6 +250,8 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	defer r.resolveLock.Unlock(name)
 
 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("src", name))
+	ctx, cancel := context.WithTimeout(ctx, r.resolveTimeout)
+	defer cancel()
 
 	// First, try to retrieve this layer from the underlying cache.
 	r.layerCacheMu.Lock()
@@ -256,7 +272,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	log.G(ctx).Debugf("resolving")
 
 	// Resolve the blob.
-	blobR, err := r.resolveBlob(ctx, hosts, refspec, desc)
+	blobR, err := r.resolveBlob(ctx, hosts, refspec, desc, name)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to resolve the blob")
 	}
@@ -280,11 +296,52 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	// Each file's read operation is a prioritized task and all background tasks
 	// will be stopped during the execution so this can avoid being disturbed for
 	// NW traffic by background tasks.
+	var (
+		// Use context during resolving, to make it cancellable
+		curR = readerAtFunc(func(p []byte, offset int64) (n int, err error) {
+			ctx, cancel := context.WithTimeout(ctx, r.resolveRequestTimeout)
+			defer cancel()
+			return blobR.ReadAt(p, offset, remote.WithContext(ctx))
+		})
+		curRMu sync.Mutex
+	)
 	sr := io.NewSectionReader(readerAtFunc(func(p []byte, offset int64) (n int, err error) {
 		r.backgroundTaskManager.DoPrioritizedTask()
 		defer r.backgroundTaskManager.DonePrioritizedTask()
-		return blobR.ReadAt(p, offset)
+		curRMu.Lock()
+		br := curR
+		curRMu.Unlock()
+		return br.ReadAt(p, offset)
 	}), 0, blobR.Size())
+	vr, err := r.newReader(sr, desc, fsCache, esgzOpts...)
+	if err != nil {
+		cErr := ctx.Err()
+		if errors.Is(cErr, context.DeadlineExceeded) {
+			r.blobCacheMu.Lock()
+			r.blobCache.Remove(name)
+			r.blobCacheMu.Unlock()
+		}
+		return nil, errors.Wrap(err, "failed to read layer")
+	}
+	// do not propagate context after resolve is done
+	curRMu.Lock()
+	curR = readerAtFunc(func(p []byte, offset int64) (n int, err error) { return blobR.ReadAt(p, offset) })
+	curRMu.Unlock()
+
+	// Combine layer information together and cache it.
+	l := newLayer(r, desc, blobR, vr)
+	r.layerCacheMu.Lock()
+	cachedL, done2, added := r.layerCache.Add(name, l)
+	r.layerCacheMu.Unlock()
+	if !added {
+		l.close() // layer already exists in the cache. discrad this.
+	}
+
+	log.G(ctx).Debugf("resolved")
+	return &layerRef{cachedL.(*layer), done2}, nil
+}
+
+func (r *Resolver) newReader(sr *io.SectionReader, desc ocispec.Descriptor, fsCache cache.BlobCache, esgzOpts ...metadata.Option) (*reader.VerifiableReader, error) {
 	// define telemetry hooks to measure latency metrics inside estargz package
 	telemetry := metadata.Telemetry{
 		GetFooterLatency: func(start time.Time) {
@@ -306,36 +363,24 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read layer")
 	}
-
-	// Combine layer information together and cache it.
-	l := newLayer(r, desc, blobR, vr)
-	r.layerCacheMu.Lock()
-	cachedL, done2, added := r.layerCache.Add(name, l)
-	r.layerCacheMu.Unlock()
-	if !added {
-		l.close() // layer already exists in the cache. discrad this.
-	}
-
-	log.G(ctx).Debugf("resolved")
-	return &layerRef{cachedL.(*layer), done2}, nil
+	return vr, nil
 }
 
 // resolveBlob resolves a blob based on the passed layer blob information.
-func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (_ *blobRef, retErr error) {
-	name := refspec.String() + "/" + desc.Digest.String()
-
+func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, cacheKey string) (_ *blobRef, retErr error) {
 	// Try to retrieve the blob from the underlying cache.
 	r.blobCacheMu.Lock()
-	c, done, ok := r.blobCache.Get(name)
+	c, done, ok := r.blobCache.Get(cacheKey)
 	r.blobCacheMu.Unlock()
 	if ok {
-		if blob := c.(remote.Blob); blob.Check() == nil {
+		blob := c.(remote.Blob)
+		if err := blob.Check(); err == nil {
 			return &blobRef{blob, done}, nil
 		}
 		// invalid blob. discard this.
 		done()
 		r.blobCacheMu.Lock()
-		r.blobCache.Remove(name)
+		r.blobCache.Remove(cacheKey)
 		r.blobCacheMu.Unlock()
 	}
 
@@ -355,7 +400,7 @@ func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, 
 		return nil, errors.Wrap(err, "failed to resolve the source")
 	}
 	r.blobCacheMu.Lock()
-	cachedB, done, added := r.blobCache.Add(name, b)
+	cachedB, done, added := r.blobCache.Add(cacheKey, b)
 	r.blobCacheMu.Unlock()
 	if !added {
 		b.Close() // blob already exists in the cache. discard this.
