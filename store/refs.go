@@ -33,8 +33,8 @@ import (
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/util/cacheutil"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
-	"github.com/containerd/stargz-snapshotter/util/lrucache"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -54,7 +54,7 @@ func newRefPool(ctx context.Context, root string, hosts source.RegistryHosts) (*
 		hosts:      hosts,
 		refcounter: make(map[string]*releaser),
 	}
-	p.cache = lrucache.New(refCacheEntry)
+	p.cache = cacheutil.NewLRUCache(refCacheEntry)
 	p.cache.OnEvicted = func(key string, value interface{}) {
 		refspec := value.(reference.Spec)
 		if err := os.RemoveAll(p.metadataDir(refspec)); err != nil {
@@ -71,7 +71,7 @@ type refPool struct {
 	hosts source.RegistryHosts
 
 	refcounter map[string]*releaser
-	cache      *lrucache.Cache
+	cache      *cacheutil.LRUCache
 	mu         sync.Mutex
 }
 

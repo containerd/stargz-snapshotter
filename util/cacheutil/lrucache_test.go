@@ -14,60 +14,57 @@
    limitations under the License.
 */
 
-package lrucache
+package cacheutil
 
 import (
 	"fmt"
 	"testing"
 )
 
-func TestAdd(t *testing.T) {
-	c := New(10)
+// TestLRUAdd tests Add API
+func TestLRUAdd(t *testing.T) {
+	c := NewLRUCache(10)
 
 	key, value := "key1", "abcd"
 	v, _, added := c.Add(key, value)
 	if !added {
-		t.Errorf("failed to add %q", key)
-		return
+		t.Fatalf("failed to add %q", key)
 	} else if v.(string) != value {
-		t.Errorf("returned different object for %q; want %q; got %q", key, value, v.(string))
-		return
+		t.Fatalf("returned different object for %q; want %q; got %q", key, value, v.(string))
 	}
 
 	key, newvalue := "key1", "dummy"
 	v, _, added = c.Add(key, newvalue)
 	if added || v.(string) != value {
-		t.Errorf("%q must be originally stored one; want %q; got %q (added:%v)",
+		t.Fatalf("%q must be originally stored one; want %q; got %q (added:%v)",
 			key, value, v.(string), added)
 	}
 }
 
-func TestGet(t *testing.T) {
-	c := New(10)
+// TestLRUGet tests Get API
+func TestLRUGet(t *testing.T) {
+	c := NewLRUCache(10)
 
 	key, value := "key1", "abcd"
 	v, _, added := c.Add(key, value)
 	if !added {
-		t.Errorf("failed to add %q", key)
-		return
+		t.Fatalf("failed to add %q", key)
 	} else if v.(string) != value {
-		t.Errorf("returned different object for %q; want %q; got %q", key, value, v.(string))
-		return
+		t.Fatalf("returned different object for %q; want %q; got %q", key, value, v.(string))
 	}
 
 	v, _, ok := c.Get(key)
 	if !ok {
-		t.Errorf("failed to get obj %q (%q)", key, value)
-		return
+		t.Fatalf("failed to get obj %q (%q)", key, value)
 	} else if v.(string) != value {
-		t.Errorf("unexpected object for %q; want %q; got %q", key, value, v.(string))
-		return
+		t.Fatalf("unexpected object for %q; want %q; got %q", key, value, v.(string))
 	}
 }
 
-func TestRemove(t *testing.T) {
+// TestLRURemoe tests Remove API
+func TestLRURemove(t *testing.T) {
 	var evicted []string
-	c := New(2)
+	c := NewLRUCache(2)
 	c.OnEvicted = func(key string, value interface{}) {
 		evicted = append(evicted, key)
 	}
@@ -77,30 +74,27 @@ func TestRemove(t *testing.T) {
 
 	c.Remove(key1)
 	if len(evicted) != 0 {
-		t.Errorf("no content must be evicted after remove")
-		return
+		t.Fatalf("no content must be evicted after remove")
 	}
 
 	done1()
 	if len(evicted) != 0 {
-		t.Errorf("no content must be evicted until all reference are discarded")
-		return
+		t.Fatalf("no content must be evicted until all reference are discarded")
 	}
 
 	done12()
 	if len(evicted) != 1 {
-		t.Errorf("content must be evicted")
-		return
+		t.Fatalf("content must be evicted")
 	}
 	if evicted[0] != key1 {
-		t.Errorf("1st content %q must be evicted but got %q", key1, evicted[0])
-		return
+		t.Fatalf("1st content %q must be evicted but got %q", key1, evicted[0])
 	}
 }
 
-func TestEviction(t *testing.T) {
+// TestLRUEviction tests that eviction occurs when the overflow happens.
+func TestLRUEviction(t *testing.T) {
 	var evicted []string
-	c := New(2)
+	c := NewLRUCache(2)
 	c.OnEvicted = func(key string, value interface{}) {
 		evicted = append(evicted, key)
 	}
@@ -111,42 +105,35 @@ func TestEviction(t *testing.T) {
 	_, done22, _ := c.Get(key2)
 
 	if len(evicted) != 0 {
-		t.Errorf("no content must be evicted after addition")
-		return
+		t.Fatalf("no content must be evicted after addition")
 	}
 	for i := 0; i < 2; i++ {
 		c.Add(fmt.Sprintf("key-add-%d", i), fmt.Sprintf("abcd-add-%d", i))
 	}
 	if len(evicted) != 0 {
-		t.Errorf("no content must be evicted after overflow")
-		return
+		t.Fatalf("no content must be evicted after overflow")
 	}
 
 	done1()
 	if len(evicted) != 1 {
-		t.Errorf("1 content must be evicted")
-		return
+		t.Fatalf("1 content must be evicted")
 	}
 	if evicted[0] != key1 {
-		t.Errorf("1st content %q must be evicted but got %q", key1, evicted[0])
-		return
+		t.Fatalf("1st content %q must be evicted but got %q", key1, evicted[0])
 	}
 
 	done2() // effective
 	done2() // ignored
 	done2() // ignored
 	if len(evicted) != 1 {
-		t.Errorf("only 1 content must be evicted")
-		return
+		t.Fatalf("only 1 content must be evicted")
 	}
 
 	done22()
 	if len(evicted) != 2 {
-		t.Errorf("2 contents must be evicted")
-		return
+		t.Fatalf("2 contents must be evicted")
 	}
 	if evicted[1] != key2 {
-		t.Errorf("2nd content %q must be evicted but got %q", key2, evicted[1])
-		return
+		t.Fatalf("2nd content %q must be evicted but got %q", key2, evicted[1])
 	}
 }
