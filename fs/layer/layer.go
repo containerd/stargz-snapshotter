@@ -297,11 +297,19 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	// will be stopped during the execution so this can avoid being disturbed for
 	// NW traffic by background tasks.
 	var (
+		isTimeout bool
+		isTimeoutMu sync.Mutex
 		// Use context during resolving, to make it cancellable
 		curR = readerAtFunc(func(p []byte, offset int64) (n int, err error) {
 			ctx, cancel := context.WithTimeout(ctx, r.resolveRequestTimeout)
 			defer cancel()
-			return blobR.ReadAt(p, offset, remote.WithContext(ctx))
+			n, err = blobR.ReadAt(p, offset, remote.WithContext(ctx))
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				isTimeoutMu.Lock()
+				isTimeout = true
+				isTimeoutMu.Unlock()
+			}
+			return n, err
 		})
 		curRMu sync.Mutex
 	)
@@ -315,8 +323,10 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	}), 0, blobR.Size())
 	vr, err := r.newReader(sr, desc, fsCache, esgzOpts...)
 	if err != nil {
-		cErr := ctx.Err()
-		if errors.Is(cErr, context.DeadlineExceeded) {
+		isTimeoutMu.Lock()
+		discardBlob := isTimeout
+		isTimeoutMu.Unlock()
+		if discardBlob {
 			r.blobCacheMu.Lock()
 			r.blobCache.Remove(name)
 			r.blobCacheMu.Unlock()
