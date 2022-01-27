@@ -46,7 +46,8 @@ const (
 	prepareSucceeded     = "true"
 	prepareFailed        = "false"
 
-	defaultMaxConcurrency = 2
+	defaultMaxConcurrency    = 2
+	defaultResolveTimeoutSec = 60
 )
 
 func NewLayerManager(ctx context.Context, root string, hosts source.RegistryHosts, metadataStore metadata.Store, cfg config.Config) (*LayerManager, error) {
@@ -71,6 +72,10 @@ func NewLayerManager(ctx context.Context, root string, hosts source.RegistryHost
 	if ns != nil {
 		metrics.Register(ns)
 	}
+	resolveTimeout := time.Duration(cfg.ResolveTimeoutSec) * time.Second
+	if resolveTimeout == 0 {
+		resolveTimeout = time.Duration(defaultResolveTimeoutSec) * time.Second
+	}
 	return &LayerManager{
 		refPool:               refPool,
 		hosts:                 hosts,
@@ -85,6 +90,7 @@ func NewLayerManager(ctx context.Context, root string, hosts source.RegistryHost
 		resolveLock:           new(namedmutex.NamedMutex),
 		layer:                 make(map[string]map[string]layer.Layer),
 		refcounter:            make(map[string]map[string]int),
+		resolveTimeout:        resolveTimeout,
 	}, nil
 }
 
@@ -102,6 +108,7 @@ type LayerManager struct {
 	disableVerification   bool
 	metricsController     *layermetrics.Controller
 	resolveLock           *namedmutex.NamedMutex
+	resolveTimeout        time.Duration
 
 	layer      map[string]map[string]layer.Layer
 	refcounter map[string]map[string]int
@@ -220,8 +227,8 @@ func (r *LayerManager) getLayer(ctx context.Context, refspec reference.Spec, dgs
 	case err := <-errChan:
 		log.G(ctx).WithError(err).Debug("failed to resolve layer")
 		return nil, errors.Wrapf(err, "failed to resolve layer")
-	case <-time.After(30 * time.Second):
-		log.G(ctx).Debug("failed to resolve layer (timeout)")
+	case <-time.After(r.resolveTimeout):
+		log.G(ctx).WithField("timeout(sec)", r.resolveTimeout.Seconds()).Debug("failed to resolve layer (timeout)")
 		return nil, fmt.Errorf("failed to resolve layer (timeout)")
 	}
 

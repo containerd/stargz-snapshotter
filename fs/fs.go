@@ -68,9 +68,10 @@ import (
 )
 
 const (
-	defaultFuseTimeout    = time.Second
-	defaultMaxConcurrency = 2
-	fusermountBin         = "fusermount"
+	defaultFuseTimeout       = time.Second
+	defaultResolveTimeoutSec = 60
+	defaultMaxConcurrency    = 2
+	fusermountBin            = "fusermount"
 )
 
 type Option func(*options)
@@ -122,6 +123,11 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		entryTimeout = defaultFuseTimeout
 	}
 
+	resolveTimeout := time.Duration(cfg.ResolveTimeoutSec) * time.Second
+	if resolveTimeout == 0 {
+		resolveTimeout = time.Duration(defaultResolveTimeoutSec) * time.Second
+	}
+
 	metadataStore := fsOpts.metadataStore
 	if metadataStore == nil {
 		metadataStore = memorymetadata.NewReader
@@ -163,6 +169,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		metricsController:     c,
 		attrTimeout:           attrTimeout,
 		entryTimeout:          entryTimeout,
+		resolveTimeout:        resolveTimeout,
 	}, nil
 }
 
@@ -181,6 +188,7 @@ type filesystem struct {
 	metricsController     *layermetrics.Controller
 	attrTimeout           time.Duration
 	entryTimeout          time.Duration
+	resolveTimeout        time.Duration
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) (retErr error) {
@@ -255,8 +263,8 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	case err := <-errChan:
 		log.G(ctx).WithError(err).Debug("failed to resolve layer")
 		return errors.Wrapf(err, "failed to resolve layer")
-	case <-time.After(30 * time.Second):
-		log.G(ctx).Debug("failed to resolve layer (timeout)")
+	case <-time.After(fs.resolveTimeout):
+		log.G(ctx).WithField("timeout(sec)", fs.resolveTimeout.Seconds()).Debug("failed to resolve layer (timeout)")
 		return fmt.Errorf("failed to resolve layer (timeout)")
 	}
 	defer func() {

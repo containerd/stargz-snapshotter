@@ -42,6 +42,8 @@ type Config struct {
 	ResolveResultEntry       int   `toml:"resolve_result_entry"` // deprecated
 	PrefetchSize             int64 `toml:"prefetch_size"`
 	PrefetchTimeoutSec       int64 `toml:"prefetch_timeout_sec"`
+	ResolveTimeoutSec        int64 `toml:"resolve_timeout_sec"`
+	ResolveRequestTimeoutSec int64 `toml:"resolve_request_timeout_sec"`
 	NoPrefetch               bool  `toml:"noprefetch"`
 	NoBackgroundFetch        bool  `toml:"no_background_fetch"`
 	Debug                    bool  `toml:"debug"`
