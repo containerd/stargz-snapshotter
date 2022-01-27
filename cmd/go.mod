@@ -3,8 +3,7 @@ module github.com/containerd/stargz-snapshotter/cmd
 go 1.16
 
 require (
-	github.com/containerd/containerd v1.6.0-rc.0
-	github.com/containerd/containerd/api v1.6.0-beta.3.0.20220112172229-6e211a774ff0
+	github.com/containerd/containerd v1.6.0-rc.1
 	github.com/containerd/go-cni v1.1.1
 	github.com/containerd/stargz-snapshotter v0.10.1
 	github.com/containerd/stargz-snapshotter/estargz v0.10.1
