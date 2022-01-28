@@ -17,6 +17,8 @@
 package plugin
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -32,7 +34,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
 	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
-	"github.com/pkg/errors"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
@@ -117,16 +118,16 @@ func init() {
 				runtime.RegisterImageServiceServer(rpc, criServer)
 				// Prepare the directory for the socket
 				if err := os.MkdirAll(filepath.Dir(addr), 0700); err != nil {
-					return nil, errors.Wrapf(err, "failed to create directory %q", filepath.Dir(addr))
+					return nil, fmt.Errorf("failed to create directory %q: %w", filepath.Dir(addr), err)
 				}
 				// Try to remove the socket file to avoid EADDRINUSE
 				if err := os.RemoveAll(addr); err != nil {
-					return nil, errors.Wrapf(err, "failed to remove %q", addr)
+					return nil, fmt.Errorf("failed to remove %q: %w", addr, err)
 				}
 				// Listen and serve
 				l, err := net.Listen("unix", addr)
 				if err != nil {
-					return nil, errors.Wrapf(err, "error on listen socket %q", addr)
+					return nil, fmt.Errorf("error on listen socket %q: %w", addr, err)
 				}
 				go func() {
 					if err := rpc.Serve(l); err != nil {

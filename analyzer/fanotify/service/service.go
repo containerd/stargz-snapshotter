@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/conn"
-	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
 
@@ -36,12 +35,12 @@ func Serve(target string, r io.Reader, w io.Writer) error {
 
 	fd, err := unix.FanotifyInit(unix.FAN_CLASS_NOTIF, unix.O_RDONLY)
 	if err != nil {
-		return errors.Wrapf(err, "fanotify_init")
+		return fmt.Errorf("fanotify_init: %w", err)
 	}
 
 	// This blocks until the client tells us to start monitoring the target mountpoint.
 	if err := sConn.WaitStart(); err != nil {
-		return errors.Wrapf(err, "waiting for start inst")
+		return fmt.Errorf("waiting for start inst: %w", err)
 	}
 
 	// Start monitoring the target mountpoint.
@@ -51,12 +50,12 @@ func Serve(target string, r io.Reader, w io.Writer) error {
 		unix.AT_FDCWD,
 		target,
 	); err != nil {
-		return errors.Wrapf(err, "fanotify_mark")
+		return fmt.Errorf("fanotify_mark: %w", err)
 	}
 
 	// Notify "started" state to the client.
 	if err := sConn.SendStarted(); err != nil {
-		return errors.Wrapf(err, "failed to send started message")
+		return fmt.Errorf("failed to send started message: %w", err)
 	}
 
 	nr := bufio.NewReader(os.NewFile(uintptr(fd), ""))
@@ -66,7 +65,7 @@ func Serve(target string, r io.Reader, w io.Writer) error {
 			if err == io.EOF {
 				break
 			}
-			return errors.Wrapf(err, "read fanotify fd")
+			return fmt.Errorf("read fanotify fd: %w", err)
 		}
 		if event.Vers != unix.FANOTIFY_METADATA_VERSION {
 			return fmt.Errorf("Fanotify version mismatch %d(got) != %d(want)",
@@ -85,10 +84,10 @@ func Serve(target string, r io.Reader, w io.Writer) error {
 		// descriptor and let the client resolve the path of this file using /proc of
 		// this process.
 		if err := sConn.SendFd(int(event.Fd)); err != nil {
-			return errors.Wrapf(err, "failed to send fd %d to client", fd)
+			return fmt.Errorf("failed to send fd %d to client: %w", fd, err)
 		}
 		if err := unix.Close(int(event.Fd)); err != nil {
-			return errors.Wrapf(err, "Close(fd)")
+			return fmt.Errorf("Close(fd): %w", err)
 		}
 
 		continue

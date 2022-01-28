@@ -38,7 +38,6 @@ import (
 	"github.com/docker/go-metrics"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -61,7 +60,7 @@ func NewLayerManager(ctx context.Context, root string, hosts source.RegistryHost
 	tm := task.NewBackgroundTaskManager(maxConcurrency, 5*time.Second)
 	r, err := layer.NewResolver(root, tm, cfg, nil, metadataStore) // TODO: support IPFS
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to setup resolver")
+		return nil, fmt.Errorf("failed to setup resolver: %w", err)
 	}
 	var ns *metrics.Namespace
 	if !cfg.NoPrometheus {
@@ -140,7 +139,7 @@ func (r *LayerManager) getCachedLayer(refspec reference.Spec, dgst digest.Digest
 func (r *LayerManager) getLayerInfo(ctx context.Context, refspec reference.Spec, dgst digest.Digest) (Layer, error) {
 	manifest, config, err := r.refPool.loadRef(ctx, refspec)
 	if err != nil {
-		return Layer{}, errors.Wrapf(err, "failed to get manifest and config")
+		return Layer{}, fmt.Errorf("failed to get manifest and config: %w", err)
 	}
 	return genLayerInfo(ctx, dgst, manifest, config)
 }
@@ -159,7 +158,7 @@ func (r *LayerManager) getLayer(ctx context.Context, refspec reference.Spec, dgs
 	)
 	manifest, _, err := r.refPool.loadRef(ctx, refspec)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get manifest and config")
+		return nil, fmt.Errorf("failed to get manifest and config: %w", err)
 	}
 	var target ocispec.Descriptor
 	var preResolve []ocispec.Descriptor
@@ -199,8 +198,7 @@ func (r *LayerManager) getLayer(ctx context.Context, refspec reference.Spec, dgs
 				return // This is not target layer
 			}
 			if err != nil {
-				errChan <- errors.Wrapf(err, "failed to resolve layer %q / %q",
-					refspec, l.Digest)
+				errChan <- fmt.Errorf("failed to resolve layer %q / %q: %w", refspec, l.Digest, err)
 				return
 			}
 			// Log this as preparation success
@@ -219,7 +217,7 @@ func (r *LayerManager) getLayer(ctx context.Context, refspec reference.Spec, dgs
 	case l = <-resultChan:
 	case err := <-errChan:
 		log.G(ctx).WithError(err).Debug("failed to resolve layer")
-		return nil, errors.Wrapf(err, "failed to resolve layer")
+		return nil, fmt.Errorf("failed to resolve layer: %w", err)
 	case <-time.After(30 * time.Second):
 		log.G(ctx).Debug("failed to resolve layer (timeout)")
 		return nil, fmt.Errorf("failed to resolve layer (timeout)")
@@ -272,11 +270,11 @@ func (r *LayerManager) resolveLayer(ctx context.Context, refspec reference.Spec,
 		dgst, err := digest.Parse(tocDigest)
 		if err != nil {
 			log.G(ctx).WithError(err).Debugf("failed to parse passed TOC digest %q", dgst)
-			return nil, errors.Wrapf(err, "invalid TOC digest: %v", tocDigest)
+			return nil, fmt.Errorf("invalid TOC digest: %v: %w", tocDigest, err)
 		}
 		if err := l.Verify(dgst); err != nil {
 			log.G(ctx).WithError(err).Debugf("invalid layer")
-			return nil, errors.Wrapf(err, "invalid stargz layer")
+			return nil, fmt.Errorf("invalid stargz layer: %w", err)
 		}
 		log.G(ctx).Debugf("verified")
 	} else {

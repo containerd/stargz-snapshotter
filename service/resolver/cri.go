@@ -27,6 +27,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -41,7 +42,6 @@ import (
 	dconfig "github.com/containerd/containerd/remotes/docker/config"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	rhttp "github.com/hashicorp/go-retryablehttp"
-	"github.com/pkg/errors"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
 
@@ -128,12 +128,12 @@ func RegistryHostsFromCRIConfig(ctx context.Context, config Registry, credsFuncs
 
 		endpoints, err := registryEndpoints(config, host)
 		if err != nil {
-			return nil, errors.Wrap(err, "get registry endpoints")
+			return nil, fmt.Errorf("get registry endpoints: %w", err)
 		}
 		for _, e := range endpoints {
 			u, err := url.Parse(e)
 			if err != nil {
-				return nil, errors.Wrapf(err, "parse registry endpoint %q from mirrors", e)
+				return nil, fmt.Errorf("parse registry endpoint %q from mirrors: %w", e, err)
 			}
 
 			var (
@@ -147,7 +147,7 @@ func RegistryHostsFromCRIConfig(ctx context.Context, config Registry, credsFuncs
 				if tr, ok := rclient.HTTPClient.Transport.(*http.Transport); ok {
 					tr.TLSClientConfig, err = getTLSConfig(*config.TLS)
 					if err != nil {
-						return nil, errors.Wrapf(err, "get TLSConfig for registry %q", e)
+						return nil, fmt.Errorf("get TLSConfig for registry %q: %w", e, err)
 					}
 				} else {
 					return nil, errors.New("TLS config cannot be applied; Client.Transport is not *http.Transport")
@@ -216,15 +216,15 @@ func getTLSConfig(registryTLSConfig TLSConfig) (*tls.Config, error) {
 		err       error
 	)
 	if registryTLSConfig.CertFile != "" && registryTLSConfig.KeyFile == "" {
-		return nil, errors.Errorf("cert file %q was specified, but no corresponding key file was specified", registryTLSConfig.CertFile)
+		return nil, fmt.Errorf("cert file %q was specified, but no corresponding key file was specified", registryTLSConfig.CertFile)
 	}
 	if registryTLSConfig.CertFile == "" && registryTLSConfig.KeyFile != "" {
-		return nil, errors.Errorf("key file %q was specified, but no corresponding cert file was specified", registryTLSConfig.KeyFile)
+		return nil, fmt.Errorf("key file %q was specified, but no corresponding cert file was specified", registryTLSConfig.KeyFile)
 	}
 	if registryTLSConfig.CertFile != "" && registryTLSConfig.KeyFile != "" {
 		cert, err = tls.LoadX509KeyPair(registryTLSConfig.CertFile, registryTLSConfig.KeyFile)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to load cert file")
+			return nil, fmt.Errorf("failed to load cert file: %w", err)
 		}
 		if len(cert.Certificate) != 0 {
 			tlsConfig.Certificates = []tls.Certificate{cert}
@@ -235,11 +235,11 @@ func getTLSConfig(registryTLSConfig TLSConfig) (*tls.Config, error) {
 	if registryTLSConfig.CAFile != "" {
 		caCertPool, err := x509.SystemCertPool()
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to get system cert pool")
+			return nil, fmt.Errorf("failed to get system cert pool: %w", err)
 		}
 		caCert, err := ioutil.ReadFile(registryTLSConfig.CAFile)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to load CA file")
+			return nil, fmt.Errorf("failed to load CA file: %w", err)
 		}
 		caCertPool.AppendCertsFromPEM(caCert)
 		tlsConfig.RootCAs = caCertPool
@@ -292,19 +292,19 @@ func registryEndpoints(config Registry, host string) ([]string, error) {
 	}
 	defaultHost, err := docker.DefaultHost(host)
 	if err != nil {
-		return nil, errors.Wrap(err, "get default host")
+		return nil, fmt.Errorf("get default host: %w", err)
 	}
 	for i := range endpoints {
 		en, err := addDefaultScheme(endpoints[i])
 		if err != nil {
-			return nil, errors.Wrap(err, "parse endpoint url")
+			return nil, fmt.Errorf("parse endpoint url: %w", err)
 		}
 		endpoints[i] = en
 	}
 	for _, e := range endpoints {
 		u, err := url.Parse(e)
 		if err != nil {
-			return nil, errors.Wrap(err, "parse endpoint url")
+			return nil, fmt.Errorf("parse endpoint url: %w", err)
 		}
 		if u.Host == host {
 			// Do not add default if the endpoint already exists.
@@ -325,7 +325,7 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 		// Do not return the auth info when server address doesn't match.
 		u, err := url.Parse(auth.ServerAddress)
 		if err != nil {
-			return "", "", errors.Wrap(err, "parse server address")
+			return "", "", fmt.Errorf("parse server address: %w", err)
 		}
 		if host != u.Host {
 			return "", "", nil
@@ -346,7 +346,7 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 		}
 		fields := strings.SplitN(string(decoded), ":", 2)
 		if len(fields) != 2 {
-			return "", "", errors.Errorf("invalid decoded auth: %q", decoded)
+			return "", "", fmt.Errorf("invalid decoded auth: %q", decoded)
 		}
 		user, passwd := fields[0], fields[1]
 		return user, strings.Trim(passwd, "\x00"), nil

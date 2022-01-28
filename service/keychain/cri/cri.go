@@ -18,6 +18,8 @@ package cri
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -25,7 +27,6 @@ import (
 	"github.com/containerd/containerd/reference"
 	distribution "github.com/containerd/containerd/reference/docker"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
-	"github.com/pkg/errors"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 )
 
@@ -138,7 +139,7 @@ func (in *instrumentedService) ImageFsInfo(ctx context.Context, r *runtime.Image
 func parseReference(ref string) (reference.Spec, error) {
 	namedRef, err := distribution.ParseDockerRef(ref)
 	if err != nil {
-		return reference.Spec{}, errors.Wrapf(err, "failed to parse image reference %q", ref)
+		return reference.Spec{}, fmt.Errorf("failed to parse image reference %q: %w", ref, err)
 	}
 	return reference.Parse(namedRef.String())
 }

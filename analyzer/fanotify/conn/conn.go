@@ -24,8 +24,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/pkg/errors"
 )
 
 const (
@@ -74,11 +72,11 @@ func (nc *Client) GetPath() (string, error) {
 	}
 	fd, err := strconv.ParseInt(mes[len(mesFdPrefix):], 10, 32)
 	if err != nil {
-		return "", errors.Wrapf(err, "invalid fd %q", mes)
+		return "", fmt.Errorf("invalid fd %q: %w", mes, err)
 	}
 	path, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", nc.servicePid, fd))
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to get link from fd %q", mes)
+		return "", fmt.Errorf("failed to get link from fd %q: %w", mes, err)
 	}
 	return path, writeMessage(nc.w, mesAck)
 }

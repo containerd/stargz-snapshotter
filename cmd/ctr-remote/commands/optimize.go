@@ -20,6 +20,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -39,7 +40,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 )
@@ -108,7 +108,7 @@ var OptimizeCommand = cli.Command{
 				for _, ps := range pss {
 					p, err := platforms.Parse(ps)
 					if err != nil {
-						return errors.Wrapf(err, "invalid platform %q", ps)
+						return fmt.Errorf("invalid platform %q: %w", ps, err)
 					}
 					all = append(all, p)
 				}
@@ -143,7 +143,7 @@ var OptimizeCommand = cli.Command{
 		}
 		if recordOutFile := clicontext.String("record-out"); recordOutFile != "" {
 			if err := writeContentFile(ctx, client, recordOut, recordOutFile); err != nil {
-				return errors.Wrapf(err, "failed output record file")
+				return fmt.Errorf("failed output record file: %w", err)
 			}
 		}
 		var f converter.ConvertFunc
@@ -194,7 +194,7 @@ func analyze(ctx context.Context, clicontext *cli.Context, client *containerd.Cl
 			for _, ps := range pss {
 				p, err := platforms.Parse(ps)
 				if err != nil {
-					return "", nil, nil, errors.Wrapf(err, "invalid platform %q", ps)
+					return "", nil, nil, fmt.Errorf("invalid platform %q: %w", ps, err)
 				}
 				if platforms.DefaultStrict().Match(p) {
 					containsDefault = true

@@ -29,7 +29,6 @@ import (
 	iface "github.com/ipfs/interface-go-ipfs-core"
 	ipath "github.com/ipfs/interface-go-ipfs-core/path"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 )
 
 type resolver struct {
@@ -96,7 +95,7 @@ func (f *fetcher) Fetch(ctx context.Context, desc ocispec.Descriptor) (io.ReadCl
 	}
 	n, err := f.r.api.Unixfs().Get(ctx, p)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get file %q", p.String())
+		return nil, fmt.Errorf("failed to get file %q: %w", p.String(), err)
 	}
 	return files.ToFile(n), nil
 }
