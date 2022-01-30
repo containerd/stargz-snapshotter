@@ -18,6 +18,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 )
 
@@ -75,7 +75,7 @@ var GetTOCDigestCommand = cli.Command{
 		}
 		footer := make([]byte, footerSize)
 		if _, err := ra.ReadAt(footer, ra.Size()-int64(footerSize)); err != nil {
-			return errors.Wrapf(err, "error reading footer")
+			return fmt.Errorf("error reading footer: %w", err)
 		}
 
 		var decompressor estargz.Decompressor
@@ -86,20 +86,20 @@ var GetTOCDigestCommand = cli.Command{
 
 		_, tocOff, tocSize, err := decompressor.ParseFooter(footer)
 		if err != nil {
-			return errors.Wrapf(err, "error parsing footer")
+			return fmt.Errorf("error parsing footer: %w", err)
 		}
 		if tocSize <= 0 {
 			tocSize = ra.Size() - tocOff - int64(footerSize)
 		}
 		toc, tocDgst, err := decompressor.ParseTOC(io.NewSectionReader(ra, tocOff, tocSize))
 		if err != nil {
-			return errors.Wrapf(err, "error parsing TOC")
+			return fmt.Errorf("error parsing TOC: %w", err)
 		}
 
 		if clicontext.Bool("dump-toc") {
 			tocJSON, err := json.MarshalIndent(toc, "", "\t")
 			if err != nil {
-				return errors.Wrapf(err, "failed to marshal toc")
+				return fmt.Errorf("failed to marshal toc: %w", err)
 			}
 			fmt.Println(string(tocJSON))
 			return nil

@@ -27,7 +27,6 @@ import (
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/platforms"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 )
 
 func ManifestDesc(ctx context.Context, provider content.Provider, image ocispec.Descriptor, platform platforms.MatchComparer) (ocispec.Descriptor, error) {
@@ -103,14 +102,14 @@ func ManifestDesc(ctx context.Context, provider content.Provider, image ocispec.
 			}
 			return descs, nil
 		}
-		return nil, errors.Wrapf(errdefs.ErrNotFound, "unexpected media type %v for %v", desc.MediaType, desc.Digest)
+		return nil, fmt.Errorf("unexpected media type %v for %v: %w", desc.MediaType, desc.Digest, errdefs.ErrNotFound)
 	}), image); err != nil {
 		return ocispec.Descriptor{}, err
 	}
 	if len(m) == 0 {
-		err := errors.Wrapf(errdefs.ErrNotFound, "manifest %v", image.Digest)
+		err := fmt.Errorf("manifest %v: %w", image.Digest, errdefs.ErrNotFound)
 		if wasIndex {
-			err = errors.Wrapf(errdefs.ErrNotFound, "no match for platform in manifest %v", image.Digest)
+			err = fmt.Errorf("no match for platform in manifest %v: %w", image.Digest, errdefs.ErrNotFound)
 		}
 		return ocispec.Descriptor{}, err
 	}

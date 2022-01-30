@@ -17,9 +17,8 @@
 package errorutil
 
 import (
+	"errors"
 	"testing"
-
-	"github.com/pkg/errors"
 )
 
 func TestNoError(t *testing.T) {

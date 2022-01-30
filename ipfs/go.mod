@@ -9,7 +9,6 @@ require (
 	github.com/ipfs/interface-go-ipfs-core v0.5.2
 	github.com/libp2p/go-libp2p-record v0.1.1 // indirect
 	github.com/opencontainers/image-spec v1.0.2-0.20211117181255-693428a734f5
-	github.com/pkg/errors v0.9.1
 )
 
 // Temporary fork for avoiding importing patent-protected code: https://github.com/hashicorp/golang-lru/issues/73

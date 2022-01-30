@@ -37,7 +37,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/rs/xid"
 	"golang.org/x/sync/errgroup"
 )
@@ -88,14 +87,14 @@ func imageRecorderFromManifest(ctx context.Context, cs content.Store, manifestDe
 		log.G(ctx).Infof("analyzing blob %q", desc.Digest)
 		readerAt, err := cs.ReaderAt(ctx, desc)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get reader blob %v", desc.Digest)
+			return nil, fmt.Errorf("failed to get reader blob %v: %w", desc.Digest, err)
 		}
 		defer readerAt.Close()
 		r := io.Reader(io.NewSectionReader(readerAt, 0, desc.Size))
 		if !uncompress.IsUncompressedType(desc.MediaType) {
 			r, err = compression.DecompressStream(r)
 			if err != nil {
-				return nil, errors.Wrapf(err, "cannot decompress layer %v", desc.Digest)
+				return nil, fmt.Errorf("cannot decompress layer %v: %w", desc.Digest, err)
 			}
 		}
 		eg.Go(func() error {
@@ -120,7 +119,7 @@ func imageRecorderFromManifest(ctx context.Context, cs content.Store, manifestDe
 	recordW, err := content.OpenWriter(ctx, cs,
 		content.WithRef(fmt.Sprintf("recorder-%v", xid.New().String())))
 	if err != nil {
-		return nil, errors.Wrapf(err, "faeild to open writer for recorder")
+		return nil, fmt.Errorf("failed to open writer for recorder: %w", err)
 	}
 	return &ImageRecorder{
 		r:              recorder.New(recordW),

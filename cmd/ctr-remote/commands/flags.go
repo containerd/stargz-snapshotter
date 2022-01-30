@@ -39,7 +39,6 @@ import (
 	"github.com/hashicorp/go-multierror"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/pkg/errors"
 	"github.com/rs/xid"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -142,19 +141,19 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 		defer func() {
 			if rErr != nil {
 				if err := done(); err != nil {
-					rErr = errors.Wrap(rErr, "failed to cleanup")
+					rErr = fmt.Errorf("failed to cleanup: %w", rErr)
 				}
 			}
 		}()
 
 		entrypointOpt, err := withEntrypointArgs(clicontext, image)
 		if err != nil {
-			rErr = errors.Wrapf(err, "failed to parse entrypoint and arg flags")
+			rErr = fmt.Errorf("failed to parse entrypoint and arg flags: %w", err)
 			return
 		}
 		resolverOpt, cleanup, err := withResolveConfig(clicontext)
 		if err != nil {
-			rErr = errors.Wrapf(err, "failed to parse DNS-related flags")
+			rErr = fmt.Errorf("failed to parse DNS-related flags: %w", err)
 			return
 		}
 		cleanups = append(cleanups, cleanup)
@@ -162,7 +161,7 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 		for _, mount := range clicontext.StringSlice("mount") {
 			m, err := parseMountFlag(mount)
 			if err != nil {
-				rErr = errors.Wrapf(err, "failed to parse mount flag %q", mount)
+				rErr = fmt.Errorf("failed to parse mount flag %q: %w", mount, err)
 				return
 			}
 			mounts = append(mounts, m)
@@ -197,7 +196,7 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 			var nOpt oci.SpecOpts
 			nOpt, cleanup, err = withCNI(clicontext)
 			if err != nil {
-				rErr = errors.Wrapf(err, "failed to parse CNI-related flags")
+				rErr = fmt.Errorf("failed to parse CNI-related flags: %w", err)
 				return
 			}
 			cleanups = append(cleanups, cleanup)
@@ -226,13 +225,13 @@ func withEntrypointArgs(clicontext *cli.Context, image containerd.Image) (oci.Sp
 	var eFlag []string
 	if eStr := clicontext.String("entrypoint"); eStr != "" {
 		if err := json.Unmarshal([]byte(eStr), &eFlag); err != nil {
-			return nil, errors.Wrapf(err, "invalid option \"entrypoint\"")
+			return nil, fmt.Errorf("invalid option \"entrypoint\": %w", err)
 		}
 	}
 	var aFlag []string
 	if aStr := clicontext.String("args"); aStr != "" {
 		if err := json.Unmarshal([]byte(aStr), &aFlag); err != nil {
-			return nil, errors.Wrapf(err, "invalid option \"args\"")
+			return nil, fmt.Errorf("invalid option \"args\": %w", err)
 		}
 	}
 	return func(ctx gocontext.Context, client oci.Client, container *containers.Container, s *runtimespec.Spec) error {
@@ -278,7 +277,7 @@ func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, 
 	defer func() {
 		if rErr != nil {
 			if err := done(); err != nil {
-				rErr = errors.Wrap(rErr, "failed to cleanup")
+				rErr = fmt.Errorf("failed to cleanup: %w", rErr)
 			}
 		}
 	}()
@@ -286,7 +285,7 @@ func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, 
 	// Create a new network namespace for configuring it with CNI plugins
 	ns, err := netns.NewNetNS(netnsMountDir)
 	if err != nil {
-		rErr = errors.Wrapf(err, "failed to prepare netns")
+		rErr = fmt.Errorf("failed to prepare netns: %w", err)
 		return
 	}
 	cleanups = append(cleanups, ns.Remove)
@@ -304,13 +303,13 @@ func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, 
 	cniopts = append(cniopts, gocni.WithDefaultConf)
 	network, err := gocni.New(cniopts...)
 	if err != nil {
-		rErr = errors.Wrap(err, "failed to prepare CNI plugins")
+		rErr = fmt.Errorf("failed to prepare CNI plugins: %w", err)
 		return
 	}
 	id := xid.New().String()
 	ctx := gocontext.Background()
 	if _, err := network.Setup(ctx, id, ns.GetPath()); err != nil {
-		rErr = errors.Wrap(err, "failed to setup netns with CNI plugins")
+		rErr = fmt.Errorf("failed to setup netns with CNI plugins: %w", err)
 		return
 	}
 	cleanups = append(cleanups, func() error {
@@ -328,7 +327,7 @@ func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup f
 	defer func() {
 		if rErr != nil {
 			if err := cleanup(); err != nil {
-				rErr = errors.Wrap(rErr, "failed to cleanup")
+				rErr = fmt.Errorf("failed to cleanup: %w", rErr)
 			}
 		}
 	}()
@@ -351,7 +350,7 @@ func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup f
 	)
 	for _, n := range nameservers {
 		if _, err := fmt.Fprintf(buf, "nameserver %s\n", n); err != nil {
-			rErr = errors.Wrap(err, "failed to prepare nameserver of /etc/resolv.conf")
+			rErr = fmt.Errorf("failed to prepare nameserver of /etc/resolv.conf: %w", err)
 			return
 		}
 	}
@@ -359,19 +358,19 @@ func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup f
 	if len(searches) > 0 {
 		_, err := fmt.Fprintf(buf, "search %s\n", strings.Join(searches, " "))
 		if err != nil {
-			rErr = errors.Wrap(err, "failed to prepare search contents of /etc/resolv.conf")
+			rErr = fmt.Errorf("failed to prepare search contents of /etc/resolv.conf: %w", err)
 			return
 		}
 	}
 	if len(dnsopts) > 0 {
 		_, err := fmt.Fprintf(buf, "options %s\n", strings.Join(dnsopts, " "))
 		if err != nil {
-			rErr = errors.Wrap(err, "failed to prepare options contents of /etc/resolv.conf")
+			rErr = fmt.Errorf("failed to prepare options contents of /etc/resolv.conf: %w", err)
 			return
 		}
 	}
 	if err := ioutil.WriteFile(etcResolvConfPath, buf.Bytes(), 0644); err != nil {
-		rErr = errors.Wrap(err, "failed to write contents to /etc/resolv.conf")
+		rErr = fmt.Errorf("failed to write contents to /etc/resolv.conf: %w", err)
 		return
 	}
 	buf.Reset() // Reusing for /etc/hosts
@@ -389,7 +388,7 @@ func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup f
 		{"ip6-allrouters", "ff02::2"},
 	} {
 		if _, err := fmt.Fprintf(buf, "%s\t%s\n", h.ip, h.host); err != nil {
-			rErr = errors.Wrap(err, "failed to write default hosts to /etc/hosts")
+			rErr = fmt.Errorf("failed to write default hosts to /etc/hosts: %w", err)
 			return
 		}
 	}
@@ -401,12 +400,12 @@ func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup f
 		}
 		// TODO: Validate them
 		if _, err := fmt.Fprintf(buf, "%s\t%s\n", parts[1], parts[0]); err != nil {
-			rErr = errors.Wrap(err, "failed to write extra hosts to /etc/hosts")
+			rErr = fmt.Errorf("failed to write extra hosts to /etc/hosts: %w", err)
 			return
 		}
 	}
 	if err := ioutil.WriteFile(etcHostsPath, buf.Bytes(), 0644); err != nil {
-		rErr = errors.Wrap(err, "failed to write contents to /etc/hosts")
+		rErr = fmt.Errorf("failed to write contents to /etc/hosts: %w", err)
 		return
 	}
 

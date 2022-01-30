@@ -23,7 +23,6 @@ import (
 	"sort"
 
 	"github.com/containerd/stargz-snapshotter/metadata"
-	"github.com/pkg/errors"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -226,7 +225,7 @@ func writeAttr(b *bolt.Bucket, attr *metadata.Attr) error {
 				}
 			}
 			if err := xbkt.Put([]byte(k), v); err != nil {
-				return errors.Wrapf(err, "failed to set xattr %q=%q", k, string(v))
+				return fmt.Errorf("failed to set xattr %q=%q: %w", k, string(v), err)
 			}
 		}
 	}
@@ -344,10 +343,10 @@ func writeMetadataEntry(md *bolt.Bucket, m *metadataEntry) error {
 			break
 		}
 		if err := md.Put(bucketKeyChildID, encodeID(firstChild.id)); err != nil {
-			return errors.Wrapf(err, "failed to put id of first child %q", firstChildName)
+			return fmt.Errorf("failed to put id of first child %q: %w", firstChildName, err)
 		}
 		if err := md.Put(bucketKeyChildName, []byte(firstChildName)); err != nil {
-			return errors.Wrapf(err, "failed to put name first child %q", firstChildName)
+			return fmt.Errorf("failed to put name first child %q: %w", firstChildName, err)
 		}
 		if len(m.children) > 1 {
 			var cbkt *bolt.Bucket
@@ -369,7 +368,7 @@ func writeMetadataEntry(md *bolt.Bucket, m *metadataEntry) error {
 					}
 				}
 				if err := cbkt.Put([]byte(c.base), encodeID(c.id)); err != nil {
-					return errors.Wrapf(err, "failed to add child ID %q", c.id)
+					return fmt.Errorf("failed to add child ID %q: %w", c.id, err)
 				}
 			}
 		}
@@ -377,7 +376,7 @@ func writeMetadataEntry(md *bolt.Bucket, m *metadataEntry) error {
 	if len(m.chunks) > 0 {
 		first := m.chunks[0]
 		if err := md.Put(bucketKeyChunk, encodeChunkEntry(first)); err != nil {
-			return errors.Wrapf(err, "failed to set chunk %q", first.offset)
+			return fmt.Errorf("failed to set chunk %q: %w", first.offset, err)
 		}
 		var cbkt *bolt.Bucket
 		for _, e := range m.chunks[1:] {
@@ -405,7 +404,7 @@ func writeMetadataEntry(md *bolt.Bucket, m *metadataEntry) error {
 	}
 	if m.nextOffset > 0 {
 		if err := putInt(md, bucketKeyNextOffset, m.nextOffset); err != nil {
-			return errors.Wrapf(err, "failed to set next offset value %d", m.nextOffset)
+			return fmt.Errorf("failed to set next offset value %d: %w", m.nextOffset, err)
 		}
 	}
 	return nil

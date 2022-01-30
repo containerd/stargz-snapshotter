@@ -44,7 +44,6 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/pkg/errors"
 	"github.com/rs/xid"
 )
 
@@ -99,7 +98,7 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 	// Spawn a fanotifier process in a new mount namespace and setup recorder.
 	fanotifier, err := fanotify.SpawnFanotifier("/proc/self/exe")
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to spawn fanotifier")
+		return "", fmt.Errorf("failed to spawn fanotifier: %w", err)
 	}
 	defer func() {
 		if err := fanotifier.Close(); err != nil {
@@ -195,7 +194,7 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 	}
 	defer rc.Close()
 	if err := fanotifier.Start(); err != nil {
-		return "", errors.Wrapf(err, "failed to start fanotifier")
+		return "", fmt.Errorf("failed to start fanotifier: %w", err)
 	}
 	var fanotifierClosed bool
 	var fanotifierClosedMu sync.Mutex
@@ -293,7 +292,7 @@ func mountImage(ctx context.Context, ss snapshots.Snapshotter, image containerd.
 		if err := ss.Remove(ctx, mountpoint); err != nil && !errdefs.IsNotFound(err) {
 			log.G(ctx).WithError(err).Warnf("failed to cleanup snapshot after mount error")
 		}
-		return nil, errors.Wrapf(err, "failed to mount rootfs at %q", mountpoint)
+		return nil, fmt.Errorf("failed to mount rootfs at %q: %w", mountpoint, err)
 	}
 	return func() {
 		if err := mount.UnmountAll(mountpoint, 0); err != nil {
@@ -352,7 +351,7 @@ func killTask(ctx context.Context, container containerd.Container, task containe
 		return containerd.ExitStatus{}, err
 	}
 	if err := task.Kill(ctx, sig, containerd.WithKillAll); err != nil && !errdefs.IsNotFound(err) {
-		return containerd.ExitStatus{}, errors.Wrapf(err, "forward SIGKILL")
+		return containerd.ExitStatus{}, fmt.Errorf("forward SIGKILL: %w", err)
 	}
 	select {
 	case status := <-statusC:

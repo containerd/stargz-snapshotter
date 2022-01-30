@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/containerd/containerd/cmd/ctr/commands"
@@ -26,7 +27,6 @@ import (
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	httpapi "github.com/ipfs/go-ipfs-http-client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 )
@@ -67,7 +67,7 @@ var IPFSPushCommand = cli.Command{
 				for _, ps := range pss {
 					p, err := platforms.Parse(ps)
 					if err != nil {
-						return errors.Wrapf(err, "invalid platform %q", ps)
+						return fmt.Errorf("invalid platform %q: %w", ps, err)
 					}
 					all = append(all, p)
 				}

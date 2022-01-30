@@ -34,7 +34,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -82,7 +81,7 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 				return nil, err
 			}
 			if uncompressedDesc == nil {
-				return nil, errors.Errorf("unexpectedly got the same blob after compression (%s, %q)", desc.Digest, desc.MediaType)
+				return nil, fmt.Errorf("unexpectedly got the same blob after compression (%s, %q)", desc.Digest, desc.MediaType)
 			}
 			defer func() {
 				if err := cs.Delete(ctx, uncompressedDesc.Digest); err != nil {
