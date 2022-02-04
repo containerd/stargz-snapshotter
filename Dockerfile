@@ -15,7 +15,7 @@
 ARG CONTAINERD_VERSION=v1.6.0-rc.2
 ARG RUNC_VERSION=v1.0.3
 ARG CNI_PLUGINS_VERSION=v1.0.1
-ARG NERDCTL_VERSION=0.15.0
+ARG NERDCTL_VERSION=0.16.1
 
 ARG PODMAN_VERSION=v3.4.4
 ARG CRIO_VERSION=v1.23.0
@@ -24,7 +24,7 @@ ARG COMMON_VERSION=v0.47.3
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=k8s.gcr.io/pause:3.6
 
 # Used in CI
-ARG CRI_TOOLS_VERSION=v1.22.0
+ARG CRI_TOOLS_VERSION=v1.23.0
 
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
