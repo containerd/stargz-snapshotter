@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/containerd/containerd v1.6.0-rc.1
+	github.com/containerd/containerd v1.6.0-rc.2
 	github.com/containerd/continuity v0.2.2
 	github.com/containerd/stargz-snapshotter/estargz v0.11.0
 	github.com/docker/cli v20.10.12+incompatible
@@ -16,7 +16,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-retryablehttp v0.7.0
 	github.com/klauspost/compress v1.14.2
-	github.com/moby/sys/mountinfo v0.5.0
+	github.com/moby/sys/mountinfo v0.6.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.2-0.20211117181255-693428a734f5
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
