@@ -156,6 +156,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: Validate CRI-O through CRI
       env:
+        DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
         METADATA_STORE: ${{ matrix.metadata-store }}
       run: make test-cri-o
 
