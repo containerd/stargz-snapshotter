@@ -485,6 +485,15 @@ func (r *Reader) Lookup(path string) (e *TOCEntry, ok bool) {
 	return
 }
 
+// ForEachEntry calls the callback func for each TOCEntry.
+func (r *Reader) ForEachEntry(f func(*TOCEntry) bool) {
+	for _, e := range r.toc.Entries {
+		if !f(e) {
+			return
+		}
+	}
+}
+
 // OpenFile returns the reader of the specified file payload.
 //
 // Name must be absolute path or one that is relative to root.

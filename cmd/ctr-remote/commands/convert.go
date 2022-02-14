@@ -18,19 +18,25 @@ package commands
 
 import (
 	"compress/gzip"
+	gocontext "context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
+	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
+	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/platforms"
+	imgrecorder "github.com/containerd/stargz-snapshotter/analyzer/recorder"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
+	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -57,6 +63,14 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		cli.StringFlag{
 			Name:  "estargz-record-in",
 			Usage: "Read 'ctr-remote optimize --record-out=<FILE>' record file",
+		},
+		cli.StringFlag{
+			Name:  "estargz-record-in-ref",
+			Usage: "Read record file distributed as an image",
+		},
+		cli.StringFlag{
+			Name:  "estargz-record-copy",
+			Usage: "Copy record of prioritized files from existing eStargz image",
 		},
 		cli.IntFlag{
 			Name:  "estargz-compression-level",
@@ -103,6 +117,18 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			return errors.New("src and target image need to be specified")
 		}
 
+		client, ctx, cancel, err := commands.NewClient(context)
+		if err != nil {
+			return err
+		}
+		defer cancel()
+
+		ctx, done, err := client.WithLease(ctx)
+		if err != nil {
+			return err
+		}
+		defer done(ctx)
+
 		var platformMC platforms.MatchComparer
 		if context.Bool("all-platforms") {
 			platformMC = platforms.All
@@ -125,11 +151,11 @@ When '--all-platforms' is given all images in a manifest list must be available.
 
 		var layerConvertFunc converter.ConvertFunc
 		if context.Bool("estargz") {
-			esgzOpts, err := getESGZConvertOpts(context)
+			esgzOpts, esgzOptsPerLayer, err := getESGZConvertOpts(ctx, context, client, srcRef, platformMC)
 			if err != nil {
 				return err
 			}
-			layerConvertFunc = estargzconvert.LayerConvertFunc(esgzOpts...)
+			layerConvertFunc = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, esgzOpts...)
 			if !context.Bool("oci") {
 				logrus.Warn("option --estargz should be used in conjunction with --oci")
 			}
@@ -142,11 +168,11 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		}
 
 		if context.Bool("zstdchunked") {
-			esgzOpts, err := getESGZConvertOpts(context)
+			esgzOpts, esgzOptsPerLayer, err := getESGZConvertOpts(ctx, context, client, srcRef, platformMC)
 			if err != nil {
 				return err
 			}
-			layerConvertFunc = zstdchunkedconvert.LayerConvertFunc(esgzOpts...)
+			layerConvertFunc = zstdchunkedconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, esgzOpts...)
 			if !context.Bool("oci") {
 				return errors.New("option --zstdchunked must be used in conjunction with --oci")
 			}
@@ -162,17 +188,14 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		if layerConvertFunc == nil {
 			return errors.New("specify layer converter")
 		}
-		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(layerConvertFunc))
+		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(func(ctx gocontext.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+			logrus.Infof("converting blob %q", desc.Digest)
+			return layerConvertFunc(ctx, cs, desc)
+		}))
 
 		if context.Bool("oci") {
 			convertOpts = append(convertOpts, converter.WithDockerToOCI(true))
 		}
-
-		client, ctx, cancel, err := commands.NewClient(context)
-		if err != nil {
-			return err
-		}
-		defer cancel()
 
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
@@ -183,29 +206,81 @@ When '--all-platforms' is given all images in a manifest list must be available.
 	},
 }
 
-func getESGZConvertOpts(context *cli.Context) ([]estargz.Option, error) {
+func getESGZConvertOpts(ctx gocontext.Context, context *cli.Context, client *containerd.Client, ref string, p platforms.MatchComparer) ([]estargz.Option, map[digest.Digest][]estargz.Option, error) {
 	esgzOpts := []estargz.Option{
 		estargz.WithCompressionLevel(context.Int("estargz-compression-level")),
 		estargz.WithChunkSize(context.Int("estargz-chunk-size")),
 	}
+	var esgzOptsPerLayer map[digest.Digest][]estargz.Option
 	if estargzRecordIn := context.String("estargz-record-in"); estargzRecordIn != "" {
-		paths, err := readPathsFromRecordFile(estargzRecordIn)
-		if err != nil {
-			return nil, err
+		for _, key := range []string{"estargz-record-in-ref", "estargz-record-copy"} {
+			if in := context.String(key); in != "" {
+				return nil, nil, fmt.Errorf("\"estargz-record-in\" must not used with %q", key)
+			}
 		}
-		esgzOpts = append(esgzOpts, estargz.WithPrioritizedFiles(paths))
+		var err error
+		esgzOptsPerLayer, err = recordInFromFile(ctx, client, estargzRecordIn, ref, p)
+		if err != nil {
+			return nil, nil, err
+		}
 		var ignored []string
 		esgzOpts = append(esgzOpts, estargz.WithAllowPrioritizeNotFound(&ignored))
 	}
-	return esgzOpts, nil
+	if estargzRecordInRef := context.String("estargz-record-in-ref"); estargzRecordInRef != "" {
+		for _, key := range []string{"estargz-record-in", "estargz-record-copy"} {
+			if in := context.String(key); in != "" {
+				return nil, nil, fmt.Errorf("\"estargz-record-in-ref\" must not used with %q", key)
+			}
+		}
+		var err error
+		esgzOptsPerLayer, err = recordInFromImage(ctx, client, estargzRecordInRef, ref, p)
+		if err != nil {
+			return nil, nil, err
+		}
+		var ignored []string
+		esgzOpts = append(esgzOpts, estargz.WithAllowPrioritizeNotFound(&ignored))
+	}
+	if estargzRecordCopyRef := context.String("estargz-record-copy"); estargzRecordCopyRef != "" {
+		for _, key := range []string{"estargz-record-in", "estargz-record-in-ref"} {
+			if in := context.String(key); in != "" {
+				return nil, nil, fmt.Errorf("\"estargz-record-copy\" must not used with %q", key)
+			}
+		}
+		var err error
+		esgzOptsPerLayer, err = copyRecordFromImage(ctx, client, estargzRecordCopyRef, ref, p)
+		if err != nil {
+			return nil, nil, err
+		}
+		var ignored []string
+		esgzOpts = append(esgzOpts, estargz.WithAllowPrioritizeNotFound(&ignored))
+	}
+
+	return esgzOpts, esgzOptsPerLayer, nil
 }
 
-func readPathsFromRecordFile(filename string) ([]string, error) {
+func recordInFromFile(ctx gocontext.Context, client *containerd.Client, filename, targetImgRef string, platform platforms.MatchComparer) (map[digest.Digest][]estargz.Option, error) {
 	r, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
+	return recordInFromReader(ctx, client, r, targetImgRef, platform)
+}
+
+func recordInFromImage(ctx gocontext.Context, client *containerd.Client, recordInImgRef, targetImgRef string, platform platforms.MatchComparer) (map[digest.Digest][]estargz.Option, error) {
+	recordInDgst, err := imgrecorder.RecordInFromImage(ctx, client, recordInImgRef, platform)
+	if err != nil {
+		return nil, err
+	}
+	ra, err := client.ContentStore().ReaderAt(ctx, ocispec.Descriptor{Digest: recordInDgst})
+	if err != nil {
+		return nil, err
+	}
+	defer ra.Close()
+	return recordInFromReader(ctx, client, io.NewSectionReader(ra, 0, ra.Size()), targetImgRef, platform)
+}
+
+func recordInFromReader(ctx gocontext.Context, client *containerd.Client, r io.Reader, targetImgRef string, platform platforms.MatchComparer) (map[digest.Digest][]estargz.Option, error) {
 	dec := json.NewDecoder(r)
 	var paths []string
 	added := make(map[string]struct{})
@@ -219,5 +294,26 @@ func readPathsFromRecordFile(filename string) ([]string, error) {
 			added[e.Path] = struct{}{}
 		}
 	}
-	return paths, nil
+	logrus.Infof("analyzing blobs of %q", targetImgRef)
+	recordOuts, err := imgrecorder.PrioritizedFilesFromPaths(ctx, client, paths, targetImgRef, platform)
+	if err != nil {
+		return nil, err
+	}
+	return pathsToOptions(recordOuts), nil
+}
+
+func copyRecordFromImage(ctx gocontext.Context, client *containerd.Client, recordInImgRef, targetImgRef string, p platforms.MatchComparer) (map[digest.Digest][]estargz.Option, error) {
+	recordOuts, err := imgrecorder.CopyRecordFromImage(ctx, client, recordInImgRef, targetImgRef, p)
+	if err != nil {
+		return nil, err
+	}
+	return pathsToOptions(recordOuts), nil
+}
+
+func pathsToOptions(paths map[digest.Digest][]string) map[digest.Digest][]estargz.Option {
+	layerOpts := make(map[digest.Digest][]estargz.Option)
+	for layerDgst, o := range paths {
+		layerOpts[layerDgst] = []estargz.Option{estargz.WithPrioritizedFiles(o)}
+	}
+	return layerOpts
 }

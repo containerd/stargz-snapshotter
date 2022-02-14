@@ -188,7 +188,7 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 	})
 
 	// Start to monitor "/" and run the task.
-	rc, err := recorder.NewImageRecorder(ctx, cs, img, platforms.Default())
+	rc, err := recorder.NewImageRecorder(ctx, cs, img, platforms.DefaultStrict())
 	if err != nil {
 		return "", err
 	}

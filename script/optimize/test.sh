@@ -103,9 +103,10 @@ echo "Testing..."
 function test_optimize {
     local OPTIMIZE_COMMAND="${1}"
     local NO_OPTIMIZE_COMMAND="${2}"
-    local GETTOCDIGEST_COMMAND="${3}"
-    local DECOMPRESS_COMMAND="${4}"
-    local INVISIBLE_TOC="${5}"
+    local CONVERT_COMMAND="${3}"
+    local GETTOCDIGEST_COMMAND="${4}"
+    local DECOMPRESS_COMMAND="${5}"
+    local INVISIBLE_TOC="${6}"
     cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3.3"
 services:
@@ -119,6 +120,7 @@ services:
     - NO_PROXY=127.0.0.1,localhost,${REGISTRY_HOST}:443
     - OPTIMIZE_COMMAND=${OPTIMIZE_COMMAND}
     - NO_OPTIMIZE_COMMAND=${NO_OPTIMIZE_COMMAND}
+    - CONVERT_COMMAND=${CONVERT_COMMAND}
     - GETTOCDIGEST_COMMAND=${GETTOCDIGEST_COMMAND}
     - DECOMPRESS_COMMAND=${DECOMPRESS_COMMAND}
     - INVISIBLE_TOC=${INVISIBLE_TOC}
@@ -162,12 +164,14 @@ EOF
 
 test_optimize "image optimize --oci --zstdchunked" \
               "image optimize --no-optimize --oci --zstdchunked" \
+              "image convert --oci --zstdchunked" \
               "image get-toc-digest --zstdchunked" \
               "zstd -d" \
               "true"
 
 test_optimize "image optimize --oci" \
               "image optimize --no-optimize --oci" \
+              "image convert --oci --estargz" \
               "image get-toc-digest" \
               "gunzip" \
               "false"

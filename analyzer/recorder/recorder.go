@@ -31,7 +31,6 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/converter/uncompress"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
@@ -84,7 +83,6 @@ func imageRecorderFromManifest(ctx context.Context, cs content.Store, manifestDe
 		// TODO: During optimization, we uncompress the blob several times (here and during
 		//       creating eStargz layer). We should unify this process for better optimization
 		//       performance.
-		log.G(ctx).Infof("analyzing blob %q", desc.Digest)
 		readerAt, err := cs.ReaderAt(ctx, desc)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get reader blob %v: %w", desc.Digest, err)
