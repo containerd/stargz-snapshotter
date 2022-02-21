@@ -175,7 +175,7 @@ func main() {
 		runtime.RegisterImageServiceServer(rpc, criServer)
 		credsFuncs = append(credsFuncs, f)
 	}
-	var fsOpts []fs.Option
+	fsOpts := []fs.Option{fs.WithMetricsLogLevel(logrus.InfoLevel)}
 	if config.IPFS {
 		fsOpts = append(fsOpts, fs.WithResolveHandler("ipfs", new(ipfs.ResolveHandler)))
 	}
