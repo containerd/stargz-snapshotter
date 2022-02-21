@@ -64,6 +64,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -78,6 +79,7 @@ type options struct {
 	getSources      source.GetSources
 	resolveHandlers map[string]remote.Handler
 	metadataStore   metadata.Store
+	metricsLogLevel *logrus.Level
 }
 
 func WithGetSources(s source.GetSources) Option {
@@ -98,6 +100,12 @@ func WithResolveHandler(name string, handler remote.Handler) Option {
 func WithMetadataStore(metadataStore metadata.Store) Option {
 	return func(opts *options) {
 		opts.metadataStore = metadataStore
+	}
+}
+
+func WithMetricsLogLevel(logLevel logrus.Level) Option {
+	return func(opts *options) {
+		opts.metricsLogLevel = &logLevel
 	}
 }
 
@@ -141,7 +149,11 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 	var ns *metrics.Namespace
 	if !cfg.NoPrometheus {
 		ns = metrics.NewNamespace("stargz", "fs", nil)
-		commonmetrics.Register() // Register common metrics. This will happen only once.
+		logLevel := logrus.DebugLevel
+		if fsOpts.metricsLogLevel != nil {
+			logLevel = *fsOpts.metricsLogLevel
+		}
+		commonmetrics.Register(logLevel) // Register common metrics. This will happen only once.
 	}
 	c := layermetrics.NewLayerMetrics(ns)
 	if ns != nil {
