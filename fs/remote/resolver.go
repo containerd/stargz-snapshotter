@@ -164,6 +164,9 @@ type fetcherConfig struct {
 }
 
 func jitter(duration time.Duration) time.Duration {
+	if duration <= 0 {
+		return duration
+	}
 	return time.Duration(rand.Int63n(int64(duration)) + int64(duration))
 }
 
