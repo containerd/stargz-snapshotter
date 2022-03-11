@@ -7,7 +7,7 @@ require (
 	github.com/containerd/containerd v1.6.1
 	github.com/containerd/continuity v0.2.2
 	github.com/containerd/stargz-snapshotter/estargz v0.11.2
-	github.com/docker/cli v20.10.12+incompatible
+	github.com/docker/cli v20.10.13+incompatible
 	github.com/docker/docker v20.10.7+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.6.4 // indirect
 	github.com/docker/go-metrics v0.0.1
@@ -26,7 +26,7 @@ require (
 	github.com/sirupsen/logrus v1.8.1
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9
-	google.golang.org/grpc v1.44.0
+	google.golang.org/grpc v1.45.0
 	k8s.io/api v0.23.4
 	k8s.io/apimachinery v0.23.4
 	k8s.io/client-go v0.23.4
