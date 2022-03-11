@@ -23,6 +23,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/snapshots"
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
+	"github.com/containerd/stargz-snapshotter/fs/layer"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
@@ -72,11 +73,19 @@ func NewStargzSnapshotterService(ctx context.Context, root string, config *Confi
 		hosts = resolver.RegistryHostsFromConfig(resolver.Config(config.ResolverConfig), sOpts.credsFuncs...)
 	}
 
+	userxattr, err := overlayutils.NeedsUserXAttr(snapshotterRoot(root))
+	if err != nil {
+		log.G(ctx).WithError(err).Warnf("cannot detect whether \"userxattr\" option needs to be used, assuming to be %v", userxattr)
+	}
+	opq := layer.OverlayOpaqueTrusted
+	if userxattr {
+		opq = layer.OverlayOpaqueUser
+	}
 	// Configure filesystem and snapshotter
 	fsOpts := append(sOpts.fsOpts, stargzfs.WithGetSources(sources(
 		sourceFromCRILabels(hosts),      // provides source info based on CRI labels
 		source.FromDefaultLabels(hosts), // provides source info based on default labels
-	)))
+	)), stargzfs.WithOverlayOpaqueType(opq))
 	fs, err := stargzfs.NewFilesystem(fsRoot(root), config.Config, fsOpts...)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")
