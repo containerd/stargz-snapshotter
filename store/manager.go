@@ -58,7 +58,7 @@ func NewLayerManager(ctx context.Context, root string, hosts source.RegistryHost
 		maxConcurrency = defaultMaxConcurrency
 	}
 	tm := task.NewBackgroundTaskManager(maxConcurrency, 5*time.Second)
-	r, err := layer.NewResolver(root, tm, cfg, nil, metadataStore) // TODO: support IPFS
+	r, err := layer.NewResolver(root, tm, cfg, nil, metadataStore, layer.OverlayOpaqueAll) // TODO: support IPFS
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup resolver: %w", err)
 	}
