@@ -13,7 +13,7 @@ require (
 	github.com/goccy/go-json v0.9.5
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ipfs/go-ipfs-http-client v0.2.0
-	github.com/ipfs/interface-go-ipfs-core v0.5.2
+	github.com/ipfs/interface-go-ipfs-core v0.6.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.2-0.20211117181255-693428a734f5
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
