@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"path"
@@ -221,7 +220,7 @@ func (r *reader) init(decompressedR io.Reader, rOpts metadata.Options) (retErr e
 		return fmt.Errorf("failed to get a unique id for metadata reader")
 	}
 
-	f, err := ioutil.TempFile("", "")
+	f, err := os.CreateTemp("", "")
 	if err != nil {
 		return err
 	}
@@ -832,7 +831,7 @@ func (fr *fileReader) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 	defer dr.Close()
 	base := off - ent.chunkOffset
-	if n, err := io.CopyN(ioutil.Discard, dr, base); n != base || err != nil {
+	if n, err := io.CopyN(io.Discard, dr, base); n != base || err != nil {
 		return 0, fmt.Errorf("discard of %d bytes = %v, %v", base, n, err)
 	}
 	return io.ReadFull(dr, p)

@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"testing"
@@ -202,7 +201,7 @@ func TestNodeIndex(t *testing.T) {
 		},
 	}
 
-	tempDir, err := ioutil.TempDir("", "test-recorder")
+	tempDir, err := os.MkdirTemp("", "test-recorder")
 	if err != nil {
 		t.Fatalf("failed to prepare content store dir: %v", err)
 	}

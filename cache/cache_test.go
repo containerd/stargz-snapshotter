@@ -26,7 +26,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"testing"
 )
@@ -39,7 +38,7 @@ func TestDirectoryCache(t *testing.T) {
 
 	// with enough memory cache
 	newCache := func() (BlobCache, cleanFunc) {
-		tmp, err := ioutil.TempDir("", "testcache")
+		tmp, err := os.MkdirTemp("", "testcache")
 		if err != nil {
 			t.Fatalf("failed to make tempdir: %v", err)
 		}
@@ -56,7 +55,7 @@ func TestDirectoryCache(t *testing.T) {
 
 	// with smaller memory cache
 	newCache = func() (BlobCache, cleanFunc) {
-		tmp, err := ioutil.TempDir("", "testcache")
+		tmp, err := os.MkdirTemp("", "testcache")
 		if err != nil {
 			t.Fatalf("failed to make tempdir: %v", err)
 		}

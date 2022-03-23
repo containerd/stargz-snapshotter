@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"testing"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -119,7 +118,7 @@ func (zc *zstdController) CountStreams(t *testing.T, b []byte) (numStreams int) 
 				continue
 			}
 			defer zr.Close()
-			res, err := ioutil.ReadAll(zr)
+			res, err := io.ReadAll(zr)
 			if err != nil && err != io.ErrUnexpectedEOF {
 				t.Fatalf("countStreams(zstd), ReadAll: %v", err)
 			}

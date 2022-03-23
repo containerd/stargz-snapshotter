@@ -29,7 +29,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -511,7 +510,7 @@ type tempFiles struct {
 }
 
 func (tf *tempFiles) TempFile(dir, pattern string) (*os.File, error) {
-	f, err := ioutil.TempFile(dir, pattern)
+	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		return nil, err
 	}

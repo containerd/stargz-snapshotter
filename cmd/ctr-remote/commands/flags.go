@@ -22,7 +22,6 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -338,7 +337,7 @@ func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup f
 	}
 
 	// Generate /etc/hosts and /etc/resolv.conf
-	resolvDir, err := ioutil.TempDir("", "tmpetc")
+	resolvDir, err := os.MkdirTemp("", "tmpetc")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -369,7 +368,7 @@ func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup f
 			return
 		}
 	}
-	if err := ioutil.WriteFile(etcResolvConfPath, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(etcResolvConfPath, buf.Bytes(), 0644); err != nil {
 		rErr = fmt.Errorf("failed to write contents to /etc/resolv.conf: %w", err)
 		return
 	}
@@ -404,7 +403,7 @@ func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup f
 			return
 		}
 	}
-	if err := ioutil.WriteFile(etcHostsPath, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(etcHostsPath, buf.Bytes(), 0644); err != nil {
 		rErr = fmt.Errorf("failed to write contents to /etc/hosts: %w", err)
 		return
 	}

@@ -20,7 +20,6 @@ import (
 	"context"
 	_ "crypto/sha256"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -55,7 +54,7 @@ func prepareWithTarget(t *testing.T, sn snapshots.Snapshotter, target, key, pare
 func TestRemotePrepare(t *testing.T) {
 	testutil.RequiresRoot(t)
 	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "overlay")
+	root, err := os.MkdirTemp("", "overlay")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +105,7 @@ func TestRemotePrepare(t *testing.T) {
 func TestRemoteOverlay(t *testing.T) {
 	testutil.RequiresRoot(t)
 	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "remote")
+	root, err := os.MkdirTemp("", "remote")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +152,7 @@ func TestRemoteOverlay(t *testing.T) {
 	}
 
 	// Validate the contents of the snapshot
-	data, err := ioutil.ReadFile(filepath.Join(getParents(ctx, sn, root, pKey)[0], remoteSampleFile))
+	data, err := os.ReadFile(filepath.Join(getParents(ctx, sn, root, pKey)[0], remoteSampleFile))
 	if err != nil {
 		t.Fatalf("failed to read a file in the remote snapshot: %v", err)
 	}
@@ -165,7 +164,7 @@ func TestRemoteOverlay(t *testing.T) {
 func TestRemoteCommit(t *testing.T) {
 	testutil.RequiresRoot(t)
 	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "remote")
+	root, err := os.MkdirTemp("", "remote")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +186,7 @@ func TestRemoteCommit(t *testing.T) {
 	}
 
 	// Make a new active snapshot based on the remote snapshot.
-	snapshot, err := ioutil.TempDir("", "snapshot")
+	snapshot, err := os.MkdirTemp("", "snapshot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +196,7 @@ func TestRemoteCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mount.Unmount(snapshot, 0)
-	if err := ioutil.WriteFile(filepath.Join(snapshot, "bar"), []byte("hi"), 0660); err != nil {
+	if err := os.WriteFile(filepath.Join(snapshot, "bar"), []byte("hi"), 0660); err != nil {
 		t.Fatal(err)
 	}
 	mount.Unmount(snapshot, 0)
@@ -209,7 +208,7 @@ func TestRemoteCommit(t *testing.T) {
 	}
 
 	// Validate the committed snapshot
-	check, err := ioutil.TempDir("", "check")
+	check, err := os.MkdirTemp("", "check")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +222,7 @@ func TestRemoteCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mount.Unmount(check, 0)
-	data, err := ioutil.ReadFile(filepath.Join(check, "bar"))
+	data, err := os.ReadFile(filepath.Join(check, "bar"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +306,7 @@ func TestFailureDetection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.TODO()
-			root, err := ioutil.TempDir("", "remote")
+			root, err := os.MkdirTemp("", "remote")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -375,11 +374,11 @@ func TestFailureDetection(t *testing.T) {
 }
 
 func bindFileSystem(t *testing.T) FileSystem {
-	root, err := ioutil.TempDir("", "remote")
+	root, err := os.MkdirTemp("", "remote")
 	if err != nil {
 		t.Fatalf("failed to prepare working-space for bind filesystem: %q", err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(root, remoteSampleFile), []byte(remoteSampleFileContents), 0660); err != nil {
+	if err := os.WriteFile(filepath.Join(root, remoteSampleFile), []byte(remoteSampleFileContents), 0660); err != nil {
 		t.Fatalf("failed to write sample file of bind filesystem: %q", err)
 	}
 	return &bindFs{
@@ -454,7 +453,7 @@ func TestOverlay(t *testing.T) {
 
 func TestOverlayMounts(t *testing.T) {
 	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "overlay")
+	root, err := os.MkdirTemp("", "overlay")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +487,7 @@ func TestOverlayMounts(t *testing.T) {
 
 func TestOverlayCommit(t *testing.T) {
 	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "overlay")
+	root, err := os.MkdirTemp("", "overlay")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +502,7 @@ func TestOverlayCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := mounts[0]
-	if err := ioutil.WriteFile(filepath.Join(m.Source, "foo"), []byte("hi"), 0660); err != nil {
+	if err := os.WriteFile(filepath.Join(m.Source, "foo"), []byte("hi"), 0660); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Commit(ctx, "base", key); err != nil {
@@ -513,7 +512,7 @@ func TestOverlayCommit(t *testing.T) {
 
 func TestOverlayOverlayMount(t *testing.T) {
 	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "overlay")
+	root, err := os.MkdirTemp("", "overlay")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +596,7 @@ func getParents(ctx context.Context, sn snapshots.Snapshotter, root, key string)
 func TestOverlayOverlayRead(t *testing.T) {
 	testutil.RequiresRoot(t)
 	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "overlay")
+	root, err := os.MkdirTemp("", "overlay")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +611,7 @@ func TestOverlayOverlayRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := mounts[0]
-	if err := ioutil.WriteFile(filepath.Join(m.Source, "foo"), []byte("hi"), 0660); err != nil {
+	if err := os.WriteFile(filepath.Join(m.Source, "foo"), []byte("hi"), 0660); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Commit(ctx, "base", key); err != nil {
@@ -629,7 +628,7 @@ func TestOverlayOverlayRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syscall.Unmount(dest, 0)
-	data, err := ioutil.ReadFile(filepath.Join(dest, "foo"))
+	data, err := os.ReadFile(filepath.Join(dest, "foo"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +639,7 @@ func TestOverlayOverlayRead(t *testing.T) {
 
 func TestOverlayView(t *testing.T) {
 	ctx := context.TODO()
-	root, err := ioutil.TempDir("", "overlay")
+	root, err := os.MkdirTemp("", "overlay")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +654,7 @@ func TestOverlayView(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := mounts[0]
-	if err := ioutil.WriteFile(filepath.Join(m.Source, "foo"), []byte("hi"), 0660); err != nil {
+	if err := os.WriteFile(filepath.Join(m.Source, "foo"), []byte("hi"), 0660); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Commit(ctx, "base", key); err != nil {
@@ -667,7 +666,7 @@ func TestOverlayView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(getParents(ctx, o, root, "/tmp/top")[0], "foo"), []byte("hi, again"), 0660); err != nil {
+	if err := os.WriteFile(filepath.Join(getParents(ctx, o, root, "/tmp/top")[0], "foo"), []byte("hi, again"), 0660); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Commit(ctx, "top", key); err != nil {
