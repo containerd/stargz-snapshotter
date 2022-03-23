@@ -22,15 +22,15 @@ require (
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/pelletier/go-toml v1.9.4 // indirect
 	github.com/prometheus/client_golang v1.12.1
-	github.com/rs/xid v1.3.0
+	github.com/rs/xid v1.4.0
 	github.com/sirupsen/logrus v1.8.1
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9
+	golang.org/x/sys v0.0.0-20220209214540-3681064d5158
 	google.golang.org/grpc v1.45.0
 	k8s.io/api v0.23.5
 	k8s.io/apimachinery v0.23.5
 	k8s.io/client-go v0.23.5
-	k8s.io/cri-api v0.24.0-alpha.3
+	k8s.io/cri-api v0.24.0-alpha.4
 )
 
 replace (
