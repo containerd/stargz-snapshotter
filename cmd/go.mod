@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/containerd/containerd v1.6.1
-	github.com/containerd/go-cni v1.1.3
+	github.com/containerd/go-cni v1.1.4
 	github.com/containerd/stargz-snapshotter v0.11.3
 	github.com/containerd/stargz-snapshotter/estargz v0.11.3
 	github.com/containerd/stargz-snapshotter/ipfs v0.11.3
