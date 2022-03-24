@@ -26,7 +26,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -646,7 +645,7 @@ func (c *callsCountRoundTripper) RoundTrip(req *http.Request) (res *http.Respons
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     header,
-		Body:       convertBody(ioutil.NopCloser(bytes.NewReader([]byte(c.content)))),
+		Body:       convertBody(io.NopCloser(bytes.NewReader([]byte(c.content)))),
 	}, nil
 }
 
@@ -659,7 +658,7 @@ func (c *calledRoundTripper) RoundTrip(req *http.Request) (res *http.Response, e
 	res = &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     make(http.Header),
-		Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
+		Body:       io.NopCloser(bytes.NewReader([]byte("test"))),
 	}
 	return
 }
@@ -691,7 +690,7 @@ func multiRoundTripper(t *testing.T, contents []byte, opts ...interface{}) Round
 		return &http.Response{
 			StatusCode: statusCode,
 			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+			Body:       io.NopCloser(bytes.NewReader([]byte{})),
 		}
 	}
 
@@ -740,7 +739,7 @@ func multiRoundTripper(t *testing.T, contents []byte, opts ...interface{}) Round
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Header:     header,
-					Body:       convertBody(ioutil.NopCloser(bytes.NewReader(contents))),
+					Body:       convertBody(io.NopCloser(bytes.NewReader(contents))),
 				}
 			}
 		}
@@ -768,7 +767,7 @@ func multiRoundTripper(t *testing.T, contents []byte, opts ...interface{}) Round
 			return &http.Response{
 				StatusCode: http.StatusPartialContent,
 				Header:     header,
-				Body:       convertBody(ioutil.NopCloser(bytes.NewReader(part))),
+				Body:       convertBody(io.NopCloser(bytes.NewReader(part))),
 			}
 		}
 
@@ -809,7 +808,7 @@ func multiRoundTripper(t *testing.T, contents []byte, opts ...interface{}) Round
 		return &http.Response{
 			StatusCode: http.StatusPartialContent,
 			Header:     header,
-			Body:       convertBody(ioutil.NopCloser(&buf)),
+			Body:       convertBody(io.NopCloser(&buf)),
 		}
 	}
 }
@@ -819,7 +818,7 @@ func failRoundTripper() RoundTripFunc {
 		return &http.Response{
 			StatusCode: http.StatusInternalServerError,
 			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+			Body:       io.NopCloser(bytes.NewReader([]byte{})),
 		}
 	}
 }
@@ -827,11 +826,11 @@ func failRoundTripper() RoundTripFunc {
 func brokenBodyRoundTripper(t *testing.T, contents []byte, multiRange bool) RoundTripFunc {
 	breakReadCloser := func(r io.ReadCloser) io.ReadCloser {
 		defer r.Close()
-		data, err := ioutil.ReadAll(r)
+		data, err := io.ReadAll(r)
 		if err != nil {
 			t.Fatalf("failed to break read closer faild to read original: %v", err)
 		}
-		return ioutil.NopCloser(bytes.NewReader(data[:len(data)/2]))
+		return io.NopCloser(bytes.NewReader(data[:len(data)/2]))
 	}
 	tr := multiRoundTripper(t, contents, allowMultiRange(multiRange), bodyConverter(breakReadCloser))
 	return func(req *http.Request) *http.Response {

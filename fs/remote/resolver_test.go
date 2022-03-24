@@ -26,7 +26,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -199,7 +199,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 			return &http.Response{
 				StatusCode: code,
 				Header:     make(http.Header),
-				Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+				Body:       io.NopCloser(bytes.NewReader([]byte{})),
 				Request:    req,
 			}, nil
 		}
@@ -211,7 +211,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 			return &http.Response{
 				StatusCode: http.StatusMovedPermanently,
 				Header:     header,
-				Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+				Body:       io.NopCloser(bytes.NewReader([]byte{})),
 				Request:    req,
 			}, nil
 		}
@@ -223,7 +223,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     header,
-				Body:       ioutil.NopCloser(bytes.NewReader([]byte{0})),
+				Body:       io.NopCloser(bytes.NewReader([]byte{0})),
 				Request:    req,
 			}, nil
 		}
@@ -231,7 +231,7 @@ func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	return &http.Response{
 		StatusCode: http.StatusNotFound,
 		Header:     make(http.Header),
-		Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+		Body:       io.NopCloser(bytes.NewReader([]byte{})),
 		Request:    req,
 	}, nil
 }
@@ -262,13 +262,13 @@ func (b *breakRoundTripper) RoundTrip(req *http.Request) (res *http.Response, er
 		res = &http.Response{
 			StatusCode: http.StatusPartialContent,
 			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
+			Body:       io.NopCloser(bytes.NewReader([]byte("test"))),
 		}
 	} else {
 		res = &http.Response{
 			StatusCode: http.StatusInternalServerError,
 			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+			Body:       io.NopCloser(bytes.NewReader([]byte{})),
 		}
 	}
 	return
@@ -313,13 +313,13 @@ func (r *retryRoundTripper) RoundTrip(req *http.Request) (res *http.Response, er
 		res = &http.Response{
 			StatusCode: http.StatusTooManyRequests,
 			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+			Body:       io.NopCloser(bytes.NewReader([]byte{})),
 		}
 	case 2:
 		res = &http.Response{
 			StatusCode: http.StatusServiceUnavailable,
 			Header:     make(http.Header),
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte{})),
+			Body:       io.NopCloser(bytes.NewReader([]byte{})),
 		}
 	default:
 		header := make(http.Header)
@@ -327,7 +327,7 @@ func (r *retryRoundTripper) RoundTrip(req *http.Request) (res *http.Response, er
 		res = &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     header,
-			Body:       ioutil.NopCloser(bytes.NewReader([]byte("test"))),
+			Body:       io.NopCloser(bytes.NewReader([]byte("test"))),
 		}
 	}
 	return

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"sync"
@@ -61,7 +60,7 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 		return "", fmt.Errorf("wait-on-signal option cannot be used with terminal option")
 	}
 
-	target, err := ioutil.TempDir("", "target")
+	target, err := os.MkdirTemp("", "target")
 	if err != nil {
 		return "", err
 	}

@@ -18,7 +18,6 @@ package db
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -41,7 +40,7 @@ func TestFSLayer(t *testing.T) {
 }
 
 func newTestableReader(sr *io.SectionReader, opts ...metadata.Option) (metadata.TestableReader, error) {
-	f, err := ioutil.TempFile("", "readertestdb")
+	f, err := os.CreateTemp("", "readertestdb")
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +64,7 @@ func newTestableReader(sr *io.SectionReader, opts ...metadata.Option) (metadata.
 }
 
 func newStore(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
-	f, err := ioutil.TempFile("", "readertestdb")
+	f, err := os.CreateTemp("", "readertestdb")
 	if err != nil {
 		return nil, err
 	}

@@ -28,7 +28,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"reflect"
 	"testing"
 )
@@ -425,11 +424,11 @@ func TestSort(t *testing.T) {
 
 							}
 
-							got, err := ioutil.ReadAll(gotTar)
+							got, err := io.ReadAll(gotTar)
 							if err != nil {
 								t.Fatal("failed to read got tar payload")
 							}
-							want, err := ioutil.ReadAll(wantTar)
+							want, err := io.ReadAll(wantTar)
 							if err != nil {
 								t.Fatal("failed to read want tar payload")
 							}

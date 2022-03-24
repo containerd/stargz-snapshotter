@@ -20,7 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -252,7 +252,7 @@ func fetchManifestPlatform(ctx context.Context, fetcher remotes.Fetcher, desc oc
 	var manifest ocispec.Manifest
 	switch desc.MediaType {
 	case images.MediaTypeDockerSchema2Manifest, ocispec.MediaTypeImageManifest:
-		p, err := ioutil.ReadAll(r)
+		p, err := io.ReadAll(r)
 		if err != nil {
 			return ocispec.Manifest{}, err
 		}
@@ -265,7 +265,7 @@ func fetchManifestPlatform(ctx context.Context, fetcher remotes.Fetcher, desc oc
 		return manifest, nil
 	case images.MediaTypeDockerSchema2ManifestList, ocispec.MediaTypeImageIndex:
 		var index ocispec.Index
-		p, err := ioutil.ReadAll(r)
+		p, err := io.ReadAll(r)
 		if err != nil {
 			return ocispec.Manifest{}, err
 		}

@@ -29,10 +29,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -237,7 +237,7 @@ func getTLSConfig(registryTLSConfig TLSConfig) (*tls.Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get system cert pool: %w", err)
 		}
-		caCert, err := ioutil.ReadFile(registryTLSConfig.CAFile)
+		caCert, err := os.ReadFile(registryTLSConfig.CAFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load CA file: %w", err)
 		}

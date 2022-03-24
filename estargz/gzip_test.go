@@ -28,7 +28,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"testing"
 )
 
@@ -70,7 +69,7 @@ func (gc *gzipController) CountStreams(t *testing.T, b []byte) (numStreams int) 
 			t.Fatalf("countStreams(gzip), Reset: %v", err)
 		}
 		zr.Multistream(false)
-		n, err := io.Copy(ioutil.Discard, zr)
+		n, err := io.Copy(io.Discard, zr)
 		if err != nil {
 			t.Fatalf("countStreams(gzip), Copy: %v", err)
 		}
