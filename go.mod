@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/containerd/containerd v1.6.1
+	github.com/containerd/containerd v1.6.2
 	github.com/containerd/continuity v0.2.2
 	github.com/containerd/stargz-snapshotter/estargz v0.11.3
 	github.com/docker/cli v20.10.13+incompatible
