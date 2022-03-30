@@ -32,7 +32,6 @@ import (
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 )
 
@@ -131,7 +130,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			}
 			layerConvertFunc = estargzconvert.LayerConvertFunc(esgzOpts...)
 			if !context.Bool("oci") {
-				logrus.Warn("option --estargz should be used in conjunction with --oci")
+				return errors.New("option --estargz should be used in conjunction with --oci")
 			}
 			if context.Bool("uncompress") {
 				return errors.New("option --estargz conflicts with --uncompress")
