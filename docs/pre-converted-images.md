@@ -18,46 +18,50 @@ In the following table, image names listed in `Image Name` contain the following
 
 |Image Name|Optimized Workload|
 ---|---
-|`ghcr.io/stargz-containers/alpine:3.10.2-org`|Executing `echo hello` on the shell|
-|`ghcr.io/stargz-containers/alpine:3.10.2-esgz`|Executing `echo hello` on the shell|
-|`ghcr.io/stargz-containers/drupal:8.7.6-org`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
-|`ghcr.io/stargz-containers/drupal:8.7.6-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
-|`ghcr.io/stargz-containers/fedora:30-org`|Executing `echo hello` on the shell|
-|`ghcr.io/stargz-containers/fedora:30-esgz`|Executing `echo hello` on the shell|
-|`ghcr.io/stargz-containers/gcc:10.2.0-org`|Compiling and executing a program which prints `hello`|
-|`ghcr.io/stargz-containers/gcc:10.2.0-esgz`|Compiling and executing a program which prints `hello`|
-|`ghcr.io/stargz-containers/golang:1.12.9-org`|Compiling and executing a program which prints `hello`|
-|`ghcr.io/stargz-containers/golang:1.12.9-esgz`|Compiling and executing a program which prints `hello`|
+|`ghcr.io/stargz-containers/alpine:3.15.3-org`|Executing `echo hello` on the shell|
+|`ghcr.io/stargz-containers/alpine:3.15.3-esgz`|Executing `echo hello` on the shell|
+|`ghcr.io/stargz-containers/drupal:9.3.9-org`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/drupal:9.3.9-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/fedora:35-org`|Executing `echo hello` on the shell|
+|`ghcr.io/stargz-containers/fedora:35-esgz`|Executing `echo hello` on the shell|
+|`ghcr.io/stargz-containers/gcc:11.2.0-org`|Compiling and executing a program which prints `hello`|
+|`ghcr.io/stargz-containers/gcc:11.2.0-esgz`|Compiling and executing a program which prints `hello`|
+|`ghcr.io/stargz-containers/golang:1.18-org`|Compiling and executing a program which prints `hello`|
+|`ghcr.io/stargz-containers/golang:1.18-esgz`|Compiling and executing a program which prints `hello`|
 |`ghcr.io/stargz-containers/jenkins:2.60.3-org`|Code execution until up and ready message (`Jenkins is fully up and running`) is printed|
 |`ghcr.io/stargz-containers/jenkins:2.60.3-esgz`|Code execution until up and ready message (`Jenkins is fully up and running`) is printed|
-|`ghcr.io/stargz-containers/jruby:9.2.8.0-org`|Printing `hello`|
-|`ghcr.io/stargz-containers/jruby:9.2.8.0-esgz`|Printing `hello`|
-|`ghcr.io/stargz-containers/node:13.13.0-org`|Printing `hello`|
-|`ghcr.io/stargz-containers/node:13.13.0-esgz`|Printing `hello`|
-|`ghcr.io/stargz-containers/perl:5.30-org`|Printing `hello`|
-|`ghcr.io/stargz-containers/perl:5.30-esgz`|Printing `hello`|
-|`ghcr.io/stargz-containers/php:7.3.8-org`|Printing `hello`|
-|`ghcr.io/stargz-containers/php:7.3.8-esgz`|Printing `hello`|
-|`ghcr.io/stargz-containers/pypy:3.5-org`|Printing `hello`|
-|`ghcr.io/stargz-containers/pypy:3.5-esgz`|Printing `hello`|
-|`ghcr.io/stargz-containers/python:3.9-org`|Printing `hello`|
-|`ghcr.io/stargz-containers/python:3.9-esgz`|Printing `hello`|
-|`ghcr.io/stargz-containers/r-base:3.6.1-org`|Printing `hello`|
-|`ghcr.io/stargz-containers/r-base:3.6.1-esgz`|Printing `hello`|
-|`ghcr.io/stargz-containers/redis:5.0.5-org`|Code execution until up and ready message (`Ready to accept connections`) is printed|
-|`ghcr.io/stargz-containers/redis:5.0.5-esgz`|Code execution until up and ready message (`Ready to accept connections`) is printed|
-|`ghcr.io/stargz-containers/rethinkdb:2.3.6-org`|Code execution until up and ready message (`Server ready`) is printed|
-|`ghcr.io/stargz-containers/rethinkdb:2.3.6-esgz`|Code execution until up and ready message (`Server ready`) is printed|
-|`ghcr.io/stargz-containers/tomcat:10.0.0-jdk15-openjdk-buster-org`|Code execution until up and ready message (`Server startup`) is printed|
-|`ghcr.io/stargz-containers/tomcat:10.0.0-jdk15-openjdk-buster-esgz`|Code execution until up and ready message (`Server startup`) is printed|
-|`ghcr.io/stargz-containers/postgres:13.1-org`|Code execution until up and ready message (`database system is ready to accept connections`) is printed|
-|`ghcr.io/stargz-containers/postgres:13.1-esgz`|Code execution until up and ready message (`database system is ready to accept connections`) is printed|
-|`ghcr.io/stargz-containers/wordpress:5.7-org`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
-|`ghcr.io/stargz-containers/wordpress:5.7-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
-|`ghcr.io/stargz-containers/mariadb:10.5-org`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
-|`ghcr.io/stargz-containers/mariadb:10.5-esgz`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
-|`ghcr.io/stargz-containers/php:8-apache-buster-org`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
-|`ghcr.io/stargz-containers/php:8-apache-buster-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/jruby:9.3.4-org`|Printing `hello`|
+|`ghcr.io/stargz-containers/jruby:9.3.4-esgz`|Printing `hello`|
+|`ghcr.io/stargz-containers/node:17.8.0-org`|Printing `hello`|
+|`ghcr.io/stargz-containers/node:17.8.0-esgz`|Printing `hello`|
+|`ghcr.io/stargz-containers/perl:5.34.1-org`|Printing `hello`|
+|`ghcr.io/stargz-containers/perl:5.34.1-esgz`|Printing `hello`|
+|`ghcr.io/stargz-containers/php:8.1.4-org`|Printing `hello`|
+|`ghcr.io/stargz-containers/php:8.1.4-esgz`|Printing `hello`|
+|`ghcr.io/stargz-containers/pypy:3.9-org`|Printing `hello`|
+|`ghcr.io/stargz-containers/pypy:3.9-esgz`|Printing `hello`|
+|`ghcr.io/stargz-containers/python:3.10-org`|Printing `hello`|
+|`ghcr.io/stargz-containers/python:3.10-esgz`|Printing `hello`|
+|`ghcr.io/stargz-containers/r-base:4.1.3-org`|Printing `hello`|
+|`ghcr.io/stargz-containers/r-base:4.1.3-esgz`|Printing `hello`|
+|`ghcr.io/stargz-containers/redis:6.2.6-org`|Code execution until up and ready message (`Ready to accept connections`) is printed|
+|`ghcr.io/stargz-containers/redis:6.2.6-esgz`|Code execution until up and ready message (`Ready to accept connections`) is printed|
+|`ghcr.io/stargz-containers/rethinkdb:2.4.1-org`|Code execution until up and ready message (`Server ready`) is printed|
+|`ghcr.io/stargz-containers/rethinkdb:2.4.1-esgz`|Code execution until up and ready message (`Server ready`) is printed|
+|`ghcr.io/stargz-containers/tomcat:10.1.0-jdk17-openjdk-bullseye-org`|Code execution until up and ready message (`Server startup`) is printed|
+|`ghcr.io/stargz-containers/tomcat:10.1.0-jdk17-openjdk-bullseye-esgz`|Code execution until up and ready message (`Server startup`) is printed|
+|`ghcr.io/stargz-containers/postgres:14.2-org`|Code execution until up and ready message (`database system is ready to accept connections`) is printed|
+|`ghcr.io/stargz-containers/postgres:14.2-esgz`|Code execution until up and ready message (`database system is ready to accept connections`) is printed|
+|`ghcr.io/stargz-containers/wordpress:5.9.2-org`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/wordpress:5.9.2-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/mariadb:10.7.3-org`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
+|`ghcr.io/stargz-containers/mariadb:10.7.3-esgz`|Code execution until up and ready message (`mysqld: ready for connections`) is printed|
+|`ghcr.io/stargz-containers/php:8.1.4-apache-bullseye-org`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/php:8.1.4-apache-bullseye-esgz`|Code execution until up and ready message (`apache2 -D FOREGROUND`) is printed|
+|`ghcr.io/stargz-containers/rabbitmq:3.9.14-org`|Code execution until up and ready message (`Server startup complete`) is printed|
+|`ghcr.io/stargz-containers/rabbitmq:3.9.14-esgz`|Code execution until up and ready message (`Server startup complete`) is printed|
+|`ghcr.io/stargz-containers/elasticsearch:8.1.1-org`|Code execution until up and ready message (`started`) is printed|
+|`ghcr.io/stargz-containers/elasticsearch:8.1.1-esgz`|Code execution until up and ready message (`started`) is printed|
 |`ghcr.io/stargz-containers/nixos/nix:2.3.12-org`|Executing `echo hello` on the shell|
 |`ghcr.io/stargz-containers/nixos/nix:2.3.12-esgz`|Executing `echo hello` on the shell|
 

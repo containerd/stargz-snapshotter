@@ -232,12 +232,12 @@ fi
 
 echo "Preparing images..."
 copy ghcr.io/stargz-containers/ubuntu:20.04-org "${REGISTRY_HOST}/ubuntu:18.04"
-copy ghcr.io/stargz-containers/alpine:3.10.2-org "${REGISTRY_HOST}/alpine:3.10.2"
+copy ghcr.io/stargz-containers/alpine:3.15.3-org "${REGISTRY_HOST}/alpine:3.15.3"
 stargzify "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:sgz"
 optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:esgz"
 optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:zstdchunked"
-optimize "${REGISTRY_HOST}/alpine:3.10.2" "${REGISTRY_HOST}/alpine:esgz"
-optimize "${REGISTRY_HOST}/alpine:3.10.2" "${REGISTRY_ALT_HOST}:5000/alpine:esgz" --plain-http
+optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_HOST}/alpine:esgz"
+optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_ALT_HOST}:5000/alpine:esgz" --plain-http
 
 if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
 
