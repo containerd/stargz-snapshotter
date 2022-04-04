@@ -17,7 +17,6 @@ on:
 
 env:
   DOCKER_BUILDKIT: 1
-  DOCKER_BUILD_ARGS: --build-arg=CONTAINERD_VERSION=main # do tests with the latest containerd
 
 jobs:
   integration:

@@ -13,6 +13,17 @@ jobs:
     - name: Build all
       run: ./script/util/make.sh build -j2
 
+  build-go116:
+    runs-on: ubuntu-20.04
+    name: Check if binaries can be built with Go 1.16
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-go@v2
+      with:
+        go-version: '1.16.x'
+    - name: Build all
+      run: make build
+
   test:
     runs-on: ubuntu-20.04
     name: Test
@@ -37,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: [""]
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         exclude:
@@ -45,8 +56,6 @@ jobs:
           builtin: "true"
         - metadata-store: "db"
           builtin: "true"
-        - metadata-store: "db"
-          buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -64,7 +73,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: [""]
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -80,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: [""]
         builtin: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -101,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: [""]
         builtin: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -122,7 +131,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: [""]
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         exclude:
@@ -130,8 +139,6 @@ jobs:
           builtin: "true"
         - metadata-store: "db"
           builtin: "true"
-        - metadata-store: "db"
-          buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - uses: actions/checkout@v2
     - name: Validate containerd through CRI
