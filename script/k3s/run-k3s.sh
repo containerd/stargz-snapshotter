@@ -51,7 +51,6 @@ trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 echo "Preparing node image..."
 git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
-( cd "${TMP_K3S_REPO}" && make generate )
 cat <<EOF >> "${TMP_K3S_REPO}/go.mod"
 replace github.com/containerd/stargz-snapshotter => "$(realpath ${REPO})"
 replace github.com/containerd/stargz-snapshotter/estargz => "$(realpath ${REPO}/estargz)"
