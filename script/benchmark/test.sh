@@ -71,11 +71,7 @@ FROM ${BENCHMARKING_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
     apt-get --no-install-recommends install -y python jq && \
-    git clone https://github.com/google/go-containerregistry \
-              \${GOPATH}/src/github.com/google/go-containerregistry && \
-    cd \${GOPATH}/src/github.com/google/go-containerregistry && \
-    git checkout 4b1985e5ea2104672636879e1694808f735fd214 && \
-    GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane
+    go install github.com/google/go-containerregistry/cmd/crane@v0.8.0
 
 COPY ./config /
 
