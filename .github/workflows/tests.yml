@@ -13,6 +13,17 @@ jobs:
     - name: Build all
       run: ./script/util/make.sh build -j2
 
+  build-go116:
+    runs-on: ubuntu-20.04
+    name: Check if binaries can be built with Go 1.16
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-go@v2
+      with:
+        go-version: '1.16.x'
+    - name: Build all
+      run: make build
+
   test:
     runs-on: ubuntu-20.04
     name: Test
