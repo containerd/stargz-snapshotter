@@ -82,10 +82,7 @@ FROM ${INTEGRATION_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
     apt-get --no-install-recommends install -y iptables jq && \
-    git clone https://github.com/google/crfs \${GOPATH}/src/github.com/google/crfs && \
-    cd \${GOPATH}/src/github.com/google/crfs && \
-    git checkout 71d77da419c90be7b05d12e59945ac7a8c94a543 && \
-    GO111MODULE=on go get github.com/google/crfs/stargz/stargzify && \
+    go install github.com/google/crfs/stargz/stargzify@71d77da419c90be7b05d12e59945ac7a8c94a543 && \
     wget https://dist.ipfs.io/go-ipfs/${IPFS_VERSION}/go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
     tar -xvzf go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
     cd go-ipfs && \

@@ -83,7 +83,7 @@ ARG TARGETARCH
 
 RUN apt-get update -y && \
     apt-get --no-install-recommends install -y jq iptables zstd && \
-    GO111MODULE=on go get github.com/google/go-containerregistry/cmd/crane && \
+    go install github.com/google/go-containerregistry/cmd/crane@v0.8.0 && \
     mkdir -p /opt/tmp/cni/bin /etc/tmp/cni/net.d && \
     curl -Ls https://github.com/containernetworking/plugins/releases/download/v${CNI_PLUGINS_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-v${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/tmp/cni/bin && \
     curl -sSL https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-full-${NERDCTL_VERSION}-linux-\${TARGETARCH:-amd64}.tar.gz | tar -C /usr/local -zx bin/buildkitd bin/buildctl
