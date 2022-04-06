@@ -42,6 +42,23 @@ type zstdCompression struct {
 	*zstdchunked.Compressor
 }
 
+// LayerConvertWithLayerAndCommonOptsFunc converts legacy tar.gz layers into zstd:chunked
+// layers. Media type is unchanged. Should be used in conjunction with WithDockerToOCI(). See
+// LayerConvertFunc for more details. The difference between this function and
+// LayerConvertFunc is that this allows to specify additional options per layer.
+func LayerConvertWithLayerAndCommonOptsFunc(opts map[digest.Digest][]estargz.Option, commonOpts ...estargz.Option) converter.ConvertFunc {
+	var cOpts []estargz.Option
+	cOpts = append(cOpts, commonOpts...)
+	if opts == nil {
+		return LayerConvertFunc(cOpts...)
+	}
+	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		// TODO: enable to speciy option per layer "index" because it's possible that there are
+		//       two layers having same digest in an image (but this should be rare case)
+		return LayerConvertFunc(append(cOpts, opts[desc.Digest]...)...)(ctx, cs, desc)
+	}
+}
+
 // LayerConvertWithLayerOptsFunc converts legacy tar.gz layers into zstd:chunked layers.
 //
 // This changes Docker MediaType to OCI MediaType so this should be used in
@@ -66,8 +83,10 @@ func LayerConvertWithLayerOptsFunc(opts map[digest.Digest][]estargz.Option) conv
 //
 // Otherwise "io.containers.zstd-chunked.manifest-checksum" annotation will be lost,
 // because the Docker media type does not support layer annotations.
-func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
+func LayerConvertFunc(esgzOpts ...estargz.Option) converter.ConvertFunc {
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		var opts []estargz.Option // Copy the passed options slice and avoid directly modifying it
+		opts = append(opts, esgzOpts...)
 		if !images.IsLayerType(desc.MediaType) {
 			// No conversion. No need to return an error here.
 			return nil, nil

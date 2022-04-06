@@ -26,6 +26,11 @@ TOC_JSON_DIGEST_ANNOTATION="containerd.io/snapshot/stargz/toc.digest"
 UNCOMPRESSED_SIZE_ANNOTATION="io.containers.estargz.uncompressed-size"
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
+RECORD_IMAGE_TAG="${REGISTRY_HOST}/test/test:record$(date '+%M%S')"
+RECORD_IN_OPT_IMAGE_TAG="${REGISTRY_HOST}/test/test:record-in-opt$(date '+%M%S')"
+RECORD_IN_REF_OPT_IMAGE_TAG="${REGISTRY_HOST}/test/test:record-in-ref-opt$(date '+%M%S')"
+RECORD_COPY_OPT_IMAGE_TAG="${REGISTRY_HOST}/test/test:record-copy-opt$(date '+%M%S')"
+
 ## Image for doing network-related tests
 #
 # FROM ubuntu:20.04
@@ -205,62 +210,90 @@ echo "Checking optimized image..."
 WORKING_DIR=$(mktemp -d)
 PREFIX=/tmp/out/ make clean
 PREFIX=/tmp/out/ GO_BUILD_FLAGS="-race" make ctr-remote # Check data race
-/tmp/out/ctr-remote ${OPTIMIZE_COMMAND} -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
+/tmp/out/ctr-remote ${OPTIMIZE_COMMAND} --record-out="${WORKING_DIR}/record.json" --record-out-ref="${RECORD_IMAGE_TAG}" -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
 nerdctl push "${OPT_IMAGE_TAG}" || true
-cat <<EOF > "${WORKING_DIR}/0-want"
+nerdctl push "${RECORD_IMAGE_TAG}" || true
+nerdctl rmi "${RECORD_IMAGE_TAG}" || true
+cat <<EOF > "${WORKING_DIR}/0-opt-want"
 accessor
 a.txt
 .prefetch.landmark
 b.txt
 EOF
-append_toc "${WORKING_DIR}/0-want"
+append_toc "${WORKING_DIR}/0-opt-want"
 
-cat <<EOF > "${WORKING_DIR}/1-want"
+cat <<EOF > "${WORKING_DIR}/1-opt-want"
 c.txt
 .prefetch.landmark
 d.txt
 EOF
-append_toc "${WORKING_DIR}/1-want"
+append_toc "${WORKING_DIR}/1-opt-want"
 
-cat <<EOF > "${WORKING_DIR}/2-want"
+cat <<EOF > "${WORKING_DIR}/2-opt-want"
 .no.prefetch.landmark
 e.txt
 EOF
-append_toc "${WORKING_DIR}/2-want"
+append_toc "${WORKING_DIR}/2-opt-want"
 
 check_optimization "${OPT_IMAGE_TAG}" \
-                   "${WORKING_DIR}/0-want" \
-                   "${WORKING_DIR}/1-want" \
-                   "${WORKING_DIR}/2-want"
+                   "${WORKING_DIR}/0-opt-want" \
+                   "${WORKING_DIR}/1-opt-want" \
+                   "${WORKING_DIR}/2-opt-want"
+
+echo "Testing estargz-record-in"
+cat "${WORKING_DIR}/record.json"
+/tmp/out/ctr-remote ${CONVERT_COMMAND} --estargz-record-in="${WORKING_DIR}/record.json" "${ORG_IMAGE_TAG}" "${RECORD_IN_OPT_IMAGE_TAG}"
+nerdctl push "${RECORD_IN_OPT_IMAGE_TAG}" || true
+check_optimization "${RECORD_IN_OPT_IMAGE_TAG}" \
+                   "${WORKING_DIR}/0-opt-want" \
+                   "${WORKING_DIR}/1-opt-want" \
+                   "${WORKING_DIR}/2-opt-want"
+
+echo "Testing estargz-record-in-ref"
+nerdctl pull "${RECORD_IMAGE_TAG}"
+/tmp/out/ctr-remote ${CONVERT_COMMAND} --estargz-record-in-ref="${RECORD_IMAGE_TAG}" "${ORG_IMAGE_TAG}" "${RECORD_IN_REF_OPT_IMAGE_TAG}"
+nerdctl push "${RECORD_IN_REF_OPT_IMAGE_TAG}" || true
+check_optimization "${RECORD_IN_REF_OPT_IMAGE_TAG}" \
+                   "${WORKING_DIR}/0-opt-want" \
+                   "${WORKING_DIR}/1-opt-want" \
+                   "${WORKING_DIR}/2-opt-want"
+
+echo "Testing estargz-record-copy"
+/tmp/out/ctr-remote ${CONVERT_COMMAND} --estargz-record-copy="${OPT_IMAGE_TAG}" "${ORG_IMAGE_TAG}" "${RECORD_COPY_OPT_IMAGE_TAG}"
+nerdctl push "${RECORD_COPY_OPT_IMAGE_TAG}" || true
+check_optimization "${RECORD_COPY_OPT_IMAGE_TAG}" \
+                   "${WORKING_DIR}/0-opt-want" \
+                   "${WORKING_DIR}/1-opt-want" \
+                   "${WORKING_DIR}/2-opt-want"
 
 echo "Checking non-optimized image..."
 /tmp/out/ctr-remote ${NO_OPTIMIZE_COMMAND} "${ORG_IMAGE_TAG}" "${NOOPT_IMAGE_TAG}"
 nerdctl push "${NOOPT_IMAGE_TAG}" || true
-cat <<EOF > "${WORKING_DIR}/0-want"
+cat <<EOF > "${WORKING_DIR}/0-noopt-want"
 .no.prefetch.landmark
 a.txt
 accessor
 b.txt
 EOF
-append_toc "${WORKING_DIR}/0-want"
+append_toc "${WORKING_DIR}/0-noopt-want"
 
-cat <<EOF > "${WORKING_DIR}/1-want"
+cat <<EOF > "${WORKING_DIR}/1-noopt-want"
 .no.prefetch.landmark
 c.txt
 d.txt
 EOF
-append_toc "${WORKING_DIR}/1-want"
+append_toc "${WORKING_DIR}/1-noopt-want"
 
-cat <<EOF > "${WORKING_DIR}/2-want"
+cat <<EOF > "${WORKING_DIR}/2-noopt-want"
 .no.prefetch.landmark
 e.txt
 EOF
-append_toc "${WORKING_DIR}/2-want"
+append_toc "${WORKING_DIR}/2-noopt-want"
 
 check_optimization "${NOOPT_IMAGE_TAG}" \
-                   "${WORKING_DIR}/0-want" \
-                   "${WORKING_DIR}/1-want" \
-                   "${WORKING_DIR}/2-want"
+                   "${WORKING_DIR}/0-noopt-want" \
+                   "${WORKING_DIR}/1-noopt-want" \
+                   "${WORKING_DIR}/2-noopt-want"
 
 # Test networking & mounting work
 

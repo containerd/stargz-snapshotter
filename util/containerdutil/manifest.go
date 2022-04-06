@@ -30,8 +30,15 @@ import (
 )
 
 func ManifestDesc(ctx context.Context, provider content.Provider, image ocispec.Descriptor, platform platforms.MatchComparer) (ocispec.Descriptor, error) {
+	m, err := ManifestDescs(ctx, provider, image, platform)
+	if err != nil {
+		return ocispec.Descriptor{}, err
+	}
+	return m[0], nil
+}
+
+func ManifestDescs(ctx context.Context, provider content.Provider, image ocispec.Descriptor, platform platforms.MatchComparer) ([]ocispec.Descriptor, error) {
 	var (
-		limit    = 1
 		m        []ocispec.Descriptor
 		wasIndex bool
 	)
@@ -97,23 +104,20 @@ func ManifestDesc(ctx context.Context, provider content.Provider, image ocispec.
 				return platform.Less(*descs[i].Platform, *descs[j].Platform)
 			})
 			wasIndex = true
-			if len(descs) > limit {
-				return descs[:limit], nil
-			}
 			return descs, nil
 		}
 		return nil, fmt.Errorf("unexpected media type %v for %v: %w", desc.MediaType, desc.Digest, errdefs.ErrNotFound)
 	}), image); err != nil {
-		return ocispec.Descriptor{}, err
+		return nil, err
 	}
 	if len(m) == 0 {
 		err := fmt.Errorf("manifest %v: %w", image.Digest, errdefs.ErrNotFound)
 		if wasIndex {
 			err = fmt.Errorf("no match for platform in manifest %v: %w", image.Digest, errdefs.ErrNotFound)
 		}
-		return ocispec.Descriptor{}, err
+		return nil, err
 	}
-	return m[0], nil
+	return m, nil
 }
 
 // Forked from github.com/containerd/containerd/images/image.go

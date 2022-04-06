@@ -32,11 +32,11 @@ import (
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/analyzer"
+	imgrecorder "github.com/containerd/stargz-snapshotter/analyzer/recorder"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
-	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -76,6 +76,10 @@ var OptimizeCommand = cli.Command{
 		cli.StringFlag{
 			Name:  "record-out",
 			Usage: "record the monitor log to the specified file",
+		},
+		cli.StringFlag{
+			Name:  "record-out-ref",
+			Usage: "record the monitor log as the specified image",
 		},
 		cli.BoolFlag{
 			Name:  "oci",
@@ -139,11 +143,16 @@ var OptimizeCommand = cli.Command{
 
 		recordOut, esgzOptsPerLayer, wrapper, err := analyze(ctx, clicontext, client, srcRef)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to analyze: %w", err)
 		}
 		if recordOutFile := clicontext.String("record-out"); recordOutFile != "" {
 			if err := writeContentFile(ctx, client, recordOut, recordOutFile); err != nil {
 				return fmt.Errorf("failed output record file: %w", err)
+			}
+		}
+		if recordOutRef := clicontext.String("record-out-ref"); recordOutRef != "" {
+			if _, err := imgrecorder.RecordOutToImage(ctx, client, recordOut, recordOutRef); err != nil {
+				return fmt.Errorf("failed output record ref: %w", err)
 			}
 		}
 		var f converter.ConvertFunc
@@ -160,7 +169,7 @@ var OptimizeCommand = cli.Command{
 		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(layerConvertFunc))
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to convert %w", err)
 		}
 		fmt.Fprintln(clicontext.App.Writer, newImg.Target.Digest.String())
 		return nil
@@ -231,53 +240,31 @@ func analyze(ctx context.Context, clicontext *cli.Context, client *containerd.Cl
 	}
 	recordOut, err := analyzer.Analyze(ctx, client, srcRef, aOpts...)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, fmt.Errorf("failed to analyze: %w", err)
 	}
 
 	// Parse record file
 	srcImg, err := is.Get(ctx, srcRef)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, fmt.Errorf("failed to get image: %w", err)
 	}
 	manifestDesc, err := containerdutil.ManifestDesc(ctx, cs, srcImg.Target, platforms.DefaultStrict())
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, fmt.Errorf("failed to get manifest: %w", err)
 	}
 	p, err := content.ReadBlob(ctx, cs, manifestDesc)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
 	var manifest ocispec.Manifest
 	if err := json.Unmarshal(p, &manifest); err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, fmt.Errorf("failed to unmarshal manifest: %w", err)
 	}
 	// TODO: this should be indexed by layer "index" (not "digest")
-	layerLogs := make(map[digest.Digest][]string, len(manifest.Layers))
-	ra, err := cs.ReaderAt(ctx, ocispec.Descriptor{Digest: recordOut})
+	layerLogs, err := imgrecorder.PrioritizedFilesFromRecord(ctx, cs, manifestDesc.Digest, recordOut)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, fmt.Errorf("failed to get prioritized files from record: %w", err)
 	}
-	defer ra.Close()
-	dec := json.NewDecoder(io.NewSectionReader(ra, 0, ra.Size()))
-	added := make(map[digest.Digest]map[string]struct{}, len(manifest.Layers))
-	for dec.More() {
-		var e recorder.Entry
-		if err := dec.Decode(&e); err != nil {
-			return "", nil, nil, err
-		}
-		if *e.LayerIndex < len(manifest.Layers) &&
-			e.ManifestDigest == manifestDesc.Digest.String() {
-			dgst := manifest.Layers[*e.LayerIndex].Digest
-			if added[dgst] == nil {
-				added[dgst] = map[string]struct{}{}
-			}
-			if _, ok := added[dgst][e.Path]; !ok {
-				added[dgst][e.Path] = struct{}{}
-				layerLogs[dgst] = append(layerLogs[dgst], e.Path)
-			}
-		}
-	}
-
 	// Create a converter wrapper for skipping layer conversion. This skip occurs
 	// if "reuse" option is specified, the source layer is already valid estargz
 	// and no access occur to that layer.

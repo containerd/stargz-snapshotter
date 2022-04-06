@@ -266,3 +266,178 @@ ctr-remote image optimize --oci \
 By default, when the source image is a multi-platform image, `ctr-remote` converts the image corresponding to the platform where `ctr-remote` runs.
 
 Note that though the images specified by `--all-platform` and `--platform` are converted to eStargz, images that don't correspond to the current platform aren't *optimized*. That is, these images are lazily pulled but without prefetch.
+
+### Static optimization by sharing prioritized files information
+
+If you don't want to run the prifiler for optimizing an eStargz image as mentioned above, you can take either of the following approaches using pre-generated prioritized files information.
+
+- Copying prioritized files information from an existing eStargz image
+- Acquiering prioritized files information shared as a file
+- Acquiering prioritized files information shared via registry
+
+#### Copying prioritized files information from an existing eStargz image
+
+`ctr-remote image convert` command provides `--estargz-record-copy` option that allowes you to specify an existing eStargz image.
+When this option is used, ctr-remote analyzes the specified eStargz image, extracts prioritized files information then applies it to the newly-creating eStargz image.
+
+For example, when you optimize an eStargz image using profiler as mentioned above,
+
+```
+ctr-remote image optimize --oci \
+           --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "go version" ]' \
+           ghcr.io/stargz-containers/golang:1.15.3-buster-org \
+           registry2:5000/golang:1.15.3-esgz-go-version
+```
+
+You get the optimized eStargz `registry2:5000/golang:1.15.3-esgz-go-version`.
+
+Now you can create a new eStargz image with the same optimization as `registry2:5000/golang:1.15.3-esgz-go-version` using `--estargz-record-copy` without running the profiler.
+
+```
+ctr-remote image convert --oci --estargz \
+           --estargz-record-copy registry2:5000/golang:1.15.3-esgz-go-version \
+           ghcr.io/stargz-containers/golang:1.15.3-buster-org \
+           registry2:5000/golang:1.15.3-esgz-go-version-static
+```
+
+Here, `registry2:5000/golang:1.15.3-esgz-go-version-static` has the same digest as `registry2:5000/golang:1.15.3-esgz-go-version` because they have the same prioritized files information.
+
+> It's allowed that the eStragz image specified by `estargz-record-copy` is completely different from the converting image (e.g. optimizing `python:3.9` image by copying prioritized files information from `golang:1.15.3-esgz-go-version`).
+> In this case, prioritized files information is applied to the newly-creating eStargz in a best-effort manner.
+> Therefore, files contained in both of the image specified by `estargz-record-copy` and newly-creating one are considered as the prioritized files.
+
+#### Sharing prioritized files information using record files
+
+When optimizing an eStargz image, you can use the pre-generated *record file* which records the prioritized files of the image for a specific workload.
+
+A record file is formed as either of the following formats.
+
+- File : JSON file which records prioritized files for a specific workload
+- OCI image : An OCI-compliant image contains a record file. It can be shared among hosts/users via container registry.
+
+As shown in the following, `ctr-remote image optimize` command with `--record-out` option creates an optimized eStargz and generates a record file which contains the prioritized files information.
+
+```
+ctr-remote image optimize --oci --record-out=/tmp/record.json \
+           --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "go version" ]' \
+           ghcr.io/stargz-containers/golang:1.15.3-buster-org \
+           registry2:5000/golang:1.15.3-esgz-go-version
+```
+
+The generated record file `/tmp/record.json` contains a list of prioritized files like the following.
+Please see [`recorder`](https://github.com/containerd/stargz-snapshotter/blob/main/recorder/recorder.go) package in this repo for the detailed format of the JSON.
+
+```json
+{"path":"bin/bash","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"bin/bash","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/ld-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/ld.so.cache","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":4}
+{"path":"lib/x86_64-linux-gnu/libtinfo.so.6.1","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/libdl-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/libc-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/nsswitch.conf","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/ld.so.cache","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":4}
+{"path":"lib/x86_64-linux-gnu/libnss_files-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/passwd","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"usr/local/go/bin/go","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":5}
+{"path":"lib/x86_64-linux-gnu/ld-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/ld.so.cache","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":4}
+{"path":"lib/x86_64-linux-gnu/libpthread-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/libc-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+```
+
+The generated record file can be used for optimizing other images without running the profiler.
+`ctr-remote image convert` command provides `--estargz-record-in` option  that allowes you to specify the record file.
+The newly-created eStargz will be applied the prioritized files information described in the record file.
+
+```
+ctr-remote image convert --oci --estargz \
+           --estargz-record-in /tmp/record.json \
+           ghcr.io/stargz-containers/golang:1.15.3-buster-org \
+           registry2:5000/golang:1.15.3-esgz-go-version-static
+```
+
+Here, `registry2:5000/golang:1.15.3-esgz-go-version-static` has the same digest as `registry2:5000/golang:1.15.3-esgz-go-version` because they have the same prioritized files information.
+
+> Prioritized files information described in the record file image is applied to the newly-creating eStargz in a best-effort manner.
+> Therefore, files contained in both of the record file and the newly-creating eStargz are considered as the prioritized files.
+
+#### Sharing prioritized files information via container registry
+
+You can share the record file metioned above via container registry.
+`ctr-remote image optimize` command provides `--record-out-ref` option which packages the record file as an OCI image.
+The created record file image can be pushed to the container registry and shared among hosts/users via registry.
+
+```
+ctr-remote image optimize --oci --record-out-ref=registry2:5000/golang:record-1.15.3-esgz-go-version \
+           --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "go version" ]' \
+           ghcr.io/stargz-containers/golang:1.15.3-buster-org \
+           registry2:5000/golang:1.15.3-esgz-go-version
+```
+
+Here, `registry2:5000/golang:record-1.15.3-esgz-go-version` is the record files packaged as an OCI image.
+
+`ctr-remote image convert` command provides `--estargz-record-in-ref` option that allowes you to use the recrod file image for optimizing a new eStargz image.
+The newly-created eStargz will be applied the prioritized files information described in the record file.
+
+```
+ctr-remote image convert --oci --estargz \
+           --estargz-record-in-ref registry2:5000/golang:record-1.15.3-esgz-go-version \
+           ghcr.io/stargz-containers/golang:1.15.3-buster-org \
+           registry2:5000/golang:1.15.3-esgz-go-version-static
+```
+
+Here, `registry2:5000/golang:1.15.3-esgz-go-version-static` has the same digest as `registry2:5000/golang:1.15.3-esgz-go-version` because they have the same prioritized files information.
+
+> Prioritized files information described in the record file image is applied to the newly-creating eStargz in a best-effort manner.
+> Therefore, files contained in both of the record file and the newly-creating eStargz are considered as the prioritized files.
+
+##### Format of record file image
+
+Record file image described above is an OCI image only contains one gzip-compressed layer that contains the record file as a tar entry named `stargz.record.json`.
+
+The follwoing is the manifest of the record file image `registry2:5000/golang:record-1.15.3-esgz-go-version` mentioned above.
+
+```json
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:518c804adcec04f5148877af99ec6d216eb50fc47b0b1430217163b838ef7f15",
+    "size": 164
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:5b37372a28490bb0737aaadb48241b72ca6e54e023b15ac481a5a3df0da69dcc",
+      "size": 344
+    }
+  ]
+}
+```
+
+Layer blob `sha256:5b37372a28490bb0737aaadb48241b72ca6e54e023b15ac481a5a3df0da69dcc` is a tar.gz blob that contains the record file as a tar entry named `stargz.record.json`.
+
+```
+# cat /tmp/img/blobs/sha256/5b37372a28490bb0737aaadb48241b72ca6e54e023b15ac481a5a3df0da69dcc | tar -zxO stargz.record.json
+{"path":"bin/bash","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"bin/bash","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/ld-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/ld.so.cache","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":4}
+{"path":"lib/x86_64-linux-gnu/libtinfo.so.6.1","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/libdl-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/libc-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/nsswitch.conf","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/nsswitch.conf","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/ld.so.cache","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":4}
+{"path":"lib/x86_64-linux-gnu/libnss_files-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/libnss_files-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/passwd","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"usr/local/go/bin/go","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":5}
+{"path":"usr/local/go/bin/go","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":5}
+{"path":"lib/x86_64-linux-gnu/ld-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"etc/ld.so.cache","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":4}
+{"path":"lib/x86_64-linux-gnu/libpthread-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+{"path":"lib/x86_64-linux-gnu/libc-2.28.so","manifestDigest":"sha256:2322be6aa1e61c36cfa34a0d355b7f088022e34c6f17016bafae6041c67a0a1b","layerIndex":0}
+```
