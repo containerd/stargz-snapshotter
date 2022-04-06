@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/containerd/console v1.0.3
 	github.com/containerd/containerd v1.6.2
-	github.com/containerd/continuity v0.2.2
+	github.com/containerd/continuity v0.3.0
 	github.com/containerd/stargz-snapshotter/estargz v0.11.3
 	github.com/docker/cli v20.10.14+incompatible
 	github.com/docker/docker v20.10.7+incompatible // indirect
@@ -25,7 +25,7 @@ require (
 	github.com/rs/xid v1.4.0
 	github.com/sirupsen/logrus v1.8.1
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20220209214540-3681064d5158
+	golang.org/x/sys v0.0.0-20220405210540-1e041c57c461
 	google.golang.org/grpc v1.45.0
 	k8s.io/api v0.23.5
 	k8s.io/apimachinery v0.23.5
