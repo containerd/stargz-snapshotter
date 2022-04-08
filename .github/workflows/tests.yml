@@ -164,7 +164,7 @@ jobs:
     runs-on: ubuntu-20.04
     name: K3S
     steps:
-    - uses: actions/setup-go@v2
+    - uses: actions/setup-go@v3
       with:
         go-version: '1.17.x'
     - name: Install k3d
@@ -186,7 +186,7 @@ jobs:
     env:
       RESULT_DIR: ${{ github.workspace }}/argo-workflow/
     steps:
-    - uses: actions/setup-go@v2
+    - uses: actions/setup-go@v3
       with:
         go-version: '1.17.x'
     - name: Install k3d
@@ -226,7 +226,7 @@ jobs:
     runs-on: ubuntu-20.04
     timeout-minutes: 5
     steps:
-      - uses: actions/setup-go@v2
+      - uses: actions/setup-go@v3
         with:
           go-version: '1.18.x'
       - uses: actions/checkout@v3
