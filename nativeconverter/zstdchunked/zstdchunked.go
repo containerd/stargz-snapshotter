@@ -114,7 +114,7 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 				Metadata:         metadata,
 			},
 		}))
-		blob, err := estargz.Build(uncompressedSR, opts...)
+		blob, err := estargz.Build(uncompressedSR, append(opts, estargz.WithContext(ctx))...)
 		if err != nil {
 			return nil, err
 		}
