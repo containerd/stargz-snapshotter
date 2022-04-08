@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	"github.com/containerd/containerd/images/converter"
@@ -174,6 +175,17 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		}
 		defer cancel()
 
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt)
+		go func() {
+			// Cleanly cancel conversion
+			select {
+			case s := <-sigCh:
+				logrus.Infof("Got %v", s)
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
 			return err

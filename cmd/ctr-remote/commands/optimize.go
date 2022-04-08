@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/containerd/containerd"
@@ -157,6 +158,18 @@ var OptimizeCommand = cli.Command{
 			f = wrapper(f)
 		}
 		layerConvertFunc := logWrapper(f)
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt)
+		go func() {
+			// Cleanly cancel conversion
+			select {
+			case s := <-sigCh:
+				logrus.Infof("Got %v", s)
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
 		convertOpts = append(convertOpts, converter.WithLayerConvertFunc(layerConvertFunc))
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {

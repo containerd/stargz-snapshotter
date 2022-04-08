@@ -77,7 +77,7 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 		}
 		defer ra.Close()
 		sr := io.NewSectionReader(ra, 0, desc.Size)
-		blob, err := estargz.Build(sr, opts...)
+		blob, err := estargz.Build(sr, append(opts, estargz.WithContext(ctx))...)
 		if err != nil {
 			return nil, err
 		}
