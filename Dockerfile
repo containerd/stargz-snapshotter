@@ -12,10 +12,10 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-ARG CONTAINERD_VERSION=v1.6.2
+ARG CONTAINERD_VERSION=v1.6.3
 ARG RUNC_VERSION=v1.1.1
 ARG CNI_PLUGINS_VERSION=v1.1.1
-ARG NERDCTL_VERSION=0.18.0
+ARG NERDCTL_VERSION=0.19.0
 
 ARG PODMAN_VERSION=v4.0.3
 ARG CRIO_VERSION=v1.23.2
