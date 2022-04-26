@@ -3,7 +3,7 @@ module github.com/containerd/stargz-snapshotter/cmd
 go 1.16
 
 require (
-	github.com/containerd/containerd v1.6.2
+	github.com/containerd/containerd v1.6.3
 	github.com/containerd/go-cni v1.1.4
 	github.com/containerd/stargz-snapshotter v0.11.4
 	github.com/containerd/stargz-snapshotter/estargz v0.11.4
@@ -15,7 +15,7 @@ require (
 	github.com/ipfs/go-ipfs-http-client v0.3.1
 	github.com/ipfs/interface-go-ipfs-core v0.7.0
 	github.com/opencontainers/go-digest v1.0.0
-	github.com/opencontainers/image-spec v1.0.2-0.20211117181255-693428a734f5
+	github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.4.0
