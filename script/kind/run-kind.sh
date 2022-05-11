@@ -143,6 +143,14 @@ metadata:
   name: stargz-snapshotter
   namespace: default
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: stargz-snapshotter-sercret
+  annotations:
+    kubernetes.io/service-account.name: "stargz-snapshotter"
+type: kubernetes.io/service-account-token
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -169,21 +177,8 @@ EOF
 echo "Installing kubeconfig for stargz snapshotter on node...."
 APISERVER_PORT=$(docker exec -i "${KIND_NODENAME}" ps axww \
                      | grep kube-apiserver | sed -n -E 's/.*--secure-port=([0-9]*).*/\1/p')
-TOKENNAME=
-for (( RETRY=1; RETRY<=50; RETRY++ )) ; do
-    echo "[${RETRY}] Getting token name..."
-    TOKENNAME=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get sa stargz-snapshotter -o jsonpath='{.secrets[0].name}')
-    if [ "${TOKENNAME}" != "" ] ; then
-        break
-    fi
-    sleep 3
-done
-if [ "${TOKENNAME}" == "" ] ; then
-    echo "Failed to get token name of stargz snapshotter service account"
-    exit 1
-fi
-CA=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/${TOKENNAME} -o jsonpath='{.data.ca\.crt}')
-TOKEN=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/${TOKENNAME} -o jsonpath='{.data.token}' \
+CA=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/stargz-snapshotter-sercret -o jsonpath='{.data.ca\.crt}')
+TOKEN=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/stargz-snapshotter-sercret -o jsonpath='{.data.token}' \
             | base64 --decode)
 cat <<EOF > "${SN_KUBECONFIG}"
 apiVersion: v1
