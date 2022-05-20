@@ -52,7 +52,7 @@ check:
 	@cd ./ipfs ; GO111MODULE=$(GO111MODULE_VALUE) $(shell go env GOPATH)/bin/golangci-lint run
 
 install-check-tools:
-	@curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(shell go env GOPATH)/bin v1.45.2
+	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v1.46.2/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v1.46.2
 
 install:
 	@echo "$@"

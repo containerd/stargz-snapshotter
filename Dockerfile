@@ -13,18 +13,18 @@
 #   limitations under the License.
 
 ARG CONTAINERD_VERSION=v1.6.4
-ARG RUNC_VERSION=v1.1.1
+ARG RUNC_VERSION=v1.1.2
 ARG CNI_PLUGINS_VERSION=v1.1.1
-ARG NERDCTL_VERSION=0.19.0
+ARG NERDCTL_VERSION=0.20.0
 
-ARG PODMAN_VERSION=v4.0.3
-ARG CRIO_VERSION=v1.23.2
+ARG PODMAN_VERSION=v4.1.0
+ARG CRIO_VERSION=v1.24.0
 ARG CONMON_VERSION=v2.1.0
-ARG COMMON_VERSION=v0.47.4
+ARG COMMON_VERSION=v0.48.0
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=k8s.gcr.io/pause:3.6
 
 # Used in CI
-ARG CRI_TOOLS_VERSION=v1.23.0
+ARG CRI_TOOLS_VERSION=v1.24.1
 
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
@@ -224,7 +224,10 @@ RUN apt-get update -y && apt-get install --no-install-recommends -y \
     curl -sSL https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin && \
     echo ${CRIO_TEST_PAUSE_IMAGE_NAME} > /pause_name && \
     mkdir -p /etc/sysconfig && \
-    echo CRIO_RUNTIME_OPTIONS=--pause-image=${CRIO_TEST_PAUSE_IMAGE_NAME} > /etc/sysconfig/crio
+    echo CRIO_RUNTIME_OPTIONS=--pause-image=${CRIO_TEST_PAUSE_IMAGE_NAME} > /etc/sysconfig/crio && \
+    # Necessary to pass CRI tests: https://github.com/kubernetes-sigs/cri-tools/pull/905
+    mkdir -p /etc/crio/crio.conf.d && \
+    printf '[crio.runtime]\nseccomp_use_default_when_empty = false\n' > /etc/crio/crio.conf.d/02-seccomp.conf
 
 COPY --from=stargz-store-dev /out/* /usr/local/bin/
 COPY --from=cri-o-dev /out/bin/* /usr/local/bin/
