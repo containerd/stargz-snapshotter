@@ -166,7 +166,7 @@ var _ = (fusefs.InodeEmbedder)((*rootnode)(nil))
 
 var _ = (fusefs.NodeLookuper)((*rootnode)(nil))
 
-// Lookup loads manifest and config of specified name (imgae reference)
+// Lookup loads manifest and config of specified name (image reference)
 // and returns refnode of the specified name
 func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
 	// lookup on memory nodes
