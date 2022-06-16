@@ -198,7 +198,7 @@ Runtimes MAY first read and parse the footer to get the offset of TOC.
 
 Each file's metadata is recorded in the TOC so runtimes don't need to extract other parts of the archive as long as it only uses file metadata.
 If runtime needs to get a regular file's content, it can get the size and offset of that content from the TOC and extract that range without scanning the entire blob.
-By combining this with HTTP Range Request supported by [OCI Distribution Spec](https://github.com/opencontainers/distribution-spec/blob/main/detail.md#fetch-blob-part), runtimes can selectively download file entries from the registry.
+By combining this with HTTP Range Request supported by [OCI Distribution Spec](https://github.com/opencontainers/distribution-spec/blob/ef28f81727c3b5e98ab941ae050098ea664c0960/detail.md#fetch-blob-part), runtimes can selectively download file entries from the registry.
 
 ### Notes on compatibility with stargz
 
