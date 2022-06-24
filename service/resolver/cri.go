@@ -19,7 +19,7 @@ package resolver
 // =====
 // This is CRI-plugin-compatible registry hosts configuration.
 // Some functions are ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri as noted on each one.
-// TODO: import them from CRI package once we drop support to continerd v1.4.x
+// TODO: import them from CRI package once we drop support to continerd v1.5.x (cri v1alpha2)
 // =====
 
 import (
@@ -105,7 +105,6 @@ type TLSConfig struct {
 
 // RegistryHostsFromCRIConfig creates RegistryHosts (a set of registry configuration) from CRI-plugin-compatible config.
 // NOTE: ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L332-L405
-// TODO: import this from CRI package once we drop support to continerd v1.4.x
 func RegistryHostsFromCRIConfig(ctx context.Context, config Registry, credsFuncs ...Credential) source.RegistryHosts {
 	paths := filepath.SplitList(config.ConfigPath)
 	if len(paths) > 0 {
@@ -176,8 +175,7 @@ func RegistryHostsFromCRIConfig(ctx context.Context, config Registry, credsFuncs
 	}
 }
 
-// Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L316-L330
-// TODO: import this from CRI package once we drop support to continerd v1.4.x
+// NOTE: Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L316-L330
 func hostDirFromRoots(roots []string) func(string) (string, error) {
 	rootfn := make([]func(string) (string, error), len(roots))
 	for i := range roots {
@@ -195,8 +193,7 @@ func hostDirFromRoots(roots []string) func(string) (string, error) {
 }
 
 // toRuntimeAuthConfig converts cri plugin auth config to runtime auth config.
-// Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/helpers.go#L295-L303
-// TODO: import this from CRI package once we drop support to continerd v1.4.x
+// NOTE: Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/helpers.go#L295-L303
 func toRuntimeAuthConfig(a AuthConfig) *runtime.AuthConfig {
 	return &runtime.AuthConfig{
 		Username:      a.Username,
@@ -207,8 +204,7 @@ func toRuntimeAuthConfig(a AuthConfig) *runtime.AuthConfig {
 }
 
 // getTLSConfig returns a TLSConfig configured with a CA/Cert/Key specified by registryTLSConfig
-// Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L316-L330
-// TODO: import this from CRI package once we drop support to continerd v1.4.x
+// NOTE: Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L316-L330
 func getTLSConfig(registryTLSConfig TLSConfig) (*tls.Config, error) {
 	var (
 		tlsConfig = &tls.Config{}
@@ -250,8 +246,7 @@ func getTLSConfig(registryTLSConfig TLSConfig) (*tls.Config, error) {
 }
 
 // defaultScheme returns the default scheme for a registry host.
-// Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L316-L330
-// TODO: import this from CRI package once we drop support to continerd v1.4.x
+// NOTE: Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L316-L330
 func defaultScheme(host string) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
@@ -263,8 +258,7 @@ func defaultScheme(host string) string {
 }
 
 // addDefaultScheme returns the endpoint with default scheme
-// Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L316-L330
-// TODO: import this from CRI package once we drop support to continerd v1.4.x
+// NOTE: Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L316-L330
 func addDefaultScheme(endpoint string) (string, error) {
 	if strings.Contains(endpoint, "://") {
 		return endpoint, nil
@@ -280,8 +274,7 @@ func addDefaultScheme(endpoint string) (string, error) {
 // registryEndpoints returns endpoints for a given host.
 // It adds default registry endpoint if it does not exist in the passed-in endpoint list.
 // It also supports wildcard host matching with `*`.
-// Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L431-L464
-// TODO: import this from CRI package once we drop support to continerd v1.4.x
+// NOTE: Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L431-L464
 func registryEndpoints(config Registry, host string) ([]string, error) {
 	var endpoints []string
 	_, ok := config.Mirrors[host]
@@ -315,8 +308,7 @@ func registryEndpoints(config Registry, host string) ([]string, error) {
 }
 
 // ParseAuth parses AuthConfig and returns username and password/secret required by containerd.
-// Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L176-L214
-// TODO: import this from CRI package once we drop support to continerd v1.4.x
+// NOTE: Ported from https://github.com/containerd/containerd/blob/v1.5.2/pkg/cri/server/image_pull.go#L176-L214
 func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 	if auth == nil {
 		return "", "", nil

@@ -22,12 +22,12 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
-	"github.com/containerd/stargz-snapshotter/snapshot/overlayutils"
 	"github.com/hashicorp/go-multierror"
 )
 
