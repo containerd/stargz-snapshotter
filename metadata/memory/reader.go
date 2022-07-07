@@ -21,7 +21,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -35,22 +34,12 @@ type reader struct {
 
 	idMap     map[uint32]*estargz.TOCEntry
 	idOfEntry map[*estargz.TOCEntry]uint32
-	mu        sync.Mutex
 
-	curID   uint32
-	curIDMu sync.Mutex
-
-	opts *metadata.Options
+	estargzOpts []estargz.OpenOption
 }
 
-func (r *reader) nextID() (uint32, error) {
-	r.curIDMu.Lock()
-	defer r.curIDMu.Unlock()
-	if r.curID == math.MaxUint32 {
-		return 0, fmt.Errorf("sequence id too large")
-	}
-	r.curID++
-	return r.curID, nil
+func newReader(er *estargz.Reader, rootID uint32, idMap map[uint32]*estargz.TOCEntry, idOfEntry map[*estargz.TOCEntry]uint32, estargzOpts []estargz.OpenOption) *reader {
+	return &reader{r: er, rootID: rootID, idMap: idMap, idOfEntry: idOfEntry, estargzOpts: estargzOpts}
 }
 
 func NewReader(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
@@ -71,54 +60,72 @@ func NewReader(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, 
 	for _, d := range rOpts.Decompressors {
 		decompressors = append(decompressors, d)
 	}
-	er, err := estargz.Open(sr,
+
+	erOpts := []estargz.OpenOption{
 		estargz.WithTOCOffset(rOpts.TOCOffset),
 		estargz.WithTelemetry(telemetry),
 		estargz.WithDecompressors(decompressors...),
-	)
+	}
+	er, err := estargz.Open(sr, erOpts...)
 	if err != nil {
 		return nil, err
 	}
-
 	root, ok := er.Lookup("")
 	if !ok {
 		return nil, fmt.Errorf("failed to get root node")
 	}
-	r := &reader{r: er, idMap: make(map[uint32]*estargz.TOCEntry), idOfEntry: make(map[*estargz.TOCEntry]uint32), opts: &rOpts}
-	rootID, err := r.initID(root)
-	if err != nil {
-		return nil, err
-	}
-	r.rootID = rootID
+	rootID, idMap, idOfEntry, err := assignIDs(er, root)
+	r := newReader(er, rootID, idMap, idOfEntry, erOpts)
 	return r, nil
 }
 
-func (r *reader) initID(e *estargz.TOCEntry) (id uint32, err error) {
-	var ok bool
-	r.mu.Lock()
-	id, ok = r.idOfEntry[e]
-	if !ok {
-		id, err = r.nextID()
-		if err != nil {
-			return 0, err
-		}
-		r.idMap[id] = e
-		r.idOfEntry[e] = id
-	}
-	r.mu.Unlock()
+// assignIDs assigns an to each TOC item and returns a mapping from ID to entry and vice-versa.
+func assignIDs(er *estargz.Reader, e *estargz.TOCEntry) (rootID uint32, idMap map[uint32]*estargz.TOCEntry, idOfEntry map[*estargz.TOCEntry]uint32, err error) {
+	idMap = make(map[uint32]*estargz.TOCEntry)
+	idOfEntry = make(map[*estargz.TOCEntry]uint32)
+	curID := uint32(0)
 
-	e.ForeachChild(func(_ string, ent *estargz.TOCEntry) bool {
-		if ent.Type == "hardlink" {
-			var ok bool
-			ent, ok = r.r.Lookup(ent.Name)
-			if !ok {
-				return false
-			}
+	nextID := func() (uint32, error) {
+		if curID == math.MaxUint32 {
+			return 0, fmt.Errorf("sequence id too large")
 		}
-		_, err = r.initID(ent)
-		return err == nil
-	})
-	return id, err
+		curID++
+		return curID, nil
+	}
+
+	var mapChildren func(e *estargz.TOCEntry) (uint32, error)
+	mapChildren = func(e *estargz.TOCEntry) (uint32, error) {
+		var ok bool
+		id, ok := idOfEntry[e]
+		if !ok {
+			id, err = nextID()
+			if err != nil {
+				return 0, err
+			}
+			idMap[id] = e
+			idOfEntry[e] = id
+		}
+
+		e.ForeachChild(func(_ string, ent *estargz.TOCEntry) bool {
+			if ent.Type == "hardlink" {
+				var ok bool
+				ent, ok = er.Lookup(ent.Name)
+				if !ok {
+					return false
+				}
+			}
+			_, err = mapChildren(ent)
+			return err == nil
+		})
+		return id, nil
+	}
+
+	rootID, err = mapChildren(e)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+
+	return rootID, idMap, idOfEntry, nil
 }
 
 func (r *reader) RootID() uint32 {
@@ -130,8 +137,6 @@ func (r *reader) TOCDigest() digest.Digest {
 }
 
 func (r *reader) GetOffset(id uint32) (offset int64, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	e, ok := r.idMap[id]
 	if !ok {
 		return 0, fmt.Errorf("entry %d not found", id)
@@ -140,9 +145,7 @@ func (r *reader) GetOffset(id uint32) (offset int64, err error) {
 }
 
 func (r *reader) GetAttr(id uint32) (attr metadata.Attr, err error) {
-	r.mu.Lock()
 	e, ok := r.idMap[id]
-	r.mu.Unlock()
 	if !ok {
 		err = fmt.Errorf("entry %d not found", id)
 		return
@@ -153,9 +156,7 @@ func (r *reader) GetAttr(id uint32) (attr metadata.Attr, err error) {
 }
 
 func (r *reader) GetChild(pid uint32, base string) (id uint32, attr metadata.Attr, err error) {
-	r.mu.Lock()
 	e, ok := r.idMap[pid]
-	r.mu.Unlock()
 	if !ok {
 		err = fmt.Errorf("parent entry %d not found", pid)
 		return
@@ -183,9 +184,7 @@ func (r *reader) GetChild(pid uint32, base string) (id uint32, attr metadata.Att
 }
 
 func (r *reader) ForeachChild(id uint32, f func(name string, id uint32, mode os.FileMode) bool) error {
-	r.mu.Lock()
 	e, ok := r.idMap[id]
-	r.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("parent entry %d not found", id)
 	}
@@ -198,9 +197,7 @@ func (r *reader) ForeachChild(id uint32, f func(name string, id uint32, mode os.
 				return false
 			}
 		}
-		r.mu.Lock()
 		id, ok := r.idOfEntry[ent]
-		r.mu.Unlock()
 		if !ok {
 			err = fmt.Errorf("id of child entry %q not found", baseName)
 			return false
@@ -211,9 +208,7 @@ func (r *reader) ForeachChild(id uint32, f func(name string, id uint32, mode os.
 }
 
 func (r *reader) OpenFile(id uint32) (metadata.File, error) {
-	r.mu.Lock()
 	e, ok := r.idMap[id]
-	r.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("entry %d not found", id)
 	}
@@ -225,11 +220,12 @@ func (r *reader) OpenFile(id uint32) (metadata.File, error) {
 }
 
 func (r *reader) Clone(sr *io.SectionReader) (metadata.Reader, error) {
-	return NewReader(sr,
-		metadata.WithTOCOffset(r.opts.TOCOffset),
-		metadata.WithTelemetry(r.opts.Telemetry),
-		metadata.WithDecompressors(r.opts.Decompressors...),
-	)
+	er, err := estargz.Open(sr, r.estargzOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return newReader(er, r.rootID, r.idMap, r.idOfEntry, r.estargzOpts), nil
 }
 
 func (r *reader) Close() error {
