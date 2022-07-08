@@ -257,6 +257,24 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 					if err := checkCalled(); err != nil {
 						t.Errorf("telemetry failure: %v", err)
 					}
+
+					// Test the cloned reader works correctly as well
+					esgz2, _, err := testutil.BuildEStargz(tt.in, opts...)
+					if err != nil {
+						t.Fatalf("failed to build sample eStargz: %v", err)
+					}
+					clonedR, err := r.Clone(esgz2)
+					if err != nil {
+						t.Fatalf("failed to clone reader: %v", err)
+					}
+					defer clonedR.Close()
+					t.Logf("vvvvv Node tree (cloned) vvvvv")
+					t.Logf("[%d] ROOT", clonedR.RootID())
+					dumpNodes(t, clonedR.(TestableReader), clonedR.RootID(), 1)
+					t.Logf("^^^^^^^^^^^^^^^^^^^^^")
+					for _, want := range tt.want {
+						want(t, clonedR.(TestableReader))
+					}
 				})
 			}
 		}
