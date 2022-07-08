@@ -75,6 +75,9 @@ func NewReader(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, 
 		return nil, fmt.Errorf("failed to get root node")
 	}
 	rootID, idMap, idOfEntry, err := assignIDs(er, root)
+	if err != nil {
+		return nil, err
+	}
 	r := newReader(er, rootID, idMap, idOfEntry, erOpts)
 	return r, nil
 }
