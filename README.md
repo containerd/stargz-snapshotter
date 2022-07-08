@@ -128,31 +128,61 @@ This section describes some of them.
 
 You can try our pre-converted eStargz images on ghcr.io listed in [Trying pre-converted images](/docs/pre-converted-images.md).
 
-### Registry-side conversion with `estargz.kontain.me`
+### Building eStargz images using BuildKit
 
-You can convert arbitrary images into eStargz on the registry-side, using [`estargz.kontain.me`](https://estargz.kontain.me).
-`estargz.kontain.me/[image]` serves eStargz-converted version of an arbitrary public image.
+BuildKit supports building eStargz image since v0.10.
 
-For example, the following Kubernetes manifest performs lazy pulling of eStargz-formatted version of `docker.io/library/nginx:1.21.1` that is converted by `estargz.kontain.me`.
+You can try it using [Docker Buildx](https://docs.docker.com/buildx/working-with-buildx/).
+The following command builds an eStargz image and push it to `ghcr.io/ktock/hello:esgz`.
+Flags `oci-mediatypes=true,compression=estargz` enable to build eStargz.
 
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: nginx
-spec:
-  containers:
-  - name: nginx
-    image: estargz.kontain.me/docker.io/library/nginx:1.21.1
-    ports:
-    - containerPort: 80
+```
+$ docker buildx build -t ghcr.io/ktock/hello:esgz \
+    -o type=registry,oci-mediatypes=true,compression=estargz,force-compression=true \
+    /tmp/buildctx/
 ```
 
-> WARNING: Before trying this method, read [caveats from kontain.me](https://github.com/imjasonh/kontain.me#caveats). If you rely on it in production, you should copy the image to your own registry or build eStargz by your own using `ctr-remote` as described in the following.
+> NOTE1: `force-compression=true` isn't needed if the base image is already eStargz.
 
-### Creating eStargz using `ctr-remote`
+> NOTE2: Docker still does not support lazy pulling of eStargz.
 
-In this section, we introduce [`ctr-remote`](/docs/ctr-remote.md) command for converting images into eStargz with optimization for reading files.
+eStargz-enaled BuildKit (v0.10) will be [included to Docker v22.XX](https://github.com/moby/moby/blob/v22.06.0-beta.0/vendor.mod#L51) however you can build eStargz images with the prior version using Buildx [driver](https://github.com/docker/buildx/blob/master/docs/reference/buildx_create.md#-set-the-builder-driver-to-use---driver) feature.
+You can enable the specific version of BuildKit using [`docker buildx create`](https://docs.docker.com/engine/reference/commandline/buildx_create/) (this example specifies `v0.10.3`).
+
+```
+$ docker buildx create --use --name v0.10.3 --driver docker-container --driver-opt image=moby/buildkit:v0.10.3
+$ docker buildx inspect --bootstrap v0.10.3
+```
+
+### Building eStargz images using Kaniko
+
+[Kaniko](https://github.com/GoogleContainerTools/kaniko) is an image builder runnable in containers and Kubernetes.
+Since v1.5.0, it experimentally supports building eStargz.
+`GGCR_EXPERIMENT_ESTARGZ=1` is needed.
+
+```console
+$ docker run --rm -e GGCR_EXPERIMENT_ESTARGZ=1 \
+    -v /tmp/buildctx:/workspace -v ~/.docker/config.json:/kaniko/.docker/config.json:ro \
+    gcr.io/kaniko-project/executor:v1.8.1 --destination ghcr.io/ktock/hello:esgz
+```
+
+### Building eStargz images using nerdctl
+
+[nerdctl](https://github.com/containerd/nerdctl), Docker-compatible CLI of containerd, supports building eStargz images.
+
+```console
+$ nerdctl build -t ghcr.io/ktock/hello:1 /tmp/buildctx
+$ nerdctl image convert --estargz --oci ghcr.io/ktock/hello:1 ghcr.io/ktock/hello:esgz
+$ nerdctl push ghcr.io/ktock/hello:esgz
+```
+
+> NOTE: `--estargz` should be specified in conjunction with `--oci`
+
+Please refer to nerdctl document for details for further information (e.g. lazy pulling): https://github.com/containerd/nerdctl/blob/master/docs/stargz.md
+
+### Creating eStargz images using `ctr-remote`
+
+[`ctr-remote`](/docs/ctr-remote.md) allows converting an image into eStargz with optimizing it.
 As shown in the above benchmarking result, on-demand lazy pulling improves the performance of pull but causes runtime performance penalty because reading files induce remotely downloading contents.
 For solving this, `ctr-remote` has *workload-based* optimization for images.
 
@@ -198,6 +228,28 @@ bin  boot  dev  etc  home  lib  lib32  lib64  libx32  media  mnt  opt  proc  roo
 ```
 
 > NOTE: You can perform lazy pulling from any OCI-compatible registries (e.g. docker.io, ghcr.io, etc) as long as the image is formatted as eStargz.
+
+### Registry-side conversion with `estargz.kontain.me`
+
+You can convert arbitrary images into eStargz on the registry-side, using [`estargz.kontain.me`](https://estargz.kontain.me).
+`estargz.kontain.me/[image]` serves eStargz-converted version of an arbitrary public image.
+
+For example, the following Kubernetes manifest performs lazy pulling of eStargz-formatted version of `docker.io/library/nginx:1.21.1` that is converted by `estargz.kontain.me`.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: estargz.kontain.me/docker.io/library/nginx:1.21.1
+    ports:
+    - containerPort: 80
+```
+
+> WARNING: Before trying this method, read [caveats from kontain.me](https://github.com/imjasonh/kontain.me#caveats). If you rely on it in production, you should copy the image to your own registry or build eStargz by your own using `ctr-remote` as described in the following.
 
 ## Importing Stargz Snapshotter as go module
 
