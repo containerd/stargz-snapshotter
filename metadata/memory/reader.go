@@ -32,7 +32,12 @@ type reader struct {
 	r      *estargz.Reader
 	rootID uint32
 
-	idMap     map[uint32]*estargz.TOCEntry
+	idMap map[uint32]*estargz.TOCEntry
+	// NOTE: Once "reader.idOfEntry" is initialized by "reader.asssignIDs()", it must keyed by the value of "reader.idMap"
+	//       but not by "*estargz.TOCEntry" returned by "estargz.Reader" calls (e.g. "estargz.Reader.Lookup()"). This is because once
+	//       "reader" is replicated by "reader.Clone()", the replicated one has the different instance of "estargz.Reader" than the original
+	//       "*reader". Thus a "*estargz.TOCEntry" obtained by that (cloned) "estargz.Reader" is the different instance than the original and
+	//       can the key of "reader.idOfEntry".
 	idOfEntry map[*estargz.TOCEntry]uint32
 
 	estargzOpts []estargz.OpenOption
@@ -98,6 +103,10 @@ func assignIDs(er *estargz.Reader, e *estargz.TOCEntry) (rootID uint32, idMap ma
 
 	var mapChildren func(e *estargz.TOCEntry) (uint32, error)
 	mapChildren = func(e *estargz.TOCEntry) (uint32, error) {
+		if e.Type == "hardlink" {
+			return 0, fmt.Errorf("unexpected type \"hardlink\": this should be replaced to the destination entry")
+		}
+
 		var ok bool
 		id, ok := idOfEntry[e]
 		if !ok {
@@ -110,16 +119,12 @@ func assignIDs(er *estargz.Reader, e *estargz.TOCEntry) (rootID uint32, idMap ma
 		}
 
 		e.ForeachChild(func(_ string, ent *estargz.TOCEntry) bool {
-			if ent.Type == "hardlink" {
-				var ok bool
-				ent, ok = er.Lookup(ent.Name)
-				if !ok {
-					return false
-				}
-			}
 			_, err = mapChildren(ent)
 			return err == nil
 		})
+		if err != nil {
+			return 0, err
+		}
 		return id, nil
 	}
 
@@ -169,13 +174,6 @@ func (r *reader) GetChild(pid uint32, base string) (id uint32, attr metadata.Att
 		err = fmt.Errorf("child %q of entry %d not found", base, pid)
 		return
 	}
-	if child.Type == "hardlink" {
-		child, ok = r.r.Lookup(child.Name)
-		if !ok {
-			err = fmt.Errorf("child %q ()hardlink of entry %d not found", base, pid)
-			return
-		}
-	}
 	cid, ok := r.idOfEntry[child]
 	if !ok {
 		err = fmt.Errorf("id of entry %q not found", base)
@@ -193,13 +191,6 @@ func (r *reader) ForeachChild(id uint32, f func(name string, id uint32, mode os.
 	}
 	var err error
 	e.ForeachChild(func(baseName string, ent *estargz.TOCEntry) bool {
-		if ent.Type == "hardlink" {
-			var ok bool
-			ent, ok = r.r.Lookup(ent.Name)
-			if !ok {
-				return false
-			}
-		}
 		id, ok := r.idOfEntry[ent]
 		if !ok {
 			err = fmt.Errorf("id of child entry %q not found", baseName)
