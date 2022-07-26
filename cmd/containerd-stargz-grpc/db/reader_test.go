@@ -24,11 +24,12 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	fsreader "github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/metadata"
+	"github.com/containerd/stargz-snapshotter/metadata/testutil"
 	bolt "go.etcd.io/bbolt"
 )
 
 func TestReader(t *testing.T) {
-	metadata.TestReader(t, newTestableReader)
+	testutil.TestReader(t, newTestableReader)
 }
 
 func TestFSReader(t *testing.T) {
@@ -39,7 +40,7 @@ func TestFSLayer(t *testing.T) {
 	layer.TestSuiteLayer(t, newStore)
 }
 
-func newTestableReader(sr *io.SectionReader, opts ...metadata.Option) (metadata.TestableReader, error) {
+func newTestableReader(sr *io.SectionReader, opts ...metadata.Option) (testutil.TestableReader, error) {
 	f, err := os.CreateTemp("", "readertestdb")
 	if err != nil {
 		return nil, err
@@ -97,7 +98,7 @@ func (r *readCloser) Close() error {
 }
 
 type testableReadCloser struct {
-	metadata.TestableReader
+	testutil.TestableReader
 	closeFn func() error
 }
 
