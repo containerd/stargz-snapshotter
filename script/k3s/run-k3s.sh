@@ -63,10 +63,11 @@ sed -i -E 's|(ENV DAPPER_ENV .*)|\1 DOCKER_BUILDKIT|g' "${TMP_K3S_REPO}/Dockerfi
         git config user.name "dummy" && \
         cat ./.golangci.json | jq '.run.deadline|="10m"' > "${TMP_GOLANGCI}" && \
         cp "${TMP_GOLANGCI}" ./.golangci.json &&  \
+        go mod tidy && \
         make deps && \
         git add . && \
         git commit -m tmp && \
-        REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${K3S_NODE_TAG}" make
+        REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${K3S_NODE_TAG}" SKIP_VALIDATE=1 make
 )
 cat <<EOF > "${TMP_BUILTIN_CONF}"
 configs:
