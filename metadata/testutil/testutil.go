@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package metadata
+package testutil
 
 import (
 	"compress/gzip"
@@ -30,7 +30,8 @@ import (
 
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
-	"github.com/containerd/stargz-snapshotter/util/testutil"
+	"github.com/containerd/stargz-snapshotter/metadata"
+	tutil "github.com/containerd/stargz-snapshotter/util/testutil"
 	"github.com/hashicorp/go-multierror"
 	"github.com/klauspost/compress/zstd"
 )
@@ -39,7 +40,7 @@ var allowedPrefix = [4]string{"", "./", "/", "../"}
 
 type compression interface {
 	estargz.Compressor
-	Decompressor
+	metadata.Decompressor
 }
 
 var srcCompressions = map[string]compression{
@@ -71,10 +72,10 @@ func gzipCompressionWithLevel(compressionLevel int) compression {
 	return gzipCompression{estargz.NewGzipCompressorWithLevel(compressionLevel), &estargz.GzipDecompressor{}}
 }
 
-type ReaderFactory func(sr *io.SectionReader, opts ...Option) (r TestableReader, err error)
+type ReaderFactory func(sr *io.SectionReader, opts ...metadata.Option) (r TestableReader, err error)
 
 type TestableReader interface {
-	Reader
+	metadata.Reader
 	NumOfNodes() (i int, _ error)
 }
 
@@ -85,24 +86,24 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 	tests := []struct {
 		name      string
 		chunkSize int
-		in        []testutil.TarEntry
+		in        []tutil.TarEntry
 		want      []check
 	}{
 		{
 			name: "empty",
-			in:   []testutil.TarEntry{},
+			in:   []tutil.TarEntry{},
 			want: []check{
 				numOfNodes(2), // root dir + prefetch landmark
 			},
 		},
 		{
 			name: "files",
-			in: []testutil.TarEntry{
-				testutil.File("foo", "foofoo", testutil.WithFileMode(0644|os.ModeSetuid)),
-				testutil.Dir("bar/"),
-				testutil.File("bar/baz.txt", "bazbazbaz", testutil.WithFileOwner(1000, 1000)),
-				testutil.File("xxx.txt", "xxxxx", testutil.WithFileModTime(sampleTime)),
-				testutil.File("y.txt", "", testutil.WithFileXattrs(map[string]string{"testkey": "testval"})),
+			in: []tutil.TarEntry{
+				tutil.File("foo", "foofoo", tutil.WithFileMode(0644|os.ModeSetuid)),
+				tutil.Dir("bar/"),
+				tutil.File("bar/baz.txt", "bazbazbaz", tutil.WithFileOwner(1000, 1000)),
+				tutil.File("xxx.txt", "xxxxx", tutil.WithFileModTime(sampleTime)),
+				tutil.File("y.txt", "", tutil.WithFileXattrs(map[string]string{"testkey": "testval"})),
 			},
 			want: []check{
 				numOfNodes(7), // root dir + prefetch landmark + 1 dir + 4 files
@@ -118,15 +119,15 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 		},
 		{
 			name: "dirs",
-			in: []testutil.TarEntry{
-				testutil.Dir("foo/", testutil.WithDirMode(os.ModeDir|0600|os.ModeSticky)),
-				testutil.Dir("foo/bar/", testutil.WithDirOwner(1000, 1000)),
-				testutil.File("foo/bar/baz.txt", "testtest"),
-				testutil.File("foo/bar/xxxx", "x"),
-				testutil.File("foo/bar/yyy", "yyy"),
-				testutil.Dir("foo/a/", testutil.WithDirModTime(sampleTime)),
-				testutil.Dir("foo/a/1/", testutil.WithDirXattrs(map[string]string{"testkey": "testval"})),
-				testutil.File("foo/a/1/2", "1111111111"),
+			in: []tutil.TarEntry{
+				tutil.Dir("foo/", tutil.WithDirMode(os.ModeDir|0600|os.ModeSticky)),
+				tutil.Dir("foo/bar/", tutil.WithDirOwner(1000, 1000)),
+				tutil.File("foo/bar/baz.txt", "testtest"),
+				tutil.File("foo/bar/xxxx", "x"),
+				tutil.File("foo/bar/yyy", "yyy"),
+				tutil.Dir("foo/a/", tutil.WithDirModTime(sampleTime)),
+				tutil.Dir("foo/a/1/", tutil.WithDirXattrs(map[string]string{"testkey": "testval"})),
+				tutil.File("foo/a/1/2", "1111111111"),
 			},
 			want: []check{
 				numOfNodes(10), // root dir + prefetch landmark + 4 dirs + 4 files
@@ -146,15 +147,15 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 		},
 		{
 			name: "hardlinks",
-			in: []testutil.TarEntry{
-				testutil.File("foo", "foofoo", testutil.WithFileOwner(1000, 1000)),
-				testutil.Dir("bar/"),
-				testutil.Link("bar/foolink", "foo"),
-				testutil.Link("bar/foolink2", "bar/foolink"),
-				testutil.Dir("bar/1/"),
-				testutil.File("bar/1/baz.txt", "testtest"),
-				testutil.Link("barlink", "bar/1/baz.txt"),
-				testutil.Symlink("foosym", "bar/foolink2"),
+			in: []tutil.TarEntry{
+				tutil.File("foo", "foofoo", tutil.WithFileOwner(1000, 1000)),
+				tutil.Dir("bar/"),
+				tutil.Link("bar/foolink", "foo"),
+				tutil.Link("bar/foolink2", "bar/foolink"),
+				tutil.Dir("bar/1/"),
+				tutil.File("bar/1/baz.txt", "testtest"),
+				tutil.Link("barlink", "bar/1/baz.txt"),
+				tutil.Symlink("foosym", "bar/foolink2"),
 			},
 			want: []check{
 				numOfNodes(7), // root dir + prefetch landmark + 2 dirs + 1 flie(linked) + 1 file(linked) + 1 symlink
@@ -178,12 +179,12 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 		},
 		{
 			name: "various files",
-			in: []testutil.TarEntry{
-				testutil.Dir("bar/"),
-				testutil.File("bar/../bar///////////////////foo", ""),
-				testutil.Chardev("bar/cdev", 10, 11),
-				testutil.Blockdev("bar/bdev", 100, 101),
-				testutil.Fifo("bar/fifo"),
+			in: []tutil.TarEntry{
+				tutil.Dir("bar/"),
+				tutil.File("bar/../bar///////////////////foo", ""),
+				tutil.Chardev("bar/cdev", 10, 11),
+				tutil.Blockdev("bar/bdev", 100, 101),
+				tutil.Fifo("bar/fifo"),
 			},
 			want: []check{
 				numOfNodes(7), // root dir + prefetch landmark + 1 file + 1 dir + 1 cdev + 1 bdev + 1 fifo
@@ -196,10 +197,10 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 		{
 			name:      "chunks",
 			chunkSize: 4,
-			in: []testutil.TarEntry{
-				testutil.Dir("foo/"),
-				testutil.File("foo/small", sampleText[:2]),
-				testutil.File("foo/large", sampleText),
+			in: []tutil.TarEntry{
+				tutil.Dir("foo/"),
+				tutil.File("foo/small", sampleText[:2]),
+				tutil.File("foo/large", sampleText),
 			},
 			want: []check{
 				numOfNodes(5), // root dir + prefetch landmark + 1 dir + 2 files
@@ -228,21 +229,21 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 			for srcCompresionName, srcCompression := range srcCompressions {
 				srcCompression := srcCompression
 				t.Run(tt.name+"-"+srcCompresionName, func(t *testing.T) {
-					opts := []testutil.BuildEStargzOption{
-						testutil.WithBuildTarOptions(testutil.WithPrefix(prefix)),
-						testutil.WithEStargzOptions(estargz.WithCompression(srcCompression)),
+					opts := []tutil.BuildEStargzOption{
+						tutil.WithBuildTarOptions(tutil.WithPrefix(prefix)),
+						tutil.WithEStargzOptions(estargz.WithCompression(srcCompression)),
 					}
 					if tt.chunkSize > 0 {
-						opts = append(opts, testutil.WithEStargzOptions(estargz.WithChunkSize(tt.chunkSize)))
+						opts = append(opts, tutil.WithEStargzOptions(estargz.WithChunkSize(tt.chunkSize)))
 					}
-					esgz, _, err := testutil.BuildEStargz(tt.in, opts...)
+					esgz, _, err := tutil.BuildEStargz(tt.in, opts...)
 					if err != nil {
 						t.Fatalf("failed to build sample eStargz: %v", err)
 					}
 
 					telemetry, checkCalled := newCalledTelemetry()
 					r, err := factory(esgz,
-						WithDecompressors(new(zstdchunked.Decompressor)), WithTelemetry(telemetry))
+						metadata.WithDecompressors(new(zstdchunked.Decompressor)), metadata.WithTelemetry(telemetry))
 					if err != nil {
 						t.Fatalf("failed to create new reader: %v", err)
 					}
@@ -259,7 +260,7 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 					}
 
 					// Test the cloned reader works correctly as well
-					esgz2, _, err := testutil.BuildEStargz(tt.in, opts...)
+					esgz2, _, err := tutil.BuildEStargz(tt.in, opts...)
 					if err != nil {
 						t.Fatalf("failed to build sample eStargz: %v", err)
 					}
@@ -296,17 +297,17 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 			})
 		}
 
-		in := []testutil.TarEntry{
-			testutil.File("foo", "foofoo"),
-			testutil.Dir("bar/"),
-			testutil.File("bar/zzz.txt", "bazbazbaz"),
-			testutil.File("bar/aaa.txt", "bazbazbaz"),
-			testutil.File("bar/fff.txt", "bazbazbaz"),
-			testutil.File("xxx.txt", "xxxxx"),
-			testutil.File("y.txt", ""),
+		in := []tutil.TarEntry{
+			tutil.File("foo", "foofoo"),
+			tutil.Dir("bar/"),
+			tutil.File("bar/zzz.txt", "bazbazbaz"),
+			tutil.File("bar/aaa.txt", "bazbazbaz"),
+			tutil.File("bar/fff.txt", "bazbazbaz"),
+			tutil.File("xxx.txt", "xxxxx"),
+			tutil.File("y.txt", ""),
 		}
 
-		esgz, _, err := testutil.BuildEStargz(in)
+		esgz, _, err := tutil.BuildEStargz(in)
 		if err != nil {
 			t.Fatalf("failed to build sample eStargz: %v", err)
 		}
@@ -340,14 +341,14 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 	})
 }
 
-func newCalledTelemetry() (telemetry *Telemetry, check func() error) {
+func newCalledTelemetry() (telemetry *metadata.Telemetry, check func() error) {
 	var getFooterLatencyCalled bool
 	var getTocLatencyCalled bool
 	var deserializeTocLatencyCalled bool
-	return &Telemetry{
-			func(time.Time) { getFooterLatencyCalled = true },
-			func(time.Time) { getTocLatencyCalled = true },
-			func(time.Time) { deserializeTocLatencyCalled = true },
+	return &metadata.Telemetry{
+			GetFooterLatency:      func(time.Time) { getFooterLatencyCalled = true },
+			GetTocLatency:         func(time.Time) { getTocLatencyCalled = true },
+			DeserializeTocLatency: func(time.Time) { deserializeTocLatencyCalled = true },
 		}, func() error {
 			var allErr error
 			if !getFooterLatencyCalled {

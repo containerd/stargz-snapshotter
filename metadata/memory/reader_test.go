@@ -21,13 +21,14 @@ import (
 	"testing"
 
 	"github.com/containerd/stargz-snapshotter/metadata"
+	"github.com/containerd/stargz-snapshotter/metadata/testutil"
 )
 
 func TestReader(t *testing.T) {
-	metadata.TestReader(t, readerFactory)
+	testutil.TestReader(t, readerFactory)
 }
 
-func readerFactory(sr *io.SectionReader, opts ...metadata.Option) (metadata.TestableReader, error) {
+func readerFactory(sr *io.SectionReader, opts ...metadata.Option) (testutil.TestableReader, error) {
 	r, err := NewReader(sr, opts...)
 	if err != nil {
 		return nil, err
