@@ -28,10 +28,10 @@ REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.soc
 
 ## Image for doing network-related tests
 #
-# FROM ubuntu:20.04
+# FROM ubuntu:22.04
 # RUN apt-get update && apt-get install -y curl iproute2
 #
-NETWORK_MOUNT_TEST_ORG_IMAGE_TAG="ghcr.io/stargz-containers/ubuntu:20.04-curl-ip"
+NETWORK_MOUNT_TEST_ORG_IMAGE_TAG="ghcr.io/stargz-containers/ubuntu:22.04-curl-ip"
 ########################################
 
 RETRYNUM=100

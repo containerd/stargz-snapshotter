@@ -21,7 +21,7 @@ env:
 
 jobs:
   integration:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: Integration
     steps:
     - name: Install htpasswd for setting up private registry
@@ -31,7 +31,7 @@ jobs:
       run: make integration
 
   test-optimize:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: Optimize
     steps:
     - name: Install htpasswd for setting up private registry
@@ -41,7 +41,7 @@ jobs:
       run: make test-optimize
 
   test-kind:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: Kind
     steps:
     - name: Install htpasswd for setting up private registry
@@ -51,7 +51,7 @@ jobs:
       run: make test-kind
 
   test-criauth:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: CRIAuth
     steps:
     - name: Install htpasswd for setting up private registry
@@ -61,7 +61,7 @@ jobs:
       run: make test-criauth
 
   test-cri-containerd:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: CRIValidationContainerd
     steps:
     - uses: actions/checkout@v3
@@ -79,7 +79,7 @@ jobs:
       run: make test-cri-o
 
   test-k3s:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: K3S
     steps:
     - uses: actions/setup-go@v3
