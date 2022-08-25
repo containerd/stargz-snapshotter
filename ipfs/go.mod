@@ -4,7 +4,7 @@ go 1.16
 
 require (
 	github.com/containerd/containerd v1.6.8
-	github.com/ipfs/go-cid v0.1.0
+	github.com/ipfs/go-cid v0.3.0
 	github.com/ipfs/go-ipfs-files v0.1.1
 	github.com/ipfs/interface-go-ipfs-core v0.7.0
 	github.com/ipld/go-codec-dagpb v1.3.2 // indirect
