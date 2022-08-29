@@ -93,7 +93,12 @@ func NewStargzSnapshotterService(ctx context.Context, root string, config *Confi
 
 	var snapshotter snapshots.Snapshotter
 
-	snapshotter, err = snbase.NewSnapshotter(ctx, snapshotterRoot(root), fs, snbase.AsynchronousRemove)
+	snOpts := []snbase.Opt{snbase.AsynchronousRemove}
+	if config.SnapshotterConfig.AllowInvalidMountsOnRestart {
+		snOpts = append(snOpts, snbase.AllowInvalidMountsOnRestart)
+	}
+
+	snapshotter, err = snbase.NewSnapshotter(ctx, snapshotterRoot(root), fs, snOpts...)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to create new snapshotter")
 	}
