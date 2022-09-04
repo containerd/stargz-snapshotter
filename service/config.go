@@ -32,6 +32,9 @@ type Config struct {
 
 	// ResolverConfig is config for resolving registries.
 	ResolverConfig `toml:"resolver"`
+
+	// SnapshotterConfig is snapshotter-related config.
+	SnapshotterConfig `toml:"snapshotter"`
 }
 
 // KubeconfigKeychainConfig is config for kubeconfig-based keychain.
@@ -55,3 +58,12 @@ type CRIKeychainConfig struct {
 
 // ResolverConfig is config for resolving registries.
 type ResolverConfig resolver.Config
+
+// SnapshotterConfig is snapshotter-related config.
+type SnapshotterConfig struct {
+	// AllowInvalidMountsOnRestart allows that there are snapshot mounts that cannot access to the
+	// data source when restarting the snapshotter.
+	// NOTE: User needs to manually remove the snapshots from containerd's metadata store using
+	//       ctr (e.g. `ctr snapshot rm`).
+	AllowInvalidMountsOnRestart bool `toml:"allow_invalid_mounts_on_restart"`
+}
