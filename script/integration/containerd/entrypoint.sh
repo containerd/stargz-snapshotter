@@ -194,6 +194,20 @@ function run_and_check_remote_snapshots {
     check_remote_snapshots "${LOG_FILE}"
 }
 
+# Copied from moby project (Apache License 2.0)
+# https://github.com/moby/moby/blob/a9fe88e395acaacd84067b5fc701d52dbcf4b625/hack/dind#L28-L38
+# cgroup v2: enable nesting
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+	# move the processes from the root group to the /init group,
+	# otherwise writing subtree_control fails with EBUSY.
+	# An error during moving non-existent process (i.e., "cat") is ignored.
+	mkdir -p /sys/fs/cgroup/init
+	xargs -rn1 < /sys/fs/cgroup/cgroup.procs > /sys/fs/cgroup/init/cgroup.procs || :
+	# enable controllers
+	sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
+		> /sys/fs/cgroup/cgroup.subtree_control
+fi
+
 echo "===== VERSION INFORMATION ====="
 containerd --version
 runc --version
