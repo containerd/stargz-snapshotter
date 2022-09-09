@@ -13,18 +13,18 @@
 #   limitations under the License.
 
 ARG CONTAINERD_VERSION=v1.6.8
-ARG RUNC_VERSION=v1.1.3
+ARG RUNC_VERSION=v1.1.4
 ARG CNI_PLUGINS_VERSION=v1.1.1
-ARG NERDCTL_VERSION=0.22.2
+ARG NERDCTL_VERSION=0.23.0
 
-ARG PODMAN_VERSION=v4.2.0
-ARG CRIO_VERSION=v1.24.2
-ARG CONMON_VERSION=v2.1.3
+ARG PODMAN_VERSION=v4.2.1
+ARG CRIO_VERSION=v1.25.0
+ARG CONMON_VERSION=v2.1.4
 ARG COMMON_VERSION=v0.49.1
-ARG CRIO_TEST_PAUSE_IMAGE_NAME=k8s.gcr.io/pause:3.6
+ARG CRIO_TEST_PAUSE_IMAGE_NAME=registry.k8s.io/pause:3.6
 
 # Used in CI
-ARG CRI_TOOLS_VERSION=v1.24.2
+ARG CRI_TOOLS_VERSION=v1.25.0
 
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
