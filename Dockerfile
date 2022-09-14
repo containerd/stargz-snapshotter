@@ -204,7 +204,7 @@ COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-s
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 COPY ./script/config/ /
 RUN /clone3-workaround apt-get update -y && /clone3-workaround apt-get install --no-install-recommends -y fuse
-ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
+ENTRYPOINT [ "/usr/local/bin/kind-entrypoint.sh", "/usr/local/bin/entrypoint", "/sbin/init" ]
 
 # Image for testing CRI-O with Stargz Store.
 # NOTE: This cannot be used for the node image of KinD.
@@ -249,4 +249,4 @@ COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /
 RUN /clone3-workaround apt-get update -y && /clone3-workaround apt-get install --no-install-recommends -y fuse && \
     systemctl enable stargz-snapshotter
-ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
+ENTRYPOINT [ "/usr/local/bin/kind-entrypoint.sh", "/usr/local/bin/entrypoint", "/sbin/init" ]

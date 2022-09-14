@@ -105,7 +105,8 @@ class Bench:
 class BenchRunner:
     ECHO_HELLO = set(['alpine:3.15.3',
                       'nixos/nix:2.3.12',
-                      'fedora:35',])
+                      'fedora:35',
+                      'ubuntu:22.04'])
 
     CMD_ARG_WAIT = {'rethinkdb:2.4.1': RunArgs(waitline='Server ready'),
                     'glassfish:4.1-jdk8': RunArgs(waitline='Running GlassFish'),
@@ -143,6 +144,7 @@ class BenchRunner:
     ALL = dict([(b.name, b) for b in
                 [Bench('alpine:3.15.3', 'distro'),
                  Bench('fedora:35', 'distro'),
+                 Bench('ubuntu:22.04', 'distro'),
                  Bench('rethinkdb:2.4.1', 'database'),
                  Bench('postgres:14.2', 'database'),
                  Bench('redis:6.2.6', 'database'),

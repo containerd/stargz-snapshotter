@@ -16,6 +16,20 @@
 
 set -euo pipefail
 
+# Copied from moby project (Apache License 2.0)
+# https://github.com/moby/moby/blob/a9fe88e395acaacd84067b5fc701d52dbcf4b625/hack/dind#L28-L38
+# cgroup v2: enable nesting
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+	# move the processes from the root group to the /init group,
+	# otherwise writing subtree_control fails with EBUSY.
+	# An error during moving non-existent process (i.e., "cat") is ignored.
+	mkdir -p /sys/fs/cgroup/init
+	xargs -rn1 < /sys/fs/cgroup/cgroup.procs > /sys/fs/cgroup/init/cgroup.procs || :
+	# enable controllers
+	sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
+		> /sys/fs/cgroup/cgroup.subtree_control
+fi
+
 # necessary host configuration for CRI-O
 # https://github.com/kubernetes-sigs/cri-tools/blob/ec9e336fd8c21c4bab89a6aed2c4a138c8cfae75/.github/workflows/crio.yml#L36-L45
 sysctl -w net.ipv4.conf.all.route_localnet=1

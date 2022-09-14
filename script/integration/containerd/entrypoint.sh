@@ -194,6 +194,20 @@ function run_and_check_remote_snapshots {
     check_remote_snapshots "${LOG_FILE}"
 }
 
+# Copied from moby project (Apache License 2.0)
+# https://github.com/moby/moby/blob/a9fe88e395acaacd84067b5fc701d52dbcf4b625/hack/dind#L28-L38
+# cgroup v2: enable nesting
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+	# move the processes from the root group to the /init group,
+	# otherwise writing subtree_control fails with EBUSY.
+	# An error during moving non-existent process (i.e., "cat") is ignored.
+	mkdir -p /sys/fs/cgroup/init
+	xargs -rn1 < /sys/fs/cgroup/cgroup.procs > /sys/fs/cgroup/init/cgroup.procs || :
+	# enable controllers
+	sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
+		> /sys/fs/cgroup/cgroup.subtree_control
+fi
+
 echo "===== VERSION INFORMATION ====="
 containerd --version
 runc --version
@@ -231,11 +245,11 @@ if [ "${OK}" != "ok" ] ; then
 fi
 
 echo "Preparing images..."
-copy ghcr.io/stargz-containers/ubuntu:20.04-org "${REGISTRY_HOST}/ubuntu:18.04"
+copy ghcr.io/stargz-containers/ubuntu:22.04-org "${REGISTRY_HOST}/ubuntu:22.04"
 copy ghcr.io/stargz-containers/alpine:3.15.3-org "${REGISTRY_HOST}/alpine:3.15.3"
-stargzify "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:sgz"
-optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:esgz"
-optimize "${REGISTRY_HOST}/ubuntu:18.04" "${REGISTRY_HOST}/ubuntu:zstdchunked"
+stargzify "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:sgz"
+optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz"
+optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:zstdchunked"
 optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_HOST}/alpine:esgz"
 optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_ALT_HOST}:5000/alpine:esgz" --plain-http
 
@@ -250,15 +264,15 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     retry curl -X POST localhost:5001/api/v0/version >/dev/null 2>&1 # wait for up
 
     # stargz snapshotter
-    ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
-    CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:18.04")
+    ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
+    CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:22.04")
     reboot_containerd
     run_and_check_remote_snapshots ctr-remote i rpull --ipfs "${CID}"
     copy_out_dir "${CID}" "/usr" "${USR_STARGZSN_IPFS}" "stargz"
 
     # overlayfs snapshotter
-    ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:18.04"
-    CID=$(ctr-remote i ipfs-push --estargz=false "${REGISTRY_HOST}/ubuntu:18.04")
+    ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
+    CID=$(ctr-remote i ipfs-push --estargz=false "${REGISTRY_HOST}/ubuntu:22.04")
     reboot_containerd
     ctr-remote i rpull --snapshotter=overlayfs --ipfs "${CID}"
     copy_out_dir "${CID}" "/usr" "${USR_NORMALSN_IPFS}" "overlayfs"
@@ -320,10 +334,10 @@ echo "Testing stargz filesystem..."
 # Test with a normal image
 
 echo "Getting normal image with normal snapshotter..."
-dump_dir "${REGISTRY_HOST}/ubuntu:18.04" "/usr" "overlayfs" "false" "${USR_NORMALSN_UNSTARGZ}"
+dump_dir "${REGISTRY_HOST}/ubuntu:22.04" "/usr" "overlayfs" "false" "${USR_NORMALSN_UNSTARGZ}"
 
 echo "Getting normal image with stargz snapshotter..."
-dump_dir "${REGISTRY_HOST}/ubuntu:18.04" "/usr" "stargz" "false" "${USR_STARGZSN_UNSTARGZ}"
+dump_dir "${REGISTRY_HOST}/ubuntu:22.04" "/usr" "stargz" "false" "${USR_STARGZSN_UNSTARGZ}"
 
 echo "Diffing between two root filesystems(normal vs stargz snapshotter, normal rootfs)"
 diff --no-dereference -qr "${USR_NORMALSN_UNSTARGZ}/" "${USR_STARGZSN_UNSTARGZ}/"
