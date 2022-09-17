@@ -21,14 +21,18 @@ import (
 	"path/filepath"
 
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/metadata"
+	esgzexternaltoc "github.com/containerd/stargz-snapshotter/nativeconverter/estargz/externaltoc"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/hashicorp/go-multierror"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 type Option func(*options)
@@ -85,7 +89,12 @@ func NewStargzSnapshotterService(ctx context.Context, root string, config *Confi
 	fsOpts := append(sOpts.fsOpts, stargzfs.WithGetSources(sources(
 		sourceFromCRILabels(hosts),      // provides source info based on CRI labels
 		source.FromDefaultLabels(hosts), // provides source info based on default labels
-	)), stargzfs.WithOverlayOpaqueType(opq))
+	)),
+		stargzfs.WithOverlayOpaqueType(opq),
+		stargzfs.WithAdditionalDecompressors(func(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) []metadata.Decompressor {
+			return []metadata.Decompressor{esgzexternaltoc.NewRemoteDecompressor(ctx, hosts, refspec, desc)}
+		}),
+	)
 	fs, err := stargzfs.NewFilesystem(fsRoot(root), config.Config, fsOpts...)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure filesystem")

@@ -18,6 +18,7 @@ package commands
 
 import (
 	"compress/gzip"
+	gocontext "context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,11 +26,14 @@ import (
 	"os/signal"
 
 	"github.com/containerd/containerd/cmd/ctr/commands"
+	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
+	esgzexternaltocconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz/externaltoc"
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -68,6 +72,19 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			Name:  "estargz-chunk-size",
 			Usage: "eStargz chunk size",
 			Value: 0,
+		},
+		cli.IntFlag{
+			Name:  "estargz-min-chunk-size",
+			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand.",
+			Value: 0,
+		},
+		cli.BoolFlag{
+			Name:  "estargz-external-toc",
+			Usage: "Separate TOC JSON into another image (called \"TOC image\"). The name of TOC image is the original + \"-esgztoc\" suffix. Both eStargz and the TOC image should be pushed to the same registry. stargz-snapshotter refers to the TOC image when it pulls the result eStargz image.",
+		},
+		cli.BoolFlag{
+			Name:  "estargz-keep-diff-id",
+			Usage: "convert to esgz without changing diffID (cannot be used in conjunction with '--estargz-record-in'. must be specified with '--estargz-external-toc')",
 		},
 		// zstd:chunked flags
 		cli.BoolFlag{
@@ -125,12 +142,31 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		convertOpts = append(convertOpts, converter.WithPlatform(platformMC))
 
 		var layerConvertFunc converter.ConvertFunc
+		var finalize func(ctx gocontext.Context, cs content.Store, ref string, desc *ocispec.Descriptor) (*images.Image, error)
 		if context.Bool("estargz") {
 			esgzOpts, err := getESGZConvertOpts(context)
 			if err != nil {
 				return err
 			}
-			layerConvertFunc = estargzconvert.LayerConvertFunc(esgzOpts...)
+			if context.Bool("estargz-external-toc") {
+				if !context.Bool("estargz-keep-diff-id") {
+					layerConvertFunc, finalize = esgzexternaltocconvert.LayerConvertFunc(esgzOpts, context.Int("estargz-compression-level"))
+				} else {
+					if context.String("estargz-record-in") != "" {
+						return fmt.Errorf("option --estargz-keep-diff-id conflicts with --estargz-record-in")
+					}
+					layerConvertFunc, finalize = esgzexternaltocconvert.LayerConvertLossLessFunc(esgzexternaltocconvert.LayerConvertLossLessConfig{
+						CompressionLevel: context.Int("estargz-compression-level"),
+						ChunkSize:        context.Int("estargz-chunk-size"),
+						MinChunkSize:     context.Int("estargz-min-chunk-size"),
+					})
+				}
+			} else {
+				if context.Bool("estargz-keep-diff-id") {
+					return fmt.Errorf("option --estargz-keep-diff-id must be used with --estargz-external-toc")
+				}
+				layerConvertFunc = estargzconvert.LayerConvertFunc(esgzOpts...)
+			}
 			if !context.Bool("oci") {
 				logrus.Warn("option --estargz should be used in conjunction with --oci")
 			}
@@ -175,6 +211,12 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		}
 		defer cancel()
 
+		ctx, done, err := client.WithLease(ctx)
+		if err != nil {
+			return err
+		}
+		defer done(ctx)
+
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt)
 		go func() {
@@ -190,6 +232,19 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		if err != nil {
 			return err
 		}
+		if finalize != nil {
+			newI, err := finalize(ctx, client.ContentStore(), targetRef, &newImg.Target)
+			if err != nil {
+				return err
+			}
+			is := client.ImageService()
+			_ = is.Delete(ctx, newI.Name)
+			finimg, err := is.Create(ctx, *newI)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(context.App.Writer, "extra image:", finimg.Name)
+		}
 		fmt.Fprintln(context.App.Writer, newImg.Target.Digest.String())
 		return nil
 	},
@@ -199,6 +254,7 @@ func getESGZConvertOpts(context *cli.Context) ([]estargz.Option, error) {
 	esgzOpts := []estargz.Option{
 		estargz.WithCompressionLevel(context.Int("estargz-compression-level")),
 		estargz.WithChunkSize(context.Int("estargz-chunk-size")),
+		estargz.WithMinChunkSize(context.Int("estargz-min-chunk-size")),
 	}
 	if estargzRecordIn := context.String("estargz-record-in"); estargzRecordIn != "" {
 		paths, err := readPathsFromRecordFile(estargzRecordIn)

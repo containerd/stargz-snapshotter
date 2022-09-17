@@ -25,9 +25,7 @@ package estargz
 import (
 	"bytes"
 	"compress/gzip"
-	"crypto/sha256"
 	"fmt"
-	"io"
 	"testing"
 )
 
@@ -42,8 +40,10 @@ func TestGzipEStargz(t *testing.T) {
 	)
 }
 
-func gzipControllerWithLevel(compressionLevel int) TestingController {
-	return &gzipController{&GzipCompressor{compressionLevel}, &GzipDecompressor{}}
+func gzipControllerWithLevel(compressionLevel int) TestingControllerFactory {
+	return func() TestingController {
+		return &gzipController{&GzipCompressor{compressionLevel}, &GzipDecompressor{}}
+	}
 }
 
 type gzipController struct {
@@ -55,44 +55,13 @@ func (gc *gzipController) String() string {
 	return fmt.Sprintf("gzip_compression_level=%v", gc.GzipCompressor.compressionLevel)
 }
 
-func (gc *gzipController) CountStreams(t *testing.T, b []byte) (numStreams int) {
-	len0 := len(b)
-	br := bytes.NewReader(b)
-	zr := new(gzip.Reader)
-	t.Logf("got gzip streams:")
-	for {
-		zoff := len0 - br.Len()
-		if err := zr.Reset(br); err != nil {
-			if err == io.EOF {
-				return
-			}
-			t.Fatalf("countStreams(gzip), Reset: %v", err)
-		}
-		zr.Multistream(false)
-		n, err := io.Copy(io.Discard, zr)
-		if err != nil {
-			t.Fatalf("countStreams(gzip), Copy: %v", err)
-		}
-		var extra string
-		if len(zr.Header.Extra) > 0 {
-			extra = fmt.Sprintf("; extra=%q", zr.Header.Extra)
-		}
-		t.Logf("  [%d] at %d in stargz, uncompressed length %d%s", numStreams, zoff, n, extra)
-		numStreams++
-	}
+// TestStream tests the passed estargz blob contains the specified list of streams.
+func (gc *gzipController) TestStreams(t *testing.T, b []byte, streams []int64) {
+	CheckGzipHasStreams(t, b, streams)
 }
 
 func (gc *gzipController) DiffIDOf(t *testing.T, b []byte) string {
-	h := sha256.New()
-	zr, err := gzip.NewReader(bytes.NewReader(b))
-	if err != nil {
-		t.Fatalf("diffIDOf(gzip): %v", err)
-	}
-	defer zr.Close()
-	if _, err := io.Copy(h, zr); err != nil {
-		t.Fatalf("diffIDOf(gzip).Copy: %v", err)
-	}
-	return fmt.Sprintf("sha256:%x", h.Sum(nil))
+	return GzipDiffIDOf(t, b)
 }
 
 // Tests footer encoding, size, and parsing of gzip-based eStargz.

@@ -177,6 +177,22 @@ Properties other than `chunkDigest` are inherited from [stargz](https://github.c
   TOCEntries of non-empty `reg` and `chunk` MUST set this property.
   This MAY be used for verifying the data of the chunk.
 
+- **`innerOffset`** *int64*
+
+  This OPTIONAL property indicates the uncompressed offset of the "reg" or "chunk" entry payload in a stream starts from `offset` field.
+
+#### Details about `innerOffset`
+
+`innerOffset` enables to put multiple "reg" or "chunk" payloads in one gzip stream starts from `offset`.
+This field allows the following structure.
+
+![The structure of eStargz with innerOffset](/docs/images/estargz-inneroffset.png)
+
+Use case of this field is `--estargz-min-chunk-size` flag of `ctr-remote`.
+The value of this flag is the minimal number of bytes of data must be written in one gzip stream.
+If it's > 0, multiple files and chunks can be written into one gzip stream.
+Smaller number of gzip header and smaller size of the result blob can be expected.
+
 ### Footer
 
 At the end of the blob, a *footer* MUST be appended.
@@ -293,6 +309,61 @@ After the TOC is verified, the snapshotter mounts this layer using the metadata 
 
 During runtime of the container, this snapshotter fetches chunks of regular file contents lazily.
 Before providing a chunk to the filesystem user, snapshotter recalculates the digest and checks it matches the one recorded in the corresponding TOCEntry.
+
+## eStargz image with an external TOC (OPTIONAL)
+
+This OPTIONAL feature allows separating TOC into another image called *TOC image*.
+This type of eStargz is the same as the normal eStargz but doesn't contain TOC JSON file (`stargz.index.json`) in the layer blob and has a special footer.
+This feature enables creating a smaller eStargz blob by avoiding including TOC JSON file in that blob.
+
+Footer has the following structure:
+
+```
+// The footer is an empty gzip stream with no compression and an Extra header.
+//
+// 46 comes from:
+//
+// 10 bytes  gzip header
+// 2  bytes  XLEN (length of Extra field) = 21 (4 bytes header + len("STARGZEXTERNALTOC"))
+// 2  bytes  Extra: SI1 = 'S', SI2 = 'G'
+// 2  bytes  Extra: LEN = 17 (len("STARGZEXTERNALTOC"))
+// 17 bytes  Extra: subfield = "STARGZEXTERNALTOC"
+// 5  bytes  flate header
+// 8  bytes  gzip footer
+// (End of the eStargz blob)
+```
+
+TOC image is an OCI image containing TOC.
+Each layer contains a TOC JSON file (`stargz.index.json`) in the root directory.
+
+Layer descriptors in the manifest must contain an annotation `containerd.io/snapshot/stargz/layer.digest`.
+The value of this annotation is the digest of the eStargz layer blob corresponding to that TOC.
+
+The following is an example layer descriptor in the TOC image.
+This layer (`sha256:64dedefd539280a5578c8b94bae6f7b4ebdbd12cb7a7df0770c4887a53d9af70`) contains the TOC JSON file (`stargz.index.json`) in the root directory and can be used for eStargz layer blob that has the digest `sha256:5da5601c1f2024c07f580c11b2eccf490cd499473883a113c376d64b9b10558f`.
+
+```json
+{
+  "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+  "digest": "sha256:64dedefd539280a5578c8b94bae6f7b4ebdbd12cb7a7df0770c4887a53d9af70",
+  "size": 154425,
+  "annotations": {
+    "containerd.io/snapshot/stargz/layer.digest": "sha256:5da5601c1f2024c07f580c11b2eccf490cd499473883a113c376d64b9b10558f"
+  }
+}
+```
+
+### Example usecase: lazy pulling with Stargz Snapshotter
+
+Stargz Snapshotter supports eStargz with external TOC.
+If an eStargz blob's footer indicates that it requires the TOC image, stargz snapshotter also pulls it from the registry.
+
+Stargz snapshotter assumes the TOC image has the reference name same as the eStargz with `-esgztoc` suffix.
+For example, if an eStargz image is named `ghcr.io/stargz-containers/ubuntu:22.04-esgz`, stargz snapshotter acquires the TOC image from `ghcr.io/stargz-containers/ubuntu:22.04-esgz-esgztoc`.
+Note that future versions of stargz snapshotter will support more ways to search the TOC image (e.g. allowing custom suffix, using OCI Reference Type, etc.)
+
+Once stargz snapshotter acquires TOC image, it tries to find the TOC corresponding to the mounting eStargz blob, by looking `containerd.io/snapshot/stargz/layer.digest` annotations.
+As describe in the above, the acquired TOC JSON is validated using `containerd.io/snapshot/stargz/toc.digest` annotation.
 
 ## Example of TOC
 

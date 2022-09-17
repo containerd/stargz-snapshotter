@@ -20,12 +20,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
+	"time"
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/containerd/remotes"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -155,4 +158,63 @@ func ValidateMediaType(b []byte, mt string) error {
 		}
 	}
 	return nil
+}
+
+// Fetch manifest of the specified platform
+func FetchManifestPlatform(ctx context.Context, fetcher remotes.Fetcher, desc ocispec.Descriptor, platform ocispec.Platform) (ocispec.Manifest, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	r, err := fetcher.Fetch(ctx, desc)
+	if err != nil {
+		return ocispec.Manifest{}, err
+	}
+	defer r.Close()
+
+	var manifest ocispec.Manifest
+	switch desc.MediaType {
+	case images.MediaTypeDockerSchema2Manifest, ocispec.MediaTypeImageManifest:
+		p, err := io.ReadAll(r)
+		if err != nil {
+			return ocispec.Manifest{}, err
+		}
+		if err := ValidateMediaType(p, desc.MediaType); err != nil {
+			return ocispec.Manifest{}, err
+		}
+		if err := json.Unmarshal(p, &manifest); err != nil {
+			return ocispec.Manifest{}, err
+		}
+		return manifest, nil
+	case images.MediaTypeDockerSchema2ManifestList, ocispec.MediaTypeImageIndex:
+		var index ocispec.Index
+		p, err := io.ReadAll(r)
+		if err != nil {
+			return ocispec.Manifest{}, err
+		}
+		if err := ValidateMediaType(p, desc.MediaType); err != nil {
+			return ocispec.Manifest{}, err
+		}
+		if err = json.Unmarshal(p, &index); err != nil {
+			return ocispec.Manifest{}, err
+		}
+		var target ocispec.Descriptor
+		found := false
+		for _, m := range index.Manifests {
+			p := platforms.DefaultSpec()
+			if m.Platform != nil {
+				p = *m.Platform
+			}
+			if !platforms.NewMatcher(platform).Match(p) {
+				continue
+			}
+			target = m
+			found = true
+			break
+		}
+		if !found {
+			return ocispec.Manifest{}, fmt.Errorf("no manifest found for platform")
+		}
+		return FetchManifestPlatform(ctx, fetcher, target, platform)
+	}
+	return ocispec.Manifest{}, fmt.Errorf("unknown mediatype %q", desc.MediaType)
 }

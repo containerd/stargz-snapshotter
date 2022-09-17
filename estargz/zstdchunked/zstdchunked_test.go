@@ -19,9 +19,9 @@ package zstdchunked
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"io"
+	"sort"
 	"testing"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -38,8 +38,10 @@ func TestZstdChunked(t *testing.T) {
 	)
 }
 
-func zstdControllerWithLevel(compressionLevel zstd.EncoderLevel) estargz.TestingController {
-	return &zstdController{&Compressor{CompressionLevel: compressionLevel}, &Decompressor{}}
+func zstdControllerWithLevel(compressionLevel zstd.EncoderLevel) estargz.TestingControllerFactory {
+	return func() estargz.TestingController {
+		return &zstdController{&Compressor{CompressionLevel: compressionLevel}, &Decompressor{}}
+	}
 }
 
 type zstdController struct {
@@ -51,17 +53,36 @@ func (zc *zstdController) String() string {
 	return fmt.Sprintf("zstd_compression_level=%v", zc.Compressor.CompressionLevel)
 }
 
-func (zc *zstdController) CountStreams(t *testing.T, b []byte) (numStreams int) {
+// TestStream tests the passed zstdchunked blob contains the specified list of streams.
+// The last entry of streams must be the offset of footer (len(b) - footerSize).
+func (zc *zstdController) TestStreams(t *testing.T, b []byte, streams []int64) {
 	t.Logf("got zstd streams (compressed size: %d):", len(b))
-	zh := new(zstd.Header)
+
+	if len(streams) == 0 {
+		return // nop
+	}
+
+	// We expect the last offset is footer offset.
+	// 8 is the size of the zstd skippable frame header + the frame size (see WriteTOCAndFooter)
+	sort.Slice(streams, func(i, j int) bool {
+		return streams[i] < streams[j]
+	})
+	streams[len(streams)-1] = streams[len(streams)-1] - 8
+	wants := map[int64]struct{}{}
+	for _, s := range streams {
+		wants[s] = struct{}{}
+	}
+
 	magicLen := 4 // length of magic bytes and skippable frame magic bytes
 	zoff := 0
+	numStreams := 0
 	for {
 		if len(b) <= zoff {
 			break
 		} else if len(b)-zoff <= magicLen {
 			t.Fatalf("invalid frame size %d is too small", len(b)-zoff)
 		}
+		delete(wants, int64(zoff)) // offset found
 		remainingFrames := b[zoff:]
 
 		// Check if zoff points to the beginning of a frame
@@ -70,73 +91,24 @@ func (zc *zstdController) CountStreams(t *testing.T, b []byte) (numStreams int) 
 				t.Fatalf("frame must start from magic bytes; but %x",
 					remainingFrames[:magicLen])
 			}
-
-			// This is a skippable frame
-			size := binary.LittleEndian.Uint32(remainingFrames[magicLen : magicLen+4])
-			t.Logf("  [%d] at %d in stargz, SKIPPABLE FRAME (nextFrame: %d/%d)",
-				numStreams, zoff, zoff+(magicLen+4+int(size)), len(b))
-			zoff += (magicLen + 4 + int(size))
-			numStreams++
-			continue
 		}
-
-		// Parse header and get uncompressed size of this frame
-		if err := zh.Decode(remainingFrames); err != nil {
-			t.Fatalf("countStreams(zstd), *Header.Decode: %v", err)
-		}
-		uncompressedFrameSize := zh.FrameContentSize
-		if uncompressedFrameSize == 0 {
-			// FrameContentSize is optional so it's possible we cannot get size info from
-			// this field. If this frame contains only one block, we can get the decompressed
-			// size from that block header.
-			if zh.FirstBlock.OK && zh.FirstBlock.Last && !zh.FirstBlock.Compressed {
-				uncompressedFrameSize = uint64(zh.FirstBlock.DecompressedSize)
-			} else {
-				t.Fatalf("countStreams(zstd), failed to get uncompressed frame size")
+		searchBase := magicLen
+		nextMagicIdx := nextIndex(remainingFrames[searchBase:], zstdFrameMagic)
+		nextSkippableIdx := nextIndex(remainingFrames[searchBase:], skippableFrameMagic)
+		nextFrame := len(remainingFrames)
+		for _, i := range []int{nextMagicIdx, nextSkippableIdx} {
+			if 0 < i && searchBase+i < nextFrame {
+				nextFrame = searchBase + i
 			}
 		}
-
-		// Identify the offset of the next frame
-		nextFrame := magicLen // ignore the magic bytes of this frame
-		for {
-			// search for the beginning magic bytes of the next frame
-			searchBase := nextFrame
-			nextMagicIdx := nextIndex(remainingFrames[searchBase:], zstdFrameMagic)
-			nextSkippableIdx := nextIndex(remainingFrames[searchBase:], skippableFrameMagic)
-			nextFrame = len(remainingFrames)
-			for _, i := range []int{nextMagicIdx, nextSkippableIdx} {
-				if 0 < i && searchBase+i < nextFrame {
-					nextFrame = searchBase + i
-				}
-			}
-
-			// "nextFrame" seems the offset of the next frame. Verify it by checking if
-			// the decompressed size of this frame is the same value as set in the header.
-			zr, err := zstd.NewReader(bytes.NewReader(remainingFrames[:nextFrame]))
-			if err != nil {
-				t.Logf("  [%d] invalid frame candidate: %v", numStreams, err)
-				continue
-			}
-			defer zr.Close()
-			res, err := io.ReadAll(zr)
-			if err != nil && err != io.ErrUnexpectedEOF {
-				t.Fatalf("countStreams(zstd), ReadAll: %v", err)
-			}
-			if uint64(len(res)) == uncompressedFrameSize {
-				break
-			}
-
-			// Try the next magic byte candidate until end
-			if uint64(len(res)) > uncompressedFrameSize || nextFrame > len(remainingFrames) {
-				t.Fatalf("countStreams(zstd), cannot identify frame (off:%d)", zoff)
-			}
-		}
-		t.Logf("  [%d] at %d in stargz, uncompressed length %d (nextFrame: %d/%d)",
-			numStreams, zoff, uncompressedFrameSize, zoff+nextFrame, len(b))
+		t.Logf("  [%d] at %d in stargz (nextFrame: %d/%d): %v, %v",
+			numStreams, zoff, zoff+nextFrame, len(b), nextMagicIdx, nextSkippableIdx)
 		zoff += nextFrame
 		numStreams++
 	}
-	return numStreams
+	if len(wants) != 0 {
+		t.Fatalf("some stream offsets not found in the blob: %v", wants)
+	}
 }
 
 func nextIndex(s1, sub []byte) int {
