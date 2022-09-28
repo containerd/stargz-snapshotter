@@ -70,6 +70,10 @@ var OptimizeCommand = cli.Command{
 			Name:  "wait-on-signal",
 			Usage: "ignore context cancel and keep the container running until it receives SIGINT (Ctrl + C) sent manually",
 		},
+		cli.StringFlag{
+			Name:  "wait-on-line",
+			Usage: "Substring of a stdout line to be waited. When this string is detected, the container will be killed.",
+		},
 		cli.BoolFlag{
 			Name:  "no-optimize",
 			Usage: "convert image without optimization",
@@ -231,7 +235,8 @@ func analyze(ctx context.Context, clicontext *cli.Context, client *containerd.Cl
 		aOpts = append(aOpts, analyzer.WithWaitOnSignal())
 	} else {
 		aOpts = append(aOpts,
-			analyzer.WithPeriod(time.Duration(clicontext.Int("period"))*time.Second))
+			analyzer.WithPeriod(time.Duration(clicontext.Int("period"))*time.Second),
+			analyzer.WithWaitLineOut(clicontext.String("wait-on-line")))
 	}
 	if clicontext.Bool("terminal") {
 		if !clicontext.Bool("i") {

@@ -30,6 +30,7 @@ type analyzerOpts struct {
 	specOpts     SpecOpts
 	terminal     bool
 	stdin        bool
+	waitLineOut  string
 }
 
 // Option is runtime configuration of analyzer container
@@ -77,5 +78,13 @@ func WithWaitOnSignal() Option {
 func WithSnapshotter(snapshotter string) Option {
 	return func(opts *analyzerOpts) {
 		opts.snapshotter = snapshotter
+	}
+}
+
+// WithWaitLineOut specifies a substring of a stdout line to be waited.
+// When this line is detected, the container will be killed.
+func WithWaitLineOut(s string) Option {
+	return func(opts *analyzerOpts) {
+		opts.waitLineOut = s
 	}
 }

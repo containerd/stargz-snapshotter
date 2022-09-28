@@ -17,11 +17,13 @@
 package analyzer
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -161,6 +163,7 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 	defer container.Delete(ctx, containerd.WithSnapshotCleanup)
 	var ioCreator cio.Creator
 	var con console.Console
+	waitLine := newLineWaiter(aOpts.waitLineOut)
 	stdinC := newLazyReadCloser(os.Stdin)
 	if aOpts.terminal {
 		if !aOpts.stdin {
@@ -172,11 +175,11 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 			return "", err
 		}
 		// On terminal mode, the "stderr" field is unused.
-		ioCreator = cio.NewCreator(cio.WithStreams(con, con, nil), cio.WithTerminal)
+		ioCreator = cio.NewCreator(cio.WithStreams(con, waitLine.registerWriter(con), nil), cio.WithTerminal)
 	} else if aOpts.stdin {
-		ioCreator = cio.NewCreator(cio.WithStreams(stdinC, os.Stdout, os.Stderr))
+		ioCreator = cio.NewCreator(cio.WithStreams(stdinC, waitLine.registerWriter(os.Stdout), os.Stderr))
 	} else {
-		ioCreator = cio.NewCreator(cio.WithStreams(nil, os.Stdout, os.Stderr))
+		ioCreator = cio.NewCreator(cio.WithStreams(nil, waitLine.registerWriter(os.Stdout), os.Stderr))
 	}
 	task, err := container.NewTask(ctx, ioCreator)
 	if err != nil {
@@ -248,7 +251,7 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 			aOpts.period = defaultPeriod
 		}
 		log.G(ctx).Infof("waiting for %v ...", aOpts.period)
-		status, killOk, err = waitOnTimeout(ctx, container, task, aOpts.period)
+		status, killOk, err = waitOnTimeout(ctx, container, task, aOpts.period, waitLine)
 		if err != nil {
 			return "", err
 		}
@@ -325,7 +328,7 @@ func waitOnSignal(ctx context.Context, container containerd.Container, task cont
 	}
 }
 
-func waitOnTimeout(ctx context.Context, container containerd.Container, task containerd.Task, period time.Duration) (containerd.ExitStatus, bool, error) {
+func waitOnTimeout(ctx context.Context, container containerd.Container, task containerd.Task, period time.Duration, line *lineWaiter) (containerd.ExitStatus, bool, error) {
 	statusC, err := task.Wait(ctx)
 	if err != nil {
 		return containerd.ExitStatus{}, false, err
@@ -333,15 +336,17 @@ func waitOnTimeout(ctx context.Context, container containerd.Container, task con
 	select {
 	case status := <-statusC:
 		return status, true, nil
+	case l := <-line.waitCh:
+		log.G(ctx).Infof("Waiting line detected %q; killing task", l)
 	case <-time.After(period):
 		log.G(ctx).Warnf("killing task. the time period to monitor access log (%s) has timed out", period.String())
-		status, err := killTask(ctx, container, task, statusC)
-		if err != nil {
-			log.G(ctx).WithError(err).Warnf("failed to kill container")
-			return containerd.ExitStatus{}, false, nil
-		}
-		return status, true, nil
 	}
+	status, err := killTask(ctx, container, task, statusC)
+	if err != nil {
+		log.G(ctx).WithError(err).Warnf("failed to kill container")
+		return containerd.ExitStatus{}, false, nil
+	}
+	return status, true, nil
 }
 
 func killTask(ctx context.Context, container containerd.Container, task containerd.Task, statusC <-chan containerd.ExitStatus) (containerd.ExitStatus, error) {
@@ -398,4 +403,38 @@ func (s *lazyReadCloser) Read(p []byte) (int, error) {
 		s.closerMu.Unlock()
 	}
 	return n, err
+}
+
+func newLineWaiter(s string) *lineWaiter {
+	return &lineWaiter{
+		waitCh:   make(chan string),
+		waitLine: s,
+	}
+}
+
+type lineWaiter struct {
+	waitCh   chan string
+	waitLine string
+}
+
+func (lw *lineWaiter) registerWriter(w io.Writer) io.Writer {
+	if lw.waitLine == "" {
+		return w
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			if strings.Contains(scanner.Text(), lw.waitLine) {
+				lw.waitCh <- lw.waitLine
+			}
+		}
+		if _, err := io.Copy(io.Discard, pr); err != nil {
+			pr.CloseWithError(err)
+			return
+		}
+	}()
+
+	return io.MultiWriter(w, pw)
 }
