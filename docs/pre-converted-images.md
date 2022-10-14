@@ -3,11 +3,15 @@
 We have several pre-converted stargz images on Github Container Registry (`ghcr.io/stargz-containers`), mainly for benchmarking purpose.
 This document lists them.
 
-:information_source: You can build your eStargz images optimized for your workload, using [`ctr-remote` command](/docs/ctr-remote.md).
+:information_source: You can build eStargz from Dockerfile using BuildKit, [using Docker Buildx](../README.md#building-estargz-images-using-buildkit) or [Kaniko](../README.md#building-estargz-images-using-kaniko).
+
+:information_source: You can convert arbitrary images into eStargz optimized for your workload, using [`ctr-remote` command](/docs/ctr-remote.md).
 
 :information_source: You can convert arbitrary images into eStargz on the registry-side, using [`estargz.kontain.me`](https://estargz.kontain.me).
 
 ## Pre-converted images
+
+:information_source: You can request new pre-converted images from our CI repository ([`github.com/stargz-containers/image-ci`](https://github.com/stargz-containers/image-ci)).
 
 In the following table, image names listed in `Image Name` contain the following suffixes based on the type of the image.
 
@@ -67,5 +71,12 @@ In the following table, image names listed in `Image Name` contain the following
 
 ## lazy-pulling-enabled KinD node image
 
-You can enable lazy pulling of eStargz on [KinD](https://github.com/kubernetes-sigs/kind) using our prebuilt node image [`ghcr.io/stargz-containers/estargz-kind-node`](https://github.com/orgs/stargz-containers/packages/container/package/estargz-kind-node).
+You can enable lazy pulling of eStargz on [KinD](https://github.com/kubernetes-sigs/kind) using our prebuilt node image [`ghcr.io/containerd/stargz-snapshotter:${VERSION}-kind`](https://github.com/orgs/containerd/packages/container/package/stargz-snapshotter) namespace.
+
+Example:
+
+```console
+$ kind create cluster --name stargz-demo --image ghcr.io/containerd/stargz-snapshotter:0.12.1-kind
+```
+
 Please refer to README for more details.
