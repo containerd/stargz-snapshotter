@@ -73,12 +73,12 @@ version = 2
 You can try our [prebuilt](/Dockerfile) [KinD](https://github.com/kubernetes-sigs/kind) node image that contains the above configuration.
 
 ```console
-$ kind create cluster --name stargz-demo --image ghcr.io/stargz-containers/estargz-kind-node:0.11.3
+$ kind create cluster --name stargz-demo --image ghcr.io/containerd/stargz-snapshotter:0.12.1-kind
 ```
 
-:information_source: kind binary v0.11.x or newer is recommended.
+:information_source: kind binary v0.16.x or newer is recommended for `ghcr.io/containerd/stargz-snapshotter:0.12.1-kind`.
 
-:information_source: You can get latest node images from [`ghcr.io/stargz-containers/estargz-kind-node`](https://github.com/orgs/stargz-containers/packages/container/package/estargz-kind-node).
+:information_source: You can get latest node images from [`ghcr.io/containerd/stargz-snapshotter:${VERSION}-kind`](https://github.com/orgs/containerd/packages/container/package/stargz-snapshotter) namespace.
 
 Then you can create eStargz pods on the cluster.
 In this example, we create a stargz-converted Node.js pod (`ghcr.io/stargz-containers/node:17.8.0-esgz`) as a demo.
