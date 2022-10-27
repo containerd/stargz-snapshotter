@@ -4,10 +4,10 @@ go 1.16
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/containerd/containerd v1.6.8
+	github.com/containerd/containerd v1.6.9
 	github.com/containerd/continuity v0.3.0
 	github.com/containerd/stargz-snapshotter/estargz v0.12.1
-	github.com/docker/cli v20.10.20+incompatible
+	github.com/docker/cli v20.10.21+incompatible
 	github.com/docker/docker v20.10.7+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.6.4 // indirect
 	github.com/docker/go-metrics v0.0.1
@@ -15,7 +15,7 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.1.1-0.20220112183258-f57e95bda82d
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-retryablehttp v0.7.1
-	github.com/klauspost/compress v1.15.11
+	github.com/klauspost/compress v1.15.12
 	github.com/moby/sys/mountinfo v0.6.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799
