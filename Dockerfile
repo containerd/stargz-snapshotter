@@ -197,13 +197,10 @@ RUN apt-get update && apt-get install -y iptables && \
 
 # Image which can be used as a node image for KinD (containerd with builtin snapshotter)
 FROM kindest/node:v1.25.3 AS kind-builtin-snapshotter
-# see https://medium.com/nttlabs/ubuntu-21-10-and-fedora-35-do-not-work-on-docker-20-10-9-1cd439d9921
-ADD https://github.com/AkihiroSuda/clone3-workaround/releases/download/v1.0.0/clone3-workaround.x86_64 /clone3-workaround
-RUN chmod 755 /clone3-workaround
 COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 COPY ./script/config/ /
-RUN /clone3-workaround apt-get update -y && /clone3-workaround apt-get install --no-install-recommends -y fuse
+RUN apt-get update -y && apt-get install --no-install-recommends -y fuse
 ENTRYPOINT [ "/usr/local/bin/kind-entrypoint.sh", "/usr/local/bin/entrypoint", "/sbin/init" ]
 
 # Image for testing CRI-O with Stargz Store.
@@ -241,12 +238,9 @@ ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 
 # Image which can be used as a node image for KinD
 FROM kindest/node:v1.25.3
-# see https://medium.com/nttlabs/ubuntu-21-10-and-fedora-35-do-not-work-on-docker-20-10-9-1cd439d9921
-ADD https://github.com/AkihiroSuda/clone3-workaround/releases/download/v1.0.0/clone3-workaround.x86_64 /clone3-workaround
-RUN chmod 755 /clone3-workaround
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /
-RUN /clone3-workaround apt-get update -y && /clone3-workaround apt-get install --no-install-recommends -y fuse && \
+RUN apt-get update -y && apt-get install --no-install-recommends -y fuse && \
     systemctl enable stargz-snapshotter
 ENTRYPOINT [ "/usr/local/bin/kind-entrypoint.sh", "/usr/local/bin/entrypoint", "/sbin/init" ]
