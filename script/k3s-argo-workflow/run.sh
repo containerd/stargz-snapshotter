@@ -46,22 +46,6 @@ function argo_yaml() {
     cp "${ORG_ARGOYAML}" "${TMP_CUSTOM_ARGOYAML}"
     sed -i 's|containerRuntimeExecutor: docker|containerRuntimeExecutor: pns|g' "${TMP_CUSTOM_ARGOYAML}"
 
-    local ARGOEXEC_IMAGE=argoproj/argoexec:v3.0.3
-    local ARGOEXEC_IMAGE_USE=ghcr.io/stargz-containers/argoproj-argoexec:v3.0.3-"${IMAGE_TYPE}"
-    replace_image "${TMP_CUSTOM_ARGOYAML}" "${ARGOEXEC_IMAGE}" "${ARGOEXEC_IMAGE_USE}"
-
-    local MINIO_IMAGE=minio/minio:RELEASE.2019-12-17T23-16-33Z
-    local MINIO_IMAGE_USE=ghcr.io/stargz-containers/minio:RELEASE.2019-12-17T23-16-33Z-"${IMAGE_TYPE}"
-    replace_image "${TMP_CUSTOM_ARGOYAML}" "${MINIO_IMAGE}" "${MINIO_IMAGE_USE}"
-
-    local ARGOWORKFLOW_IMAGE=argoproj/workflow-controller:v3.0.3
-    local ARGOWORKFLOW_IMAGE_USE=ghcr.io/stargz-containers/argoproj-workflow-controller:v3.0.3-"${IMAGE_TYPE}"
-    replace_image "${TMP_CUSTOM_ARGOYAML}" "${ARGOWORKFLOW_IMAGE}" "${ARGOWORKFLOW_IMAGE_USE}"
-
-    local ARGOCLI_IMAGE=argoproj/argocli:v3.0.3
-    local ARGOCLI_IMAGE_USE=ghcr.io/stargz-containers/argoproj-argocli:v3.0.3-"${IMAGE_TYPE}"
-    replace_image "${TMP_CUSTOM_ARGOYAML}" "${ARGOCLI_IMAGE}" "${ARGOCLI_IMAGE_USE}"
-
     cat "${TMP_CUSTOM_ARGOYAML}"
 
     rm "${TMP_CUSTOM_ARGOYAML}"
@@ -135,7 +119,7 @@ if [ "${RESULT_FILE}" == "" ] ; then
 fi
 echo "result to ${RESULT_FILE}"
 
-wget -O "${ORG_ARGOYAML}" https://raw.githubusercontent.com/argoproj/argo-workflows/stable/manifests/quick-start-minimal.yaml
+wget -O "${ORG_ARGOYAML}" https://raw.githubusercontent.com/argoproj/argo-workflows/v3.4.3/manifests/quick-start-minimal.yaml
 
 git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
 cat <<EOF >> "${TMP_K3S_REPO}/go.mod"
