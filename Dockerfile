@@ -137,7 +137,7 @@ COPY --from=stargz-store-dev /out/* /
 FROM golang-base AS containerd-base
 ARG TARGETARCH
 ARG NERDCTL_VERSION
-RUN apt-get update -y && apt-get --no-install-recommends install -y fuse && \
+RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3 && \
     curl -sSL --output /tmp/nerdctl.tgz https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${TARGETARCH:-amd64}.tar.gz && \
     tar zxvf /tmp/nerdctl.tgz -C /usr/local/bin && \
     rm -f /tmp/nerdctl.tgz
@@ -153,7 +153,7 @@ RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
 FROM golang-base AS containerd-snapshotter-base
 ARG TARGETARCH
 ARG NERDCTL_VERSION
-RUN apt-get update -y && apt-get --no-install-recommends install -y fuse && \
+RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3 && \
     curl -sSL --output /tmp/nerdctl.tgz https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${TARGETARCH:-amd64}.tar.gz && \
     tar zxvf /tmp/nerdctl.tgz -C /usr/local/bin && \
     rm -f /tmp/nerdctl.tgz
@@ -167,7 +167,7 @@ FROM golang-base AS podman-base
 ARG TARGETARCH
 ARG CNI_PLUGINS_VERSION
 ARG PODMAN_VERSION
-RUN apt-get update -y && apt-get --no-install-recommends install -y fuse libgpgme-dev \
+RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3 libgpgme-dev \
                          iptables libyajl-dev && \
     # Make CNI plugins manipulate iptables instead of nftables
     # as this test runs in a Docker container that network is configured with iptables.
@@ -200,7 +200,7 @@ FROM kindest/node:v1.25.3 AS kind-builtin-snapshotter
 COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 COPY ./script/config/ /
-RUN apt-get update -y && apt-get install --no-install-recommends -y fuse
+RUN apt-get update -y && apt-get install --no-install-recommends -y fuse3
 ENTRYPOINT [ "/usr/local/bin/kind-entrypoint.sh", "/usr/local/bin/entrypoint", "/sbin/init" ]
 
 # Image for testing CRI-O with Stargz Store.
@@ -210,7 +210,7 @@ ARG CNI_PLUGINS_VERSION
 ARG CRIO_TEST_PAUSE_IMAGE_NAME
 ENV container docker
 RUN apt-get update -y && apt-get install --no-install-recommends -y \
-                         ca-certificates fuse libgpgme-dev libglib2.0-dev curl \
+                         ca-certificates fuse3 libgpgme-dev libglib2.0-dev curl \
                          iptables conntrack systemd systemd-sysv && \
     DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y tzdata && \
     # Make CNI plugins manipulate iptables instead of nftables
@@ -241,6 +241,6 @@ FROM kindest/node:v1.25.3
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /
-RUN apt-get update -y && apt-get install --no-install-recommends -y fuse && \
+RUN apt-get update -y && apt-get install --no-install-recommends -y fuse3 && \
     systemctl enable stargz-snapshotter
 ENTRYPOINT [ "/usr/local/bin/kind-entrypoint.sh", "/usr/local/bin/entrypoint", "/sbin/init" ]
