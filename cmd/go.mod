@@ -23,9 +23,9 @@ require (
 	github.com/urfave/cli v1.22.5
 	go.etcd.io/bbolt v1.3.6
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
-	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f
+	golang.org/x/sys v0.1.0
 	google.golang.org/grpc v1.50.1
-	k8s.io/cri-api v0.26.0-alpha.2
+	k8s.io/cri-api v0.26.0-alpha.3
 )
 
 replace (
