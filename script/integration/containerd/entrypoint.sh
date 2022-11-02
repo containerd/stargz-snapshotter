@@ -31,6 +31,8 @@ DUMMYPASS=dummypass
 USR_ORG=$(mktemp -d)
 USR_MIRROR=$(mktemp -d)
 USR_REFRESH=$(mktemp -d)
+USR_TMPDIR=$(mktemp -d)
+
 USR_NORMALSN_UNSTARGZ=$(mktemp -d)
 USR_STARGZSN_UNSTARGZ=$(mktemp -d)
 USR_NORMALSN_STARGZ=$(mktemp -d)
@@ -39,14 +41,18 @@ USR_NORMALSN_ZSTD=$(mktemp -d)
 USR_STARGZSN_ZSTD=$(mktemp -d)
 USR_NORMALSN_PLAIN_STARGZ=$(mktemp -d)
 USR_STARGZSN_PLAIN_STARGZ=$(mktemp -d)
+
 USR_NORMALSN_IPFS=$(mktemp -d)
 USR_STARGZSN_IPFS=$(mktemp -d)
+
 LOG_FILE=$(mktemp)
 function cleanup {
     ORG_EXIT_CODE="${1}"
     rm -rf "${USR_ORG}" || true
     rm -rf "${USR_MIRROR}" || true
     rm -rf "${USR_REFRESH}" || true
+    rm -rf "${USR_TMPDIR}" || true
+
     rm -rf "${USR_NORMALSN_UNSTARGZ}" || true
     rm -rf "${USR_STARGZSN_UNSTARGZ}" || true
     rm -rf "${USR_NORMALSN_STARGZ}" || true
@@ -55,6 +61,7 @@ function cleanup {
     rm -rf "${USR_STARGZSN_PLAIN_STARGZ}" || true
     rm -rf "${USR_NORMALSN_ZSTD}" || true
     rm -rf "${USR_STARGZSN_ZSTD}" || true
+
     rm -rf "${USR_NORMALSN_IPFS}" || true
     rm -rf "${USR_STARGZSN_IPFS}" || true
     rm "${LOG_FILE}"
@@ -134,18 +141,28 @@ function reboot_containerd {
 function optimize {
     local SRC="${1}"
     local DST="${2}"
-    local PUSHOPTS=${@:3}
+    local PLAINHTTP="${3}"
+    local OPTS=${@:4}
     ctr-remote image pull -u "${DUMMYUSER}:${DUMMYPASS}" "${SRC}"
-    ctr-remote image optimize --oci "${SRC}" "${DST}"
+    ctr-remote image optimize ${OPTS} --oci "${SRC}" "${DST}"
+    PUSHOPTS=
+    if [ "${PLAINHTTP}" == "true" ] ; then
+        PUSHOPTS=--plain-http
+    fi
     ctr-remote image push ${PUSHOPTS} -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
 }
 
 function convert {
     local SRC="${1}"
     local DST="${2}"
-    local PUSHOPTS=${@:3}
+    local PLAINHTTP="${3}"
+    local OPTS=${@:4}
+    PUSHOPTS=
+    if [ "${PLAINHTTP}" == "true" ] ; then
+        PUSHOPTS=--plain-http
+    fi
     ctr-remote image pull -u "${DUMMYUSER}:${DUMMYPASS}" "${SRC}"
-    ctr-remote image optimize --no-optimize "${SRC}" "${DST}"
+    ctr-remote image convert ${OPTS} --oci "${SRC}" "${DST}"
     ctr-remote image push ${PUSHOPTS} -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
 }
 
@@ -248,10 +265,18 @@ echo "Preparing images..."
 copy ghcr.io/stargz-containers/ubuntu:22.04-org "${REGISTRY_HOST}/ubuntu:22.04"
 copy ghcr.io/stargz-containers/alpine:3.15.3-org "${REGISTRY_HOST}/alpine:3.15.3"
 stargzify "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:sgz"
-optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz"
-optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:zstdchunked"
-optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_HOST}/alpine:esgz"
-optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_ALT_HOST}:5000/alpine:esgz" --plain-http
+optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz" "false"
+optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:zstdchunked" "false" --zstdchunked
+optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_HOST}/alpine:esgz" "false"
+optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_ALT_HOST}:5000/alpine:esgz" "true"
+
+# images for external TOC and min-chunk-size
+# TODO: support external TOC suffix other than "-esgztoc"
+optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz-50000" "false" --estargz-min-chunk-size=50000
+optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz-ex" "false" --estargz-external-toc
+ctr-remote i push -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:esgz-ex-esgztoc"
+convert "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id" "false" --estargz --estargz-external-toc --estargz-keep-diff-id
+ctr-remote i push -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id-esgztoc"
 
 if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
 
@@ -334,13 +359,15 @@ echo "Testing stargz filesystem..."
 # Test with a normal image
 
 echo "Getting normal image with normal snapshotter..."
-dump_dir "${REGISTRY_HOST}/ubuntu:22.04" "/usr" "overlayfs" "false" "${USR_NORMALSN_UNSTARGZ}"
+OVERLAYFSSN=$(mktemp -d --tmpdir="${USR_TMPDIR}")
+dump_dir "${REGISTRY_HOST}/ubuntu:22.04" "/usr" "overlayfs" "false" "${OVERLAYFSSN}"
 
 echo "Getting normal image with stargz snapshotter..."
-dump_dir "${REGISTRY_HOST}/ubuntu:22.04" "/usr" "stargz" "false" "${USR_STARGZSN_UNSTARGZ}"
+STARGZSN=$(mktemp -d --tmpdir="${USR_TMPDIR}")
+dump_dir "${REGISTRY_HOST}/ubuntu:22.04" "/usr" "stargz" "false" "${STARGZSN}"
 
 echo "Diffing between two root filesystems(normal vs stargz snapshotter, normal rootfs)"
-diff --no-dereference -qr "${USR_NORMALSN_UNSTARGZ}/" "${USR_STARGZSN_UNSTARGZ}/"
+diff --no-dereference -qr "${OVERLAYFSSN}/" "${STARGZSN}/"
 
 # Test with an eStargz image
 
@@ -363,6 +390,45 @@ dump_dir "${REGISTRY_HOST}/ubuntu:zstdchunked" "/usr" "stargz" "true" "${USR_STA
 
 echo "Diffing between two root filesystems(normal vs stargz snapshotter, zstd:cunked rootfs)"
 diff --no-dereference -qr "${USR_NORMALSN_ZSTD}/" "${USR_STARGZSN_ZSTD}/"
+
+# Test with a external TOC image
+
+echo "Getting external TOC image with normal snapshotter..."
+EX_OVERLAYFSSN=$(mktemp -d --tmpdir="${USR_TMPDIR}")
+dump_dir "${REGISTRY_HOST}/ubuntu:esgz-ex" "/usr" "overlayfs" "false" "${EX_OVERLAYFSSN}"
+
+echo "Getting external TOC image with stargz snapshotter..."
+EX_STARGZSN=$(mktemp -d --tmpdir="${USR_TMPDIR}")
+dump_dir "${REGISTRY_HOST}/ubuntu:esgz-ex" "/usr" "stargz" "true" "${EX_STARGZSN}"
+
+echo "Diffing between two root filesystems(normal vs stargz snapshotter, eStargz (external TOC) rootfs)"
+diff --no-dereference -qr "${EX_OVERLAYFSSN}/" "${EX_STARGZSN}/"
+
+# Test with a external TOC + keep-diff-id image
+
+echo "Getting external TOC image (keep diff id) with normal snapshotter..."
+EXLL_OVERLAYFSSN=$(mktemp -d --tmpdir="${USR_TMPDIR}")
+dump_dir "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id" "/usr" "overlayfs" "false" "${EXLL_OVERLAYFSSN}"
+
+echo "Getting external TOC image (keep diff id) with stargz snapshotter..."
+EXLL_STARGZSN=$(mktemp -d --tmpdir="${USR_TMPDIR}")
+dump_dir "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id" "/usr" "stargz" "true" "${EXLL_STARGZSN}"
+
+echo "Diffing between two root filesystems(normal vs stargz snapshotter, eStargz (external TOC, keep-diff-id) rootfs)"
+diff --no-dereference -qr "${EXLL_OVERLAYFSSN}/" "${EXLL_STARGZSN}/"
+
+# Test with a eStargz with min-chunk-size=50000 image
+
+echo "Getting eStargz (min-chunk-size=50000) with normal snapshotter..."
+E50000_OVERLAYFSSN=$(mktemp -d --tmpdir="${USR_TMPDIR}")
+dump_dir "${REGISTRY_HOST}/ubuntu:esgz-50000" "/usr" "overlayfs" "false" "${E50000_OVERLAYFSSN}"
+
+echo "Getting eStargz (min-chunk-size=50000) with stargz snapshotter..."
+E50000_STARGZSN=$(mktemp -d --tmpdir="${USR_TMPDIR}")
+dump_dir "${REGISTRY_HOST}/ubuntu:esgz-50000" "/usr" "stargz" "true" "${E50000_STARGZSN}"
+
+echo "Diffing between two root filesystems(normal vs stargz snapshotter, eStargz (min-chunk-size=50000) rootfs)"
+diff --no-dereference -qr "${E50000_OVERLAYFSSN}/" "${E50000_STARGZSN}/"
 
 ############
 # Checking compatibility with plain stargz

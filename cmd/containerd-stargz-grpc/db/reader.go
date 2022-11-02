@@ -111,10 +111,10 @@ func NewReader(db *bolt.DB, sr *io.SectionReader, opts ...metadata.Option) (meta
 			allErr = multierror.Append(allErr, err)
 			continue
 		}
-		if tocSize <= 0 {
+		if tocOffset >= 0 && tocSize <= 0 {
 			tocSize = sr.Size() - tocOffset - fSize
 		}
-		if tocSize < int64(len(maybeTocBytes)) {
+		if tocOffset >= 0 && tocSize < int64(len(maybeTocBytes)) {
 			maybeTocBytes = maybeTocBytes[:tocSize]
 		}
 		tocR, err = decompressTOC(d, sr, tocOffset, tocSize, maybeTocBytes, rOpts)
@@ -149,6 +149,20 @@ func maxFooterSize(blobSize int64, decompressors ...metadata.Decompressor) (res 
 }
 
 func decompressTOC(d metadata.Decompressor, sr *io.SectionReader, tocOff, tocSize int64, tocBytes []byte, opts metadata.Options) (io.ReadCloser, error) {
+	if tocOff < 0 {
+		// This means that TOC isn't contained in the blob.
+		// We pass nil reader to DecompressTOC and expect that it acquires TOC from
+		// the external location.
+		start := time.Now()
+		tocR, err := d.DecompressTOC(nil)
+		if err != nil {
+			return nil, err
+		}
+		if opts.Telemetry != nil && opts.Telemetry.GetTocLatency != nil {
+			opts.Telemetry.GetTocLatency(start)
+		}
+		return tocR, nil
+	}
 	if len(tocBytes) > 0 {
 		start := time.Now() // before getting TOC
 		tocR, err := d.DecompressTOC(bytes.NewReader(tocBytes))
@@ -282,6 +296,9 @@ func (r *reader) initRootNode(fsID string) error {
 		if _, err := lbkt.CreateBucket(bucketKeyMetadata); err != nil {
 			return err
 		}
+		if _, err := lbkt.CreateBucket(bucketKeyStream); err != nil {
+			return err
+		}
 		nodes, err := lbkt.CreateBucket(bucketKeyNodes)
 		if err != nil {
 			return err
@@ -327,13 +344,14 @@ func (r *reader) initNodes(tr io.Reader) error {
 		}
 	}
 	md := make(map[uint32]*metadataEntry)
+	st := make(map[int64]map[int64]uint32)
 	if err := r.db.Batch(func(tx *bolt.Tx) (err error) {
 		nodes, err := getNodes(tx, r.fsID)
 		if err != nil {
 			return err
 		}
 		nodes.FillPercent = 1.0 // we only do sequential write to this bucket
-		var wantNextOffsetID uint32
+		var wantNextOffsetID []uint32
 		var lastEntBucketID uint32
 		var lastEntSize int64
 		var attr metadata.Attr
@@ -415,14 +433,17 @@ func (r *reader) initNodes(tr io.Reader) error {
 					return err
 				}
 
-				if ent.Offset > 0 && wantNextOffsetID > 0 {
-					if md[wantNextOffsetID] == nil {
-						md[wantNextOffsetID] = &metadataEntry{}
+				if ent.Offset > 0 && ent.InnerOffset == 0 && len(wantNextOffsetID) > 0 {
+					for _, i := range wantNextOffsetID {
+						if md[i] == nil {
+							md[i] = &metadataEntry{}
+						}
+						md[i].nextOffset = ent.Offset
 					}
-					md[wantNextOffsetID].nextOffset = ent.Offset
+					wantNextOffsetID = nil
 				}
 				if ent.Type == "reg" && ent.Size > 0 {
-					wantNextOffsetID = id
+					wantNextOffsetID = append(wantNextOffsetID, id)
 				}
 
 				lastEntSize = ent.Size
@@ -432,19 +453,39 @@ func (r *reader) initNodes(tr io.Reader) error {
 				if md[lastEntBucketID] == nil {
 					md[lastEntBucketID] = &metadataEntry{}
 				}
-				ce := chunkEntry{ent.Offset, ent.ChunkOffset, ent.ChunkSize, ent.ChunkDigest}
+				ce := chunkEntry{ent.Offset, ent.ChunkOffset, ent.ChunkSize, ent.ChunkDigest, ent.InnerOffset}
 				md[lastEntBucketID].chunks = append(md[lastEntBucketID].chunks, ce)
+				if _, ok := st[ent.Offset]; !ok {
+					st[ent.Offset] = make(map[int64]uint32)
+				}
+				st[ent.Offset][ent.InnerOffset] = lastEntBucketID
 			}
 		}
-		if wantNextOffsetID > 0 {
-			if md[wantNextOffsetID] == nil {
-				md[wantNextOffsetID] = &metadataEntry{}
+		if len(wantNextOffsetID) > 0 {
+			for _, i := range wantNextOffsetID {
+				if md[i] == nil {
+					md[i] = &metadataEntry{}
+				}
+				md[i].nextOffset = r.sr.Size()
 			}
-			md[wantNextOffsetID].nextOffset = r.sr.Size()
 		}
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	for mdK, d := range md {
+		for cK, ce := range d.chunks {
+			if len(st[ce.offset]) == 1 {
+				for ioff := range st[ce.offset] {
+					if ioff == 0 {
+						// This stream contains only 1 chunk with innerOffset=0. No need to record innerOffsets.
+						md[mdK].chunks[cK].innerOffset = -1 // indicates no following chunks in this stream.
+					}
+					break
+				}
+			}
+		}
 	}
 
 	addendum := make([]struct {
@@ -479,6 +520,62 @@ func (r *reader) initNodes(tr io.Reader) error {
 		return err
 	}
 
+	addendumStream := make([]struct {
+		offset []byte
+		st     map[int64]uint32
+	}, len(st))
+	i = 0
+	for off, s := range st {
+		singleStream := false
+		if len(s) == 1 {
+			for ioff := range s {
+				if ioff == 0 {
+					singleStream = true
+				}
+				break
+			}
+		}
+		if singleStream {
+			continue // This stream contains only 1 chunk with innerOffset=0. No need to record.
+		}
+		offKey, err := encodeInt(off)
+		if err != nil {
+			return err
+		}
+		addendumStream[i].offset, addendumStream[i].st = offKey, s
+		i++
+	}
+	addendumStream = addendumStream[:i]
+	if len(addendumStream) > 0 {
+		sort.Slice(addendumStream, func(i, j int) bool {
+			return bytes.Compare(addendumStream[i].offset, addendumStream[j].offset) < 0
+		})
+		if err := r.db.Batch(func(tx *bolt.Tx) (err error) {
+			stream, err := getStream(tx, r.fsID)
+			if err != nil {
+				return err
+			}
+			stream.FillPercent = 1.0 // we only do sequential write to this bucket
+			for _, s := range addendumStream {
+				stbkt, err := stream.CreateBucket(s.offset)
+				if err != nil {
+					return err
+				}
+				for innerOffset, nodeid := range s.st {
+					iOffKey, err := encodeInt(innerOffset)
+					if err != nil {
+						return err
+					}
+					if err := stbkt.Put(iOffKey, encodeID(nodeid)); err != nil {
+						return fmt.Errorf("failed to put inner offset info of %d: %w", nodeid, err)
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -718,8 +815,19 @@ func (r *reader) ForeachChild(id uint32, f func(name string, id uint32, mode os.
 	return nil
 }
 
+// OpenFileWithPreReader returns a section reader of the specified node.
+// When it reads other ranges than required by the returned reader (e.g. when the target range is located in
+// a large chunk with innerOffset), these chunks are passed to the callback so that it can be cached for futural use.
+func (r *reader) OpenFileWithPreReader(id uint32, preRead func(nid uint32, chunkOffset, chunkSize int64, chunkDigest string, r io.Reader) error) (metadata.File, error) {
+	return r.openFile(id, preRead)
+}
+
 // OpenFile returns a section reader of the specified node.
 func (r *reader) OpenFile(id uint32) (metadata.File, error) {
+	return r.openFile(id, nil)
+}
+
+func (r *reader) openFile(id uint32, preRead func(id uint32, chunkOffset, chunkSize int64, chunkDigest string, r io.Reader) error) (metadata.File, error) {
 	var chunks []chunkEntry
 	var size int64
 
@@ -759,6 +867,7 @@ func (r *reader) OpenFile(id uint32) (metadata.File, error) {
 		size:       size,
 		ents:       chunks,
 		nextOffset: nextOffset,
+		preRead:    preRead,
 	}
 	return &file{io.NewSectionReader(fr, 0, size), chunks}, nil
 }
@@ -785,6 +894,7 @@ type fileReader struct {
 	size       int64
 	ents       []chunkEntry
 	nextOffset int64
+	preRead    func(id uint32, chunkOffset, chunkSize int64, chunkDigest string, r io.Reader) error
 }
 
 // ReadAt reads file payload of this file.
@@ -830,11 +940,56 @@ func (fr *fileReader) ReadAt(p []byte, off int64) (n int, err error) {
 		return 0, fmt.Errorf("fileReader.ReadAt.decompressor.Reader: %v", err)
 	}
 	defer dr.Close()
-	base := off - ent.chunkOffset
-	if n, err := io.CopyN(io.Discard, dr, base); n != base || err != nil {
-		return 0, fmt.Errorf("discard of %d bytes = %v, %v", base, n, err)
+
+	// Stream that doesn't contain multiple chunks is indicated as ent.innerOffset < 0.
+	if fr.preRead == nil || ent.innerOffset < 0 {
+		base := off - ent.chunkOffset
+		if ent.innerOffset > 0 {
+			base += ent.innerOffset
+		}
+		if n, err := io.CopyN(io.Discard, dr, base); n != base || err != nil {
+			return 0, fmt.Errorf("discard of %d bytes = %v, %v", base, n, err)
+		}
+		return io.ReadFull(dr, p)
 	}
-	return io.ReadFull(dr, p)
+
+	var innerChunks []chunkEntryWithID
+	if err := fr.r.view(func(tx *bolt.Tx) error {
+		innerChunks, err = readInnerChunks(tx, fr.r.fsID, ent.offset)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	var found bool
+	var nr int64
+	var retN int
+	var retErr error
+	for _, e := range innerChunks {
+		// Fully read the previous chunk reader so that the seek position goes at the current chunk offset
+		if in, err := io.CopyN(io.Discard, dr, e.innerOffset-nr); err != nil || in != e.innerOffset-nr {
+			return 0, fmt.Errorf("discard of remaining %d bytes != %v, %v", e.innerOffset-nr, in, err)
+		}
+		nr += e.innerOffset - nr
+		if e.innerOffset == ent.innerOffset {
+			found = true
+			base := off - ent.chunkOffset
+			if n, err := io.CopyN(io.Discard, dr, base); n != base || err != nil {
+				return 0, fmt.Errorf("discard of offset %d bytes != %v, %v", off, n, err)
+			}
+			retN, retErr = io.ReadFull(dr, p)
+			nr += base + int64(retN)
+			continue
+		}
+		cr := &countReader{r: io.LimitReader(dr, e.chunkSize)}
+		if err := fr.preRead(e.id, e.chunkOffset, e.chunkSize, e.chunkDigest, cr); err != nil {
+			return 0, fmt.Errorf("failed to pre read: %w", err)
+		}
+		nr += cr.n
+	}
+	if !found {
+		return 0, fmt.Errorf("fileReader.ReadAt: target entry not found")
+	}
+	return retN, retErr
 }
 
 // TODO: share it with memory pkg
@@ -922,6 +1077,7 @@ func resetEnt(ent *estargz.TOCEntry) {
 	ent.ChunkOffset = 0
 	ent.ChunkSize = 0
 	ent.ChunkDigest = ""
+	ent.InnerOffset = 0
 }
 
 func positive(n int64) int64 {
@@ -983,5 +1139,16 @@ func (r *reader) NumOfChunks(id uint32) (i int, _ error) {
 	}); err != nil {
 		return 0, err
 	}
+	return
+}
+
+type countReader struct {
+	r io.Reader
+	n int64
+}
+
+func (cr *countReader) Read(p []byte) (n int, err error) {
+	n, err = cr.r.Read(p)
+	cr.n += int64(n)
 	return
 }

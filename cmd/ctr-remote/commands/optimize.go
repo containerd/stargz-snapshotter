@@ -30,12 +30,14 @@ import (
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/analyzer"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
+	esgzexternaltocconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz/externaltoc"
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
@@ -95,6 +97,20 @@ var OptimizeCommand = cli.Command{
 			Name:  "zstdchunked",
 			Usage: "use zstd compression instead of gzip (a.k.a zstd:chunked)",
 		},
+		cli.BoolFlag{
+			Name:  "estargz-external-toc",
+			Usage: "Separate TOC JSON into another image (called \"TOC image\"). The name of TOC image is the original + \"-esgztoc\" suffix. Both eStargz and the TOC image should be pushed to the same registry. stargz-snapshotter refers to the TOC image when it pulls the result eStargz image.",
+		},
+		cli.IntFlag{
+			Name:  "estargz-chunk-size",
+			Usage: "eStargz chunk size",
+			Value: 0,
+		},
+		cli.IntFlag{
+			Name:  "estargz-min-chunk-size",
+			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand.",
+			Value: 0,
+		},
 	}, samplerFlags...),
 	Action: func(clicontext *cli.Context) error {
 		convertOpts := []converter.Opt{}
@@ -152,11 +168,24 @@ var OptimizeCommand = cli.Command{
 			}
 		}
 		var f converter.ConvertFunc
+		var finalize func(ctx context.Context, cs content.Store, ref string, desc *ocispec.Descriptor) (*images.Image, error)
 		if clicontext.Bool("zstdchunked") {
 			f = zstdchunkedconvert.LayerConvertWithLayerOptsFunc(esgzOptsPerLayer)
-		} else {
+		} else if !clicontext.Bool("estargz-external-toc") {
 			f = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer,
-				estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")))
+				estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")),
+				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
+				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")))
+		} else {
+			if clicontext.Bool("reuse") {
+				// We require that the layer conversion is triggerd for each layer
+				// to make sure that "finalize" function has the information of all layers.
+				return fmt.Errorf("\"estargz-external-toc\" can't be used with \"reuse\" flag")
+			}
+			f, finalize = esgzexternaltocconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, []estargz.Option{
+				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
+				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")),
+			}, clicontext.Int("estargz-compression-level"))
 		}
 		if wrapper != nil {
 			f = wrapper(f)
@@ -178,6 +207,19 @@ var OptimizeCommand = cli.Command{
 		newImg, err := converter.Convert(ctx, client, targetRef, srcRef, convertOpts...)
 		if err != nil {
 			return err
+		}
+		if finalize != nil {
+			newI, err := finalize(ctx, client.ContentStore(), targetRef, &newImg.Target)
+			if err != nil {
+				return err
+			}
+			is := client.ImageService()
+			_ = is.Delete(ctx, newI.Name)
+			finimg, err := is.Create(ctx, *newI)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(clicontext.App.Writer, "extra image:", finimg.Name)
 		}
 		fmt.Fprintln(clicontext.App.Writer, newImg.Target.Digest.String())
 		return nil

@@ -20,17 +20,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/util/cacheutil"
@@ -206,7 +203,7 @@ func (p *refPool) fetchManifestAndConfig(ctx context.Context, refspec reference.
 		return ocispec.Manifest{}, ocispec.Image{}, err
 	}
 	plt := platforms.DefaultSpec() // TODO: should we make this configurable?
-	manifest, err := fetchManifestPlatform(ctx, fetcher, img, plt)
+	manifest, err := containerdutil.FetchManifestPlatform(ctx, fetcher, img, plt)
 	if err != nil {
 		return ocispec.Manifest{}, ocispec.Image{}, err
 	}
@@ -237,62 +234,4 @@ func (p *refPool) manifestFile(refspec reference.Spec) string {
 
 func (p *refPool) configFile(refspec reference.Spec) string {
 	return filepath.Join(p.metadataDir(refspec), "config")
-}
-
-func fetchManifestPlatform(ctx context.Context, fetcher remotes.Fetcher, desc ocispec.Descriptor, platform ocispec.Platform) (ocispec.Manifest, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-
-	r, err := fetcher.Fetch(ctx, desc)
-	if err != nil {
-		return ocispec.Manifest{}, err
-	}
-	defer r.Close()
-
-	var manifest ocispec.Manifest
-	switch desc.MediaType {
-	case images.MediaTypeDockerSchema2Manifest, ocispec.MediaTypeImageManifest:
-		p, err := io.ReadAll(r)
-		if err != nil {
-			return ocispec.Manifest{}, err
-		}
-		if err := containerdutil.ValidateMediaType(p, desc.MediaType); err != nil {
-			return ocispec.Manifest{}, err
-		}
-		if err := json.Unmarshal(p, &manifest); err != nil {
-			return ocispec.Manifest{}, err
-		}
-		return manifest, nil
-	case images.MediaTypeDockerSchema2ManifestList, ocispec.MediaTypeImageIndex:
-		var index ocispec.Index
-		p, err := io.ReadAll(r)
-		if err != nil {
-			return ocispec.Manifest{}, err
-		}
-		if err := containerdutil.ValidateMediaType(p, desc.MediaType); err != nil {
-			return ocispec.Manifest{}, err
-		}
-		if err = json.Unmarshal(p, &index); err != nil {
-			return ocispec.Manifest{}, err
-		}
-		var target ocispec.Descriptor
-		found := false
-		for _, m := range index.Manifests {
-			p := platforms.DefaultSpec()
-			if m.Platform != nil {
-				p = *m.Platform
-			}
-			if !platforms.NewMatcher(platform).Match(p) {
-				continue
-			}
-			target = m
-			found = true
-			break
-		}
-		if !found {
-			return ocispec.Manifest{}, fmt.Errorf("no manifest found for platform")
-		}
-		return fetchManifestPlatform(ctx, fetcher, target, platform)
-	}
-	return ocispec.Manifest{}, fmt.Errorf("unknown mediatype %q", desc.MediaType)
 }

@@ -503,19 +503,19 @@ func longstring(size int) (str string) {
 func TestCountReader(t *testing.T) {
 	tests := []struct {
 		name    string
-		ops     func(*countReader) error
+		ops     func(*countReadSeeker) error
 		wantPos int64
 	}{
 		{
 			name: "nop",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				return nil
 			},
 			wantPos: 0,
 		},
 		{
 			name: "read",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				size := 5
 				if _, err := pw.Read(make([]byte, size)); err != nil {
 					return err
@@ -526,7 +526,7 @@ func TestCountReader(t *testing.T) {
 		},
 		{
 			name: "readtwice",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				size1, size2 := 5, 3
 				if _, err := pw.Read(make([]byte, size1)); err != nil {
 					if err != io.EOF {
@@ -544,7 +544,7 @@ func TestCountReader(t *testing.T) {
 		},
 		{
 			name: "seek_start",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				size := int64(5)
 				if _, err := pw.Seek(size, io.SeekStart); err != nil {
 					if err != io.EOF {
@@ -557,7 +557,7 @@ func TestCountReader(t *testing.T) {
 		},
 		{
 			name: "seek_start_twice",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				size1, size2 := int64(5), int64(3)
 				if _, err := pw.Seek(size1, io.SeekStart); err != nil {
 					if err != io.EOF {
@@ -575,7 +575,7 @@ func TestCountReader(t *testing.T) {
 		},
 		{
 			name: "seek_current",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				size := int64(5)
 				if _, err := pw.Seek(size, io.SeekCurrent); err != nil {
 					if err != io.EOF {
@@ -588,7 +588,7 @@ func TestCountReader(t *testing.T) {
 		},
 		{
 			name: "seek_current_twice",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				size1, size2 := int64(5), int64(3)
 				if _, err := pw.Seek(size1, io.SeekCurrent); err != nil {
 					if err != io.EOF {
@@ -606,7 +606,7 @@ func TestCountReader(t *testing.T) {
 		},
 		{
 			name: "seek_current_twice_negative",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				size1, size2 := int64(5), int64(-3)
 				if _, err := pw.Seek(size1, io.SeekCurrent); err != nil {
 					if err != io.EOF {
@@ -624,7 +624,7 @@ func TestCountReader(t *testing.T) {
 		},
 		{
 			name: "mixed",
-			ops: func(pw *countReader) error {
+			ops: func(pw *countReadSeeker) error {
 				size1, size2, size3, size4, size5 := int64(5), int64(-3), int64(4), int64(-1), int64(6)
 				if _, err := pw.Read(make([]byte, size1)); err != nil {
 					if err != io.EOF {
@@ -659,7 +659,7 @@ func TestCountReader(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pw, err := newCountReader(bytes.NewReader(make([]byte, 100)))
+			pw, err := newCountReadSeeker(bytes.NewReader(make([]byte, 100)))
 			if err != nil {
 				t.Fatalf("failed to make position watcher: %q", err)
 			}

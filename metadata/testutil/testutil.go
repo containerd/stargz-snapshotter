@@ -20,6 +20,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
@@ -29,47 +30,32 @@ import (
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/metadata"
 	tutil "github.com/containerd/stargz-snapshotter/util/testutil"
 	"github.com/hashicorp/go-multierror"
 	"github.com/klauspost/compress/zstd"
+	digest "github.com/opencontainers/go-digest"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 var allowedPrefix = [4]string{"", "./", "/", "../"}
 
-type compression interface {
-	estargz.Compressor
-	metadata.Decompressor
-}
-
-var srcCompressions = map[string]compression{
-	"zstd-fastest":            zstdCompressionWithLevel(zstd.SpeedFastest),
-	"zstd-default":            zstdCompressionWithLevel(zstd.SpeedDefault),
-	"zstd-bettercompression":  zstdCompressionWithLevel(zstd.SpeedBetterCompression),
-	"gzip-nocompression":      gzipCompressionWithLevel(gzip.NoCompression),
-	"gzip-bestspeed":          gzipCompressionWithLevel(gzip.BestSpeed),
-	"gzip-bestcompression":    gzipCompressionWithLevel(gzip.BestCompression),
-	"gzip-defaultcompression": gzipCompressionWithLevel(gzip.DefaultCompression),
-	"gzip-huffmanonly":        gzipCompressionWithLevel(gzip.HuffmanOnly),
-}
-
-type zstdCompression struct {
-	*zstdchunked.Compressor
-	*zstdchunked.Decompressor
-}
-
-func zstdCompressionWithLevel(compressionLevel zstd.EncoderLevel) compression {
-	return &zstdCompression{&zstdchunked.Compressor{CompressionLevel: compressionLevel}, &zstdchunked.Decompressor{}}
-}
-
-type gzipCompression struct {
-	*estargz.GzipCompressor
-	*estargz.GzipDecompressor
-}
-
-func gzipCompressionWithLevel(compressionLevel int) compression {
-	return gzipCompression{estargz.NewGzipCompressorWithLevel(compressionLevel), &estargz.GzipDecompressor{}}
+var srcCompressions = map[string]tutil.CompressionFactory{
+	"zstd-fastest":                        tutil.ZstdCompressionWithLevel(zstd.SpeedFastest),
+	"zstd-default":                        tutil.ZstdCompressionWithLevel(zstd.SpeedDefault),
+	"zstd-bettercompression":              tutil.ZstdCompressionWithLevel(zstd.SpeedBetterCompression),
+	"gzip-no-compression":                 tutil.GzipCompressionWithLevel(gzip.NoCompression),
+	"gzip-bestspeed":                      tutil.GzipCompressionWithLevel(gzip.BestSpeed),
+	"gzip-bestcompression":                tutil.GzipCompressionWithLevel(gzip.BestCompression),
+	"gzip-defaultcompression":             tutil.GzipCompressionWithLevel(gzip.DefaultCompression),
+	"gzip-huffmanonly":                    tutil.GzipCompressionWithLevel(gzip.HuffmanOnly),
+	"externaltoc-gzip-bestspeed":          tutil.ExternalTOCGzipCompressionWithLevel(gzip.BestSpeed),
+	"externaltoc-gzip-bestcompression":    tutil.ExternalTOCGzipCompressionWithLevel(gzip.BestCompression),
+	"externaltoc-gzip-defaultcompression": tutil.ExternalTOCGzipCompressionWithLevel(gzip.DefaultCompression),
+	"externaltoc-gzip-huffmanonly":        tutil.ExternalTOCGzipCompressionWithLevel(gzip.HuffmanOnly),
 }
 
 type ReaderFactory func(sr *io.SectionReader, opts ...metadata.Option) (r TestableReader, err error)
@@ -83,11 +69,13 @@ type TestableReader interface {
 func TestReader(t *testing.T, factory ReaderFactory) {
 	sampleTime := time.Now().Truncate(time.Second)
 	sampleText := "qwer" + "tyui" + "opas" + "dfgh" + "jk"
+	data64KB := string(tutil.RandomBytes(t, 64000))
 	tests := []struct {
-		name      string
-		chunkSize int
-		in        []tutil.TarEntry
-		want      []check
+		name         string
+		chunkSize    int
+		minChunkSize int
+		in           []tutil.TarEntry
+		want         []check
 	}{
 		{
 			name: "empty",
@@ -222,12 +210,87 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 				hasFileContentsOffset("foo/large", int64(len(sampleText)-1), ""),
 			},
 		},
+		{
+			name:         "several_files_in_chunk",
+			minChunkSize: 8000,
+			in: []tutil.TarEntry{
+				tutil.Dir("foo/"),
+				tutil.File("foo/foo1", data64KB),
+				tutil.File("foo2", "bb"),
+				tutil.File("foo22", "ccc"),
+				tutil.Dir("bar/"),
+				tutil.File("bar/bar.txt", "aaa"),
+				tutil.File("foo3", data64KB),
+			},
+			// NOTE: we assume that the compressed "data64KB" is still larger than 8KB
+			// landmark+dir+foo1, foo2+foo22+dir+bar.txt+foo3, TOC, footer
+			want: []check{
+				numOfNodes(9), // root dir, prefetch landmark, dir, foo1, foo2, foo22, dir, bar.txt, foo3
+				hasDirChildren("foo/", "foo1"),
+				hasDirChildren("bar/", "bar.txt"),
+				hasFile("foo/foo1", data64KB, int64(len(data64KB))),
+				hasFile("foo2", "bb", 2),
+				hasFile("foo22", "ccc", 3),
+				hasFile("bar/bar.txt", "aaa", 3),
+				hasFile("foo3", data64KB, int64(len(data64KB))),
+				hasFileContentsWithPreRead("foo22", 0, "ccc", chunkInfo{"foo2", "bb", 0, 2, digest.FromString("bb").String()},
+					chunkInfo{"bar/bar.txt", "aaa", 0, 3, digest.FromString("aaa").String()}, chunkInfo{"foo3", data64KB, 0, 64000, digest.FromString(data64KB).String()}),
+				hasFileContentsOffset("foo/foo1", 0, data64KB),
+				hasFileContentsOffset("foo2", 0, "bb"),
+				hasFileContentsOffset("foo2", 1, "b"),
+				hasFileContentsOffset("foo22", 0, "ccc"),
+				hasFileContentsOffset("foo22", 1, "cc"),
+				hasFileContentsOffset("foo22", 2, "c"),
+				hasFileContentsOffset("bar/bar.txt", 0, "aaa"),
+				hasFileContentsOffset("bar/bar.txt", 1, "aa"),
+				hasFileContentsOffset("bar/bar.txt", 2, "a"),
+				hasFileContentsOffset("foo3", 0, data64KB),
+				hasFileContentsOffset("foo3", 1, data64KB[1:]),
+				hasFileContentsOffset("foo3", 2, data64KB[2:]),
+				hasFileContentsOffset("foo3", int64(len(data64KB)/2), data64KB[len(data64KB)/2:]),
+				hasFileContentsOffset("foo3", int64(len(data64KB)-1), data64KB[len(data64KB)-1:]),
+			},
+		},
+		{
+			name:         "several_files_in_chunk_chunked",
+			minChunkSize: 8000,
+			chunkSize:    32000,
+			in: []tutil.TarEntry{
+				tutil.Dir("foo/"),
+				tutil.File("foo/foo1", data64KB),
+				tutil.File("foo2", "bb"),
+				tutil.Dir("bar/"),
+				tutil.File("foo3", data64KB),
+			},
+			// NOTE: we assume that the compressed chunk of "data64KB" is still larger than 8KB
+			// landmark+dir+foo1(1), foo1(2), foo2+dir+foo3(1), foo3(2), TOC, footer
+			want: []check{
+				numOfNodes(7), // root dir, prefetch landmark, dir, foo1, foo2, dir, foo3
+				hasDirChildren("foo", "foo1"),
+				hasFile("foo/foo1", data64KB, int64(len(data64KB))),
+				hasFile("foo2", "bb", 2),
+				hasFile("foo3", data64KB, int64(len(data64KB))),
+				hasFileContentsWithPreRead("foo2", 0, "bb", chunkInfo{"foo3", data64KB[:32000], 0, 32000, digest.FromString(data64KB[:32000]).String()}),
+				hasFileContentsOffset("foo/foo1", 0, data64KB),
+				hasFileContentsOffset("foo/foo1", 1, data64KB[1:]),
+				hasFileContentsOffset("foo/foo1", 2, data64KB[2:]),
+				hasFileContentsOffset("foo/foo1", int64(len(data64KB)/2), data64KB[len(data64KB)/2:]),
+				hasFileContentsOffset("foo/foo1", int64(len(data64KB)-1), data64KB[len(data64KB)-1:]),
+				hasFileContentsOffset("foo2", 0, "bb"),
+				hasFileContentsOffset("foo2", 1, "b"),
+				hasFileContentsOffset("foo3", 0, data64KB),
+				hasFileContentsOffset("foo3", 1, data64KB[1:]),
+				hasFileContentsOffset("foo3", 2, data64KB[2:]),
+				hasFileContentsOffset("foo3", int64(len(data64KB)/2), data64KB[len(data64KB)/2:]),
+				hasFileContentsOffset("foo3", int64(len(data64KB)-1), data64KB[len(data64KB)-1:]),
+			},
+		},
 	}
 	for _, tt := range tests {
 		for _, prefix := range allowedPrefix {
 			prefix := prefix
 			for srcCompresionName, srcCompression := range srcCompressions {
-				srcCompression := srcCompression
+				srcCompression := srcCompression()
 				t.Run(tt.name+"-"+srcCompresionName, func(t *testing.T) {
 					opts := []tutil.BuildEStargzOption{
 						tutil.WithBuildTarOptions(tutil.WithPrefix(prefix)),
@@ -236,6 +299,10 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 					if tt.chunkSize > 0 {
 						opts = append(opts, tutil.WithEStargzOptions(estargz.WithChunkSize(tt.chunkSize)))
 					}
+					if tt.minChunkSize > 0 {
+						t.Logf("minChunkSize = %d", tt.minChunkSize)
+						opts = append(opts, tutil.WithEStargzOptions(estargz.WithMinChunkSize(tt.minChunkSize)))
+					}
 					esgz, _, err := tutil.BuildEStargz(tt.in, opts...)
 					if err != nil {
 						t.Fatalf("failed to build sample eStargz: %v", err)
@@ -243,7 +310,7 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 
 					telemetry, checkCalled := newCalledTelemetry()
 					r, err := factory(esgz,
-						metadata.WithDecompressors(new(zstdchunked.Decompressor)), metadata.WithTelemetry(telemetry))
+						metadata.WithDecompressors(srcCompression), metadata.WithTelemetry(telemetry))
 					if err != nil {
 						t.Fatalf("failed to create new reader: %v", err)
 					}
@@ -605,12 +672,87 @@ func hasFile(name, content string, size int64) check {
 			return
 		}
 		if attr.Size != size {
-			t.Errorf("unexpected size of file %q : %d (%q) want %d (%q)", name, attr.Size, string(data), size, content)
+			t.Errorf("unexpected size of file %q : %d (%q) want %d (%q)", name, attr.Size, longBytesView(data), size, longBytesView([]byte(content)))
 			return
 		}
 		if string(data) != content {
-			t.Errorf("unexpected content of %q: %q want %q", name, string(data), content)
+			t.Errorf("unexpected content of %q: %q want %q", name, longBytesView(data), longBytesView([]byte(content)))
 			return
+		}
+	}
+}
+
+type chunkInfo struct {
+	name        string
+	data        string
+	chunkOffset int64
+	chunkSize   int64
+	chunkDigest string
+}
+
+func hasFileContentsWithPreRead(name string, off int64, contents string, extra ...chunkInfo) check {
+	return func(t *testing.T, r TestableReader) {
+		extraMap := make(map[uint32]chunkInfo)
+		for _, e := range extra {
+			id, err := lookup(r, e.name)
+			if err != nil {
+				t.Errorf("failed to lookup extra %q: %v", e.name, err)
+				return
+			}
+			extraMap[id] = e
+		}
+		var extraNames []string
+		for _, e := range extraMap {
+			extraNames = append(extraNames, e.name)
+		}
+		id, err := lookup(r, name)
+		if err != nil {
+			t.Errorf("failed to lookup %q: %v", name, err)
+			return
+		}
+		fr, err := r.OpenFileWithPreReader(id, func(id uint32, chunkOffset, chunkSize int64, chunkDigest string, cr io.Reader) error {
+			t.Logf("On %q: got preread of %d", name, id)
+			ex, ok := extraMap[id]
+			if !ok {
+				t.Fatalf("fail on %q: unexpected entry %d: %+v", name, id, extraNames)
+			}
+			if chunkOffset != ex.chunkOffset || chunkSize != ex.chunkSize || chunkDigest != ex.chunkDigest {
+				t.Fatalf("fail on %q: unexpected node %d: %+v", name, id, ex)
+			}
+			got, err := io.ReadAll(cr)
+			if err != nil {
+				t.Fatalf("fail on %q: failed to read %d: %v", name, id, err)
+			}
+			if ex.data != string(got) {
+				t.Fatalf("fail on %q: unexpected contents of %d: len=%d; want=%d", name, id, len(got), len(ex.data))
+			}
+			delete(extraMap, id)
+			return nil
+		})
+		if err != nil {
+			t.Errorf("failed to open file %q: %v", name, err)
+			return
+		}
+		buf := make([]byte, len(contents))
+		n, err := fr.ReadAt(buf, off)
+		if err != nil && err != io.EOF {
+			t.Errorf("failed to read file %q (off:%d, want:%q): %v", name, off, contents, err)
+			return
+		}
+		if n != len(contents) {
+			t.Errorf("failed to read contents %q (off:%d, want:%q) got %q", name, off, longBytesView([]byte(contents)), longBytesView(buf))
+			return
+		}
+		if string(buf) != contents {
+			t.Errorf("unexpected content of %q: %q want %q", name, longBytesView(buf), longBytesView([]byte(contents)))
+			return
+		}
+		if len(extraMap) != 0 {
+			var exNames []string
+			for _, ex := range extraMap {
+				exNames = append(exNames, ex.name)
+			}
+			t.Fatalf("fail on %q: some entries aren't read: %+v", name, exNames)
 		}
 	}
 }
@@ -634,7 +776,11 @@ func hasFileContentsOffset(name string, off int64, contents string) check {
 			return
 		}
 		if n != len(contents) {
-			t.Errorf("failed to read contents %q (off:%d, want:%q) got %q", name, off, contents, string(buf))
+			t.Errorf("failed to read contents %q (off:%d, want:%q) got %q", name, off, longBytesView([]byte(contents)), longBytesView(buf))
+			return
+		}
+		if string(buf) != contents {
+			t.Errorf("unexpected content of %q: %q want %q", name, longBytesView(buf), longBytesView([]byte(contents)))
 			return
 		}
 	}
@@ -734,4 +880,14 @@ func lookup(r TestableReader, name string) (uint32, error) {
 	}
 	id, _, err := r.GetChild(pid, base)
 	return id, err
+}
+
+// longBytesView is an alias of []byte suitable for printing a long data as an omitted string to avoid long data being printed.
+type longBytesView []byte
+
+func (b longBytesView) String() string {
+	if len(b) < 100 {
+		return string(b)
+	}
+	return string(b[:50]) + "...(omit)..." + string(b[len(b)-50:])
 }

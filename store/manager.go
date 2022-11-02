@@ -33,6 +33,7 @@ import (
 	layermetrics "github.com/containerd/stargz-snapshotter/fs/metrics/layer"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/metadata"
+	esgzexternaltoc "github.com/containerd/stargz-snapshotter/nativeconverter/estargz/externaltoc"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
 	"github.com/docker/go-metrics"
@@ -58,7 +59,11 @@ func NewLayerManager(ctx context.Context, root string, hosts source.RegistryHost
 		maxConcurrency = defaultMaxConcurrency
 	}
 	tm := task.NewBackgroundTaskManager(maxConcurrency, 5*time.Second)
-	r, err := layer.NewResolver(root, tm, cfg, nil, metadataStore, layer.OverlayOpaqueAll) // TODO: support IPFS
+	r, err := layer.NewResolver(root, tm, cfg, nil, metadataStore, layer.OverlayOpaqueAll,
+		func(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) []metadata.Decompressor {
+			return []metadata.Decompressor{esgzexternaltoc.NewRemoteDecompressor(ctx, hosts, refspec, desc)}
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup resolver: %w", err)
 	}

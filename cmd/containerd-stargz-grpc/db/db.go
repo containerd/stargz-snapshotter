@@ -29,32 +29,35 @@ import (
 // Metadata package stores filesystem metadata in the following schema.
 //
 // - filesystems
-//   - *filesystem id*                  : bucket for each filesystem keyed by a unique string.
+//   - *filesystem id*                    : bucket for each filesystem keyed by a unique string.
 //     - nodes
-//       - *node id*                    : bucket for each node keyed by a uniqe uint64.
-//         - size : <varint>            : size of the regular node.
-//         - modtime : <varint>         : modification time of the node.
-//         - linkName : <string>        : link target of symlink
-//         - mode : <uvarint>           : permission and mode bits (os.FileMode).
-//         - uid : <varint>             : uid of the owner.
-//         - gid : <varint>             : gid of the owner.
-//         - devMajor : <varint>        : the major device number for device
-//         - devMinor : <varint>        : the minor device number for device
-//         - xattrKey : <string>        : key of the first extended attribute.
-//         - xattrValue : <string>      : value of the first extended attribute
-//         - xattrsExtra                : 2nd and the following extended attribute.
-//           - *key* : <string>         : map of key to value string
-//         - numLink : <varint>         : the number of links pointing to this node.
+//       - *node id*                      : bucket for each node keyed by a uniqe uint64.
+//         - size : <varint>              : size of the regular node.
+//         - modtime : <varint>           : modification time of the node.
+//         - linkName : <string>          : link target of symlink
+//         - mode : <uvarint>             : permission and mode bits (os.FileMode).
+//         - uid : <varint>               : uid of the owner.
+//         - gid : <varint>               : gid of the owner.
+//         - devMajor : <varint>          : the major device number for device
+//         - devMinor : <varint>          : the minor device number for device
+//         - xattrKey : <string>          : key of the first extended attribute.
+//         - xattrValue : <string>        : value of the first extended attribute
+//         - xattrsExtra                  : 2nd and the following extended attribute.
+//           - *key* : <string>           : map of key to value string
+//         - numLink : <varint>           : the number of links pointing to this node.
 //     - metadata
-//       - *node id*                    : bucket for each node keyed by a uniqe uint64.
-//         - childName : <string>       : base name of the first child
-//         - childID   : <node id>      : id of the first child
-//         - childrenExtra              : 2nd and following child nodes of directory.
-//           - *basename* : <node id>   : map of basename string to the child node id
-//         - chunk : <encoded>          : information of the first chunkn
-//         - chunksExtra                : 2nd and following chunks (this is rarely used so we can avoid the cost of creating the bucket)
-//           - *offset* : <encoded>     : keyed by gzip header offset (varint) in the estargz file to the chunk.
-//         - nextOffset : <varint>      : the offset of the next node with a non-zero offset.
+//       - *node id*                      : bucket for each node keyed by a uniqe uint64.
+//         - childName : <string>         : base name of the first child
+//         - childID   : <node id>        : id of the first child
+//         - childrenExtra                : 2nd and following child nodes of directory.
+//           - *basename* : <node id>     : map of basename string to the child node id
+//         - chunk : <encoded>            : information of the first chunkn
+//         - chunksExtra                  : 2nd and following chunks (this is rarely used so we can avoid the cost of creating the bucket)
+//           - *chunk offset* : <encoded> : keyed by chunk offset (varint) in the estargz file to the chunk.
+//         - nextOffset : <varint>        : the offset of the next node with a non-zero offset.
+//     - stream
+//       - *offset*                       : bucket for each chunk stream that have multiple inner chunks.
+//         - *innerOffset* : node id      : node id that has the contents at the keyed innerOffset.
 
 var (
 	bucketKeyFilesystems = []byte("filesystems")
@@ -80,6 +83,8 @@ var (
 	bucketKeyChunk         = []byte("chunk")
 	bucketKeyChunksExtra   = []byte("chunksExtra")
 	bucketKeyNextOffset    = []byte("nextOffset")
+
+	bucketKeyStream = []byte("stream")
 )
 
 type childEntry struct {
@@ -92,6 +97,7 @@ type chunkEntry struct {
 	chunkOffset int64
 	chunkSize   int64
 	chunkDigest string
+	innerOffset int64 // -1 indicates that no following chunks in the stream.
 }
 
 type metadataEntry struct {
@@ -130,6 +136,22 @@ func getMetadata(tx *bolt.Tx, fsID string) (*bolt.Bucket, error) {
 		return nil, fmt.Errorf("metadata bucket for fs %q not found", fsID)
 	}
 	return md, nil
+}
+
+func getStream(tx *bolt.Tx, fsID string) (*bolt.Bucket, error) {
+	filesystems := tx.Bucket(bucketKeyFilesystems)
+	if filesystems == nil {
+		return nil, fmt.Errorf("fs %q not found: no fs is registered", fsID)
+	}
+	lbkt := filesystems.Bucket([]byte(fsID))
+	if lbkt == nil {
+		return nil, fmt.Errorf("fs bucket for %q not found", fsID)
+	}
+	st := lbkt.Bucket(bucketKeyStream)
+	if st == nil {
+		return nil, fmt.Errorf("stream bucket for fs %q not found", fsID)
+	}
+	return st, nil
 }
 
 func getNodeBucketByID(nodes *bolt.Bucket, id uint32) (*bolt.Bucket, error) {
@@ -319,6 +341,60 @@ func readChunks(b *bolt.Bucket, size int64) (chunks []chunkEntry, err error) {
 	return
 }
 
+type chunkEntryWithID struct {
+	chunkEntry
+	id uint32
+}
+
+func readInnerChunks(tx *bolt.Tx, fsID string, off int64) (chunks []chunkEntryWithID, err error) {
+	sb, err := getStream(tx, fsID)
+	if err != nil {
+		return nil, err
+	}
+	offEncoded, err := encodeInt(off)
+	if err != nil {
+		return nil, err
+	}
+	ob := sb.Bucket(offEncoded)
+	if ob == nil {
+		return nil, fmt.Errorf("inner chunk bucket for %d not found", off)
+	}
+	nodes, err := getNodes(tx, fsID)
+	if err != nil {
+		return nil, fmt.Errorf("nodes bucket of %q not found: %w", fsID, err)
+	}
+	metadataEntries, err := getMetadata(tx, fsID)
+	if err != nil {
+		return nil, fmt.Errorf("metadata bucket of %q not found: %w", fsID, err)
+	}
+	if err := ob.ForEach(func(_, v []byte) error {
+		nodeid := decodeID(v)
+		b, err := getNodeBucketByID(nodes, nodeid)
+		if err != nil {
+			return fmt.Errorf("failed to get file bucket %d: %w", nodeid, err)
+		}
+		size, _ := binary.Varint(b.Get(bucketKeySize))
+		if md, err := getMetadataBucketByID(metadataEntries, nodeid); err == nil {
+			nodeChunks, err := readChunks(md, size)
+			if err != nil {
+				return fmt.Errorf("failed to get chunks: %w", err)
+			}
+			for _, e := range nodeChunks {
+				if e.offset == off {
+					chunks = append(chunks, chunkEntryWithID{e, nodeid})
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	sort.Slice(chunks, func(i, j int) bool {
+		return chunks[i].innerOffset < chunks[j].innerOffset
+	})
+	return chunks, nil
+}
+
 func readChild(md *bolt.Bucket, base string) (uint32, error) {
 	if base == string(md.Get(bucketKeyChildName)) {
 		return decodeID(md.Get(bucketKeyChildID)), nil
@@ -393,11 +469,11 @@ func writeMetadataEntry(md *bolt.Bucket, m *metadataEntry) error {
 					return err
 				}
 			}
-			eoff, err := encodeInt(e.offset)
+			ecoff, err := encodeInt(e.chunkOffset)
 			if err != nil {
 				return err
 			}
-			if err := cbkt.Put(eoff, encodeChunkEntry(e)); err != nil {
+			if err := cbkt.Put(ecoff, encodeChunkEntry(e)); err != nil {
 				return err
 			}
 		}
@@ -411,21 +487,23 @@ func writeMetadataEntry(md *bolt.Bucket, m *metadataEntry) error {
 }
 
 func encodeChunkEntry(e chunkEntry) []byte {
-	eb := make([]byte, 16+len([]byte(e.chunkDigest)))
+	eb := make([]byte, 24+len([]byte(e.chunkDigest)))
 	binary.BigEndian.PutUint64(eb[0:8], uint64(e.chunkOffset))
 	binary.BigEndian.PutUint64(eb[8:16], uint64(e.offset))
-	copy(eb[16:], []byte(e.chunkDigest))
+	binary.BigEndian.PutUint64(eb[16:24], uint64(e.innerOffset))
+	copy(eb[24:], []byte(e.chunkDigest))
 	return eb
 }
 
 func decodeChunkEntry(d []byte) (e chunkEntry, _ error) {
-	if len(d) < 16 {
+	if len(d) < 24 {
 		return e, fmt.Errorf("mulformed chunk entry (len:%d)", len(d))
 	}
 	e.chunkOffset = int64(binary.BigEndian.Uint64(d[0:8]))
 	e.offset = int64(binary.BigEndian.Uint64(d[8:16]))
-	if len(d) > 16 {
-		e.chunkDigest = string(d[16:])
+	e.innerOffset = int64(binary.BigEndian.Uint64(d[16:24]))
+	if len(d) > 24 {
+		e.chunkDigest = string(d[24:])
 	}
 	return e, nil
 }
