@@ -42,7 +42,6 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -65,6 +64,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -429,6 +429,9 @@ func (fs *filesystem) check(ctx context.Context, l layer.Layer, labels map[strin
 }
 
 func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
+	if mountpoint == "" {
+		return fmt.Errorf("mount point must be specified")
+	}
 	fs.layerMu.Lock()
 	l, ok := fs.layer[mountpoint]
 	if !ok {
@@ -439,12 +442,27 @@ func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
 	l.Done()
 	fs.layerMu.Unlock()
 	fs.metricsController.Remove(mountpoint)
-	// The goroutine which serving the mountpoint possibly becomes not responding.
-	// In case of such situations, we use MNT_FORCE here and abort the connection.
-	// In the future, we might be able to consider to kill that specific hanging
-	// goroutine using channel, etc.
-	// See also: https://www.kernel.org/doc/html/latest/filesystems/fuse.html#aborting-a-filesystem-connection
-	return syscall.Unmount(mountpoint, syscall.MNT_FORCE)
+
+	if err := unmount(mountpoint, 0); err != nil {
+		if err != unix.EBUSY {
+			return err
+		}
+		// Try force unmount
+		log.G(ctx).WithError(err).Debugf("trying force unmount %q", mountpoint)
+		if err := unmount(mountpoint, unix.MNT_FORCE); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func unmount(target string, flags int) error {
+	for {
+		if err := unix.Unmount(target, flags); err != unix.EINTR {
+			return err
+		}
+	}
 }
 
 func (fs *filesystem) prefetch(ctx context.Context, l layer.Layer, defaultPrefetchSize int64, start time.Time) {
