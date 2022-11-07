@@ -70,8 +70,9 @@ import (
 const (
 	defaultFuseTimeout    = time.Second
 	defaultMaxConcurrency = 2
-	fusermountBin         = "fusermount"
 )
+
+var fusermountBin = []string{"fusermount", "fusermount3"}
 
 type Option func(*options)
 
@@ -345,7 +346,8 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		FsName:     "stargz", // name this filesystem as "stargz"
 		Debug:      fs.debug,
 	}
-	if _, err := exec.LookPath(fusermountBin); err == nil {
+	if isFusermountBinExist() {
+		log.G(ctx).Infof("fusermount detected")
 		mountOpts.Options = []string{"suid"} // option for fusermount; allow setuid inside container
 	} else {
 		log.G(ctx).WithError(err).Infof("%s not installed; trying direct mount", fusermountBin)
@@ -472,4 +474,13 @@ func neighboringLayers(manifest ocispec.Manifest, target ocispec.Descriptor) (de
 		}
 	}
 	return
+}
+
+func isFusermountBinExist() bool {
+	for _, b := range fusermountBin {
+		if _, err := exec.LookPath(b); err == nil {
+			return true
+		}
+	}
+	return false
 }
