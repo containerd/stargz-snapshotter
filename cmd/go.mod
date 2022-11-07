@@ -8,7 +8,7 @@ require (
 	github.com/containerd/stargz-snapshotter v0.12.1
 	github.com/containerd/stargz-snapshotter/estargz v0.12.1
 	github.com/containerd/stargz-snapshotter/ipfs v0.12.1
-	github.com/coreos/go-systemd/v22 v22.4.0
+	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/go-metrics v0.0.1
 	github.com/goccy/go-json v0.9.11
 	github.com/hashicorp/go-multierror v1.1.1
