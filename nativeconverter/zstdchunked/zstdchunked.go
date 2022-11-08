@@ -49,14 +49,7 @@ type zstdCompression struct {
 // See LayerConvertFunc for more details. The difference between this function and
 // LayerConvertFunc is that this allows to specify additional eStargz options per layer.
 func LayerConvertWithLayerOptsFunc(opts map[digest.Digest][]estargz.Option) converter.ConvertFunc {
-	if opts == nil {
-		return LayerConvertFunc()
-	}
-	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
-		// TODO: enable to speciy option per layer "index" because it's possible that there are
-		//       two layers having same digest in an image (but this should be rare case)
-		return LayerConvertFunc(opts[desc.Digest]...)(ctx, cs, desc)
-	}
+	return LayerConvertWithLayerOptsFuncWithCompressionLevel(zstd.SpeedDefault, opts)
 }
 
 // LayerConvertFunc converts legacy tar.gz layers into zstd:chunked layers.
@@ -66,7 +59,40 @@ func LayerConvertWithLayerOptsFunc(opts map[digest.Digest][]estargz.Option) conv
 //
 // Otherwise "io.containers.zstd-chunked.manifest-checksum" annotation will be lost,
 // because the Docker media type does not support layer annotations.
+//
+// SpeedDefault (level 3) is used for the compression level.
+// See also: https://pkg.go.dev/github.com/klauspost/compress/zstd#EncoderLevel
 func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
+	return LayerConvertFuncWithCompressionLevel(zstd.SpeedDefault, opts...)
+}
+
+// LayerConvertWithLayerOptsFuncWithCompressionLevel converts legacy tar.gz layers into zstd:chunked layers.
+// This function allows to specify the compression level of zstd.
+//
+// This changes Docker MediaType to OCI MediaType so this should be used in
+// conjunction with WithDockerToOCI().
+// See LayerConvertFunc for more details. The difference between this function and
+// LayerConvertFunc is that this allows to specify additional eStargz options per layer and
+// allows to specify the compression level.
+func LayerConvertWithLayerOptsFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, opts map[digest.Digest][]estargz.Option) converter.ConvertFunc {
+	if opts == nil {
+		return LayerConvertFuncWithCompressionLevel(compressionLevel)
+	}
+	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		// TODO: enable to speciy option per layer "index" because it's possible that there are
+		//       two layers having same digest in an image (but this should be rare case)
+		return LayerConvertFuncWithCompressionLevel(compressionLevel, opts[desc.Digest]...)(ctx, cs, desc)
+	}
+}
+
+// LayerConvertFuncWithCompressionLevel converts legacy tar.gz layers into zstd:chunked layers with
+// the specified compression level.
+//
+// This changes Docker MediaType to OCI MediaType so this should be used in
+// conjunction with WithDockerToOCI().
+// See LayerConvertFunc for more details. The difference between this function and
+// LayerConvertFunc is that this allows configuring the compression level.
+func LayerConvertFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, opts ...estargz.Option) converter.ConvertFunc {
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
 		if !images.IsLayerType(desc.MediaType) {
 			// No conversion. No need to return an error here.
@@ -110,7 +136,7 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 		opts = append(opts, estargz.WithCompression(&zstdCompression{
 			new(zstdchunked.Decompressor),
 			&zstdchunked.Compressor{
-				CompressionLevel: zstd.SpeedDefault,
+				CompressionLevel: compressionLevel,
 				Metadata:         metadata,
 			},
 		}))

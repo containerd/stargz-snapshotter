@@ -41,6 +41,7 @@ import (
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
+	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
@@ -90,12 +91,8 @@ var OptimizeCommand = cli.Command{
 		},
 		cli.IntFlag{
 			Name:  "estargz-compression-level",
-			Usage: "eStargz compression level (only applied to gzip as of now)",
+			Usage: "eStargz compression level",
 			Value: gzip.BestCompression,
-		},
-		cli.BoolFlag{
-			Name:  "zstdchunked",
-			Usage: "use zstd compression instead of gzip (a.k.a zstd:chunked)",
 		},
 		cli.BoolFlag{
 			Name:  "estargz-external-toc",
@@ -103,13 +100,22 @@ var OptimizeCommand = cli.Command{
 		},
 		cli.IntFlag{
 			Name:  "estargz-chunk-size",
-			Usage: "eStargz chunk size",
+			Usage: "eStargz chunk size (not applied to zstd:chunked)",
 			Value: 0,
 		},
 		cli.IntFlag{
 			Name:  "estargz-min-chunk-size",
-			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand.",
+			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand (not applied to zstd:chunked)",
 			Value: 0,
+		},
+		cli.BoolFlag{
+			Name:  "zstdchunked",
+			Usage: "use zstd compression instead of gzip (a.k.a zstd:chunked)",
+		},
+		cli.IntFlag{
+			Name:  "zstdchunked-compression-level",
+			Usage: "zstd:chunked compression level",
+			Value: 3, // SpeedDefault; see also https://pkg.go.dev/github.com/klauspost/compress/zstd#EncoderLevel
 		},
 	}, samplerFlags...),
 	Action: func(clicontext *cli.Context) error {
@@ -170,7 +176,8 @@ var OptimizeCommand = cli.Command{
 		var f converter.ConvertFunc
 		var finalize func(ctx context.Context, cs content.Store, ref string, desc *ocispec.Descriptor) (*images.Image, error)
 		if clicontext.Bool("zstdchunked") {
-			f = zstdchunkedconvert.LayerConvertWithLayerOptsFunc(esgzOptsPerLayer)
+			f = zstdchunkedconvert.LayerConvertWithLayerOptsFuncWithCompressionLevel(
+				zstd.EncoderLevelFromZstd(clicontext.Int("zstdchunked-compression-level")), esgzOptsPerLayer)
 		} else if !clicontext.Bool("estargz-external-toc") {
 			f = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer,
 				estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")),
