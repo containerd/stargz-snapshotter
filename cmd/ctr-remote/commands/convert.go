@@ -36,6 +36,7 @@ import (
 	esgzexternaltocconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz/externaltoc"
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
+	"github.com/klauspost/compress/zstd"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -90,6 +91,20 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		cli.BoolFlag{
 			Name:  "zstdchunked",
 			Usage: "use zstd compression instead of gzip (a.k.a zstd:chunked). Must be used in conjunction with '--oci'.",
+		},
+		cli.StringFlag{
+			Name:  "zstdchunked-record-in",
+			Usage: "Read 'ctr-remote optimize --record-out=<FILE>' record file",
+		},
+		cli.IntFlag{
+			Name:  "zstdchunked-compression-level",
+			Usage: "zstd:chunked compression level",
+			Value: 3, // SpeedDefault; see also https://pkg.go.dev/github.com/klauspost/compress/zstd#EncoderLevel
+		},
+		cli.IntFlag{
+			Name:  "zstdchunked-chunk-size",
+			Usage: "zstd:chunked chunk size",
+			Value: 0,
 		},
 		// generic flags
 		cli.BoolFlag{
@@ -179,11 +194,12 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		}
 
 		if context.Bool("zstdchunked") {
-			esgzOpts, err := getESGZConvertOpts(context)
+			esgzOpts, err := getZstdchunkedConvertOpts(context)
 			if err != nil {
 				return err
 			}
-			layerConvertFunc = zstdchunkedconvert.LayerConvertFunc(esgzOpts...)
+			layerConvertFunc = zstdchunkedconvert.LayerConvertFuncWithCompressionLevel(
+				zstd.EncoderLevelFromZstd(context.Int("zstdchunked-compression-level")), esgzOpts...)
 			if !context.Bool("oci") {
 				return errors.New("option --zstdchunked must be used in conjunction with --oci")
 			}
@@ -258,6 +274,22 @@ func getESGZConvertOpts(context *cli.Context) ([]estargz.Option, error) {
 	}
 	if estargzRecordIn := context.String("estargz-record-in"); estargzRecordIn != "" {
 		paths, err := readPathsFromRecordFile(estargzRecordIn)
+		if err != nil {
+			return nil, err
+		}
+		esgzOpts = append(esgzOpts, estargz.WithPrioritizedFiles(paths))
+		var ignored []string
+		esgzOpts = append(esgzOpts, estargz.WithAllowPrioritizeNotFound(&ignored))
+	}
+	return esgzOpts, nil
+}
+
+func getZstdchunkedConvertOpts(context *cli.Context) ([]estargz.Option, error) {
+	esgzOpts := []estargz.Option{
+		estargz.WithChunkSize(context.Int("zstdchunked-chunk-size")),
+	}
+	if zstdchunkedRecordIn := context.String("zstdchunked-record-in"); zstdchunkedRecordIn != "" {
+		paths, err := readPathsFromRecordFile(zstdchunkedRecordIn)
 		if err != nil {
 			return nil, err
 		}
