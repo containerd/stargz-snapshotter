@@ -8,7 +8,7 @@ require (
 	github.com/containerd/stargz-snapshotter v0.12.1
 	github.com/containerd/stargz-snapshotter/estargz v0.12.1
 	github.com/containerd/stargz-snapshotter/ipfs v0.12.1
-	github.com/coreos/go-systemd/v22 v22.4.0
+	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/go-metrics v0.0.1
 	github.com/goccy/go-json v0.9.11
 	github.com/hashicorp/go-multierror v1.1.1
@@ -23,7 +23,7 @@ require (
 	github.com/urfave/cli v1.22.5
 	go.etcd.io/bbolt v1.3.6
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
-	golang.org/x/sys v0.1.0
+	golang.org/x/sys v0.2.0
 	google.golang.org/grpc v1.50.1
 	k8s.io/cri-api v0.26.0-alpha.3
 )
