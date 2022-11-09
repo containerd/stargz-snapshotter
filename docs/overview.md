@@ -176,6 +176,17 @@ host = "exampleregistry.io"
 insecure = true
 ```
 
+`header` field allows to set headers to send to the server.
+
+```toml
+[[resolver.host."registry2:5000".mirrors]]
+  host = "registry2:5000"
+  [resolver.host."registry2:5000".mirrors.header]
+    x-custom-2 = ["value3", "value4"]
+```
+
+> NOTE: Headers aren't passed to the redirected location.
+
 The config file can be passed to stargz snapshotter using `containerd-stargz-grpc`'s `--config` option.
 
 ## Make your remote snapshotter

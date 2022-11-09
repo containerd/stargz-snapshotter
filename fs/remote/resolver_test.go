@@ -35,6 +35,7 @@ import (
 
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/stargz-snapshotter/fs/source"
 	rhttp "github.com/hashicorp/go-retryablehttp"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -55,117 +56,219 @@ func TestMirror(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		tr       http.RoundTripper
-		mirrors  []string
+		hosts    func(t *testing.T) source.RegistryHosts
 		wantHost string
 		error    bool
 	}{
 		{
-			name:     "no-mirror",
-			tr:       &sampleRoundTripper{okURLs: []string{refHost}},
-			mirrors:  nil,
+			name: "no-mirror",
+			hosts: hostsConfig(
+				&sampleRoundTripper{okURLs: []string{refHost}},
+			),
 			wantHost: refHost,
 		},
 		{
-			name:     "valid-mirror",
-			tr:       &sampleRoundTripper{okURLs: []string{"mirrorexample.com"}},
-			mirrors:  []string{"mirrorexample.com"},
+			name: "valid-mirror",
+			hosts: hostsConfig(
+				&sampleRoundTripper{okURLs: []string{"mirrorexample.com"}},
+				hostSimple("mirrorexample.com"),
+			),
 			wantHost: "mirrorexample.com",
 		},
 		{
 			name: "invalid-mirror",
-			tr: &sampleRoundTripper{
-				withCode: map[string]int{
-					"mirrorexample1.com": http.StatusInternalServerError,
-					"mirrorexample2.com": http.StatusUnauthorized,
-					"mirrorexample3.com": http.StatusNotFound,
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					withCode: map[string]int{
+						"mirrorexample1.com": http.StatusInternalServerError,
+						"mirrorexample2.com": http.StatusUnauthorized,
+						"mirrorexample3.com": http.StatusNotFound,
+					},
+					okURLs: []string{"mirrorexample4.com", refHost},
 				},
-				okURLs: []string{"mirrorexample4.com", refHost},
-			},
-			mirrors: []string{
-				"mirrorexample1.com",
-				"mirrorexample2.com",
-				"mirrorexample3.com",
-				"mirrorexample4.com",
-			},
+				hostSimple("mirrorexample1.com"),
+				hostSimple("mirrorexample2.com"),
+				hostSimple("mirrorexample3.com"),
+				hostSimple("mirrorexample4.com"),
+			),
 			wantHost: "mirrorexample4.com",
 		},
 		{
 			name: "invalid-all-mirror",
-			tr: &sampleRoundTripper{
-				withCode: map[string]int{
-					"mirrorexample1.com": http.StatusInternalServerError,
-					"mirrorexample2.com": http.StatusUnauthorized,
-					"mirrorexample3.com": http.StatusNotFound,
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					withCode: map[string]int{
+						"mirrorexample1.com": http.StatusInternalServerError,
+						"mirrorexample2.com": http.StatusUnauthorized,
+						"mirrorexample3.com": http.StatusNotFound,
+					},
+					okURLs: []string{refHost},
 				},
-				okURLs: []string{refHost},
-			},
-			mirrors: []string{
-				"mirrorexample1.com",
-				"mirrorexample2.com",
-				"mirrorexample3.com",
-			},
+				hostSimple("mirrorexample1.com"),
+				hostSimple("mirrorexample2.com"),
+				hostSimple("mirrorexample3.com"),
+			),
 			wantHost: refHost,
 		},
 		{
 			name: "invalid-hostname-of-mirror",
-			tr: &sampleRoundTripper{
-				okURLs: []string{`.*`},
-			},
-			mirrors:  []string{"mirrorexample.com/somepath/"},
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					okURLs: []string{`.*`},
+				},
+				hostSimple("mirrorexample.com/somepath/"),
+			),
 			wantHost: refHost,
 		},
 		{
 			name: "redirected-mirror",
-			tr: &sampleRoundTripper{
-				redirectURL: map[string]string{
-					regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/" + blobDigest.String(),
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					redirectURL: map[string]string{
+						regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/" + blobDigest.String(),
+					},
+					okURLs: []string{`.*`},
 				},
-				okURLs: []string{`.*`},
-			},
-			mirrors:  []string{"mirrorexample.com"},
+				hostSimple("mirrorexample.com"),
+			),
 			wantHost: "backendexample.com",
 		},
 		{
 			name: "invalid-redirected-mirror",
-			tr: &sampleRoundTripper{
-				withCode: map[string]int{
-					"backendexample.com": http.StatusInternalServerError,
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					withCode: map[string]int{
+						"backendexample.com": http.StatusInternalServerError,
+					},
+					redirectURL: map[string]string{
+						regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/" + blobDigest.String(),
+					},
+					okURLs: []string{`.*`},
 				},
-				redirectURL: map[string]string{
-					regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/" + blobDigest.String(),
-				},
-				okURLs: []string{`.*`},
-			},
-			mirrors:  []string{"mirrorexample.com"},
+				hostSimple("mirrorexample.com"),
+			),
 			wantHost: refHost,
 		},
 		{
-			name:     "fail-all",
-			tr:       &sampleRoundTripper{},
-			mirrors:  []string{"mirrorexample.com"},
+			name: "fail-all",
+			hosts: hostsConfig(
+				&sampleRoundTripper{},
+				hostSimple("mirrorexample.com"),
+			),
 			wantHost: "",
 			error:    true,
+		},
+		{
+			name: "headers",
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					okURLs: []string{`.*`},
+					wantHeaders: map[string]http.Header{
+						"mirrorexample.com": http.Header(map[string][]string{
+							"test-a-key": {"a-value-1", "a-value-2"},
+							"test-b-key": {"b-value-1"},
+						}),
+					},
+				},
+				hostWithHeaders("mirrorexample.com", map[string][]string{
+					"test-a-key": {"a-value-1", "a-value-2"},
+					"test-b-key": {"b-value-1"},
+				}),
+			),
+			wantHost: "mirrorexample.com",
+		},
+		{
+			name: "headers-with-mirrors",
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					withCode: map[string]int{
+						"mirrorexample1.com": http.StatusInternalServerError,
+						"mirrorexample2.com": http.StatusInternalServerError,
+					},
+					okURLs: []string{"mirrorexample3.com", refHost},
+					wantHeaders: map[string]http.Header{
+						"mirrorexample1.com": http.Header(map[string][]string{
+							"test-a-key": {"a-value"},
+						}),
+						"mirrorexample2.com": http.Header(map[string][]string{
+							"test-b-key":   {"b-value"},
+							"test-b-key-2": {"b-value-2", "b-value-3"},
+						}),
+						"mirrorexample3.com": http.Header(map[string][]string{
+							"test-c-key": {"c-value"},
+						}),
+					},
+				},
+				hostWithHeaders("mirrorexample1.com", map[string][]string{
+					"test-a-key": {"a-value"},
+				}),
+				hostWithHeaders("mirrorexample2.com", map[string][]string{
+					"test-b-key":   {"b-value"},
+					"test-b-key-2": {"b-value-2", "b-value-3"},
+				}),
+				hostWithHeaders("mirrorexample3.com", map[string][]string{
+					"test-c-key": {"c-value"},
+				}),
+			),
+			wantHost: "mirrorexample3.com",
+		},
+		{
+			name: "headers-with-mirrors-invalid-all",
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					withCode: map[string]int{
+						"mirrorexample1.com": http.StatusInternalServerError,
+						"mirrorexample2.com": http.StatusInternalServerError,
+					},
+					okURLs: []string{"mirrorexample3.com", refHost},
+					wantHeaders: map[string]http.Header{
+						"mirrorexample1.com": http.Header(map[string][]string{
+							"test-a-key": {"a-value"},
+						}),
+						"mirrorexample2.com": http.Header(map[string][]string{
+							"test-b-key":   {"b-value"},
+							"test-b-key-2": {"b-value-2", "b-value-3"},
+						}),
+					},
+				},
+				hostWithHeaders("mirrorexample1.com", map[string][]string{
+					"test-a-key": {"a-value"},
+				}),
+				hostWithHeaders("mirrorexample2.com", map[string][]string{
+					"test-b-key":   {"b-value"},
+					"test-b-key-2": {"b-value-2", "b-value-3"},
+				}),
+			),
+			wantHost: refHost,
+		},
+		{
+			name: "headers-with-redirected-mirror",
+			hosts: hostsConfig(
+				&sampleRoundTripper{
+					redirectURL: map[string]string{
+						regexp.QuoteMeta(fmt.Sprintf("mirrorexample.com%s", blobPath)): "https://backendexample.com/blobs/" + blobDigest.String(),
+					},
+					okURLs: []string{`.*`},
+					wantHeaders: map[string]http.Header{
+						"mirrorexample.com": http.Header(map[string][]string{
+							"test-a-key":   {"a-value"},
+							"test-b-key-2": {"b-value-2", "b-value-3"},
+						}),
+					},
+				},
+				hostWithHeaders("mirrorexample.com", map[string][]string{
+					"test-a-key":   {"a-value"},
+					"test-b-key-2": {"b-value-2", "b-value-3"},
+				}),
+			),
+			wantHost: "backendexample.com",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hosts := func(refspec reference.Spec) (reghosts []docker.RegistryHost, _ error) {
-				host := refspec.Hostname()
-				for _, m := range append(tt.mirrors, host) {
-					reghosts = append(reghosts, docker.RegistryHost{
-						Client:       &http.Client{Transport: tt.tr},
-						Host:         m,
-						Scheme:       "https",
-						Path:         "/v2",
-						Capabilities: docker.HostCapabilityPull,
-					})
-				}
-				return
-			}
 			fetcher, _, err := newHTTPFetcher(context.Background(), &fetcherConfig{
-				hosts:   hosts,
+				hosts:   tt.hosts(t),
 				refspec: refspec,
 				desc:    ocispec.Descriptor{Digest: blobDigest},
 			})
@@ -175,25 +278,84 @@ func TestMirror(t *testing.T) {
 				}
 				t.Fatalf("failed to resolve reference: %v", err)
 			}
-			nurl, err := url.Parse(fetcher.url)
-			if err != nil {
-				t.Fatalf("failed to parse url %q: %v", fetcher.url, err)
+			checkFetcherURL(t, fetcher, tt.wantHost)
+
+			// Test check()
+			if err := fetcher.check(); err != nil {
+				t.Fatalf("failed to check fetcher: %v", err)
 			}
-			if nurl.Hostname() != tt.wantHost {
-				t.Errorf("invalid hostname %q(%q); want %q",
-					nurl.Hostname(), nurl.String(), tt.wantHost)
+
+			// Test refreshURL()
+			if err := fetcher.refreshURL(context.TODO()); err != nil {
+				t.Fatalf("failed to refresh URL: %v", err)
 			}
+			checkFetcherURL(t, fetcher, tt.wantHost)
 		})
 	}
 }
 
+func checkFetcherURL(t *testing.T, f *httpFetcher, wantHost string) {
+	nurl, err := url.Parse(f.url)
+	if err != nil {
+		t.Fatalf("failed to parse url %q: %v", f.url, err)
+	}
+	if nurl.Hostname() != wantHost {
+		t.Errorf("invalid hostname %q(%q); want %q", nurl.Hostname(), nurl.String(), wantHost)
+	}
+}
+
 type sampleRoundTripper struct {
+	t           *testing.T
 	withCode    map[string]int
 	redirectURL map[string]string
 	okURLs      []string
+	wantHeaders map[string]http.Header
+}
+
+func getTestHeaders(headers map[string][]string) map[string][]string {
+	res := make(map[string][]string)
+	for k, v := range headers {
+		if strings.HasPrefix(k, "test-") {
+			res[k] = v
+		}
+	}
+	return res
 }
 
 func (tr *sampleRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	reqHeader := getTestHeaders(req.Header)
+	for host, wHeaders := range tr.wantHeaders {
+		wantHeader := getTestHeaders(wHeaders)
+		if ok, _ := regexp.Match(host, []byte(req.URL.String())); ok {
+			if len(wantHeader) != len(reqHeader) {
+				tr.t.Fatalf("unexpected num of headers; got %d, wanted %d", len(wantHeader), len(reqHeader))
+			}
+			for k, v := range wantHeader {
+				gotV, ok := reqHeader[k]
+				if !ok {
+					tr.t.Fatalf("required header %q not found; got %+v", k, reqHeader)
+				}
+				wantVM := make(map[string]struct{})
+				for _, e := range v {
+					wantVM[e] = struct{}{}
+				}
+				if len(gotV) != len(v) {
+					tr.t.Fatalf("unexpected num of header values of %q; got %d, wanted %d", k, len(gotV), len(v))
+				}
+				for _, gotE := range gotV {
+					delete(wantVM, gotE)
+				}
+				if len(wantVM) != 0 {
+					tr.t.Fatalf("header %q must have elements %+v", k, wantVM)
+				}
+				delete(reqHeader, k)
+			}
+		}
+	}
+	if len(reqHeader) != 0 {
+		tr.t.Fatalf("unexpected headers %+v", reqHeader)
+	}
+
 	for host, code := range tr.withCode {
 		if ok, _ := regexp.Match(host, []byte(req.URL.String())); ok {
 			return &http.Response{
@@ -331,4 +493,45 @@ func (r *retryRoundTripper) RoundTrip(req *http.Request) (res *http.Response, er
 		}
 	}
 	return
+}
+
+type hostFactory func(tr http.RoundTripper) docker.RegistryHost
+
+func hostSimple(host string) hostFactory {
+	return func(tr http.RoundTripper) docker.RegistryHost {
+		return docker.RegistryHost{
+			Client:       &http.Client{Transport: tr},
+			Host:         host,
+			Scheme:       "https",
+			Path:         "/v2",
+			Capabilities: docker.HostCapabilityPull,
+		}
+	}
+}
+
+func hostWithHeaders(host string, headers http.Header) hostFactory {
+	return func(tr http.RoundTripper) docker.RegistryHost {
+		return docker.RegistryHost{
+			Client:       &http.Client{Transport: tr},
+			Host:         host,
+			Scheme:       "https",
+			Path:         "/v2",
+			Capabilities: docker.HostCapabilityPull,
+			Header:       headers,
+		}
+	}
+}
+
+func hostsConfig(tr *sampleRoundTripper, mirrors ...hostFactory) func(t *testing.T) source.RegistryHosts {
+	return func(t *testing.T) source.RegistryHosts {
+		tr.t = t
+		return func(refspec reference.Spec) (reghosts []docker.RegistryHost, _ error) {
+			host := refspec.Hostname()
+			for _, m := range mirrors {
+				reghosts = append(reghosts, m(tr))
+			}
+			reghosts = append(reghosts, hostSimple(host)(tr))
+			return
+		}
+	}
 }
