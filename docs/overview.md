@@ -123,7 +123,7 @@ Stargz snapshotter doesn't share credentials with containerd so credentials spec
 
 #### CRI-based authentication
 
-Following configuration enables stargz snapshotter to pull private images on Kubernetes.
+Following configuration (typically located at `/etc/containerd-stargz-grpc/config.toml`) enables stargz snapshotter to pull private images on Kubernetes.
 The snapshotter works as a proxy of CRI Image Service and exposes CRI Image Service API on the snapshotter's unix socket (i.e. `/run/containerd-stargz-grpc/containerd-stargz-grpc.sock`).
 The snapshotter acquires registry creds by scanning requests.
 
@@ -140,7 +140,7 @@ image_service_path = "/run/containerd/containerd.sock"
 
 This is another way to enable lazy pulling of private images on Kubernetes.
 
-Following configuration enables stargz snapshotter to access to private registries using kubernetes secrets (type = `kubernetes.io/dockerconfigjson`) in the cluster using kubeconfig files.
+Following configuration (typically located at `/etc/containerd-stargz-grpc/config.toml`) enables stargz snapshotter to access to private registries using kubernetes secrets (type = `kubernetes.io/dockerconfigjson`) in the cluster using kubeconfig files.
 You can specify the path of kubeconfig file using `kubeconfig_path` option.
 It's no problem that the specified file doesn't exist when this snapshotter starts.
 In this case, snapsohtter polls the file until actually provided.
