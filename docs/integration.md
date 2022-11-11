@@ -175,7 +175,21 @@ See [`./ipfs.md`](./ipfs.md)
 
 ### Dragonfly
 
-See [the document in Dragonfly project for how to use dragonfly with eStargz](https://d7y.io/docs/setup/integration/stargz/).
+Change the `/etc/containerd-stargz-grpc/config.toml` configuration to make dragonfly as registry mirror.
+`127.0.0.1:65001` is the proxy address of dragonfly peer,
+and the `X-Dragonfly-Registry` header is the address of origin registry,
+which is provided for dragonfly to download the images.
+
+```toml
+[[resolver.host."docker.io".mirrors]]
+  host = "127.0.0.1:65001"
+  insecure = true
+  [resolver.host."docker.io".mirrors.header]
+    X-Dragonfly-Registry = ["https://index.docker.io"]
+```
+
+For more details about dragonfly as registry mirror,
+refer to [How to use Dragonfly With eStargz](https://d7y.io/docs/setup/integration/stargz/).
 
 ## Registry-side conversion of eStargz
 
