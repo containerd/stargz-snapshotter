@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package cri
+package crialpha
 
 import (
 	"context"
@@ -27,14 +27,19 @@ import (
 	"github.com/containerd/containerd/reference"
 	distribution "github.com/containerd/containerd/reference/docker"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
+
+	runtime_alpha "github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
-// NewCRIKeychain provides creds passed through CRI PullImage API.
-// This also returns a CRI image service server that works as a proxy backed by the specified CRI service.
-// This server reads all PullImageRequest and uses PullImageRequest.AuthConfig for authenticating snapshots.
-func NewCRIKeychain(ctx context.Context, connectCRI func() (runtime.ImageServiceClient, error)) (resolver.Credential, runtime.ImageServiceServer) {
-	server := &instrumentedService{config: make(map[string]*runtime.AuthConfig)}
+// containerd newer than 234bf990dca4e81e89f549448aa6b555286eaa7a is required for this plugin.
+// If not, use "github.com/containerd/stargz-snapshotter/service/keychain/crialphaforked" instead.
+
+// NewAlphaCRIKeychain provides creds passed through CRI PullImage API.
+// Same as NewCRIKeychain but for CRI v1alpha API.
+// Containerd doesn't drop v1alpha API support so our proxy also exposes this API as well.
+func NewCRIAlphaKeychain(ctx context.Context, connectCRI func() (runtime_alpha.ImageServiceClient, error)) (resolver.Credential, runtime_alpha.ImageServiceServer) {
+	server := &instrumentedAlphaService{config: make(map[string]*runtime_alpha.AuthConfig)}
 	go func() {
 		log.G(ctx).Debugf("Waiting for CRI service is started...")
 		for i := 0; i < 100; i++ {
@@ -54,15 +59,15 @@ func NewCRIKeychain(ctx context.Context, connectCRI func() (runtime.ImageService
 	return server.credentials, server
 }
 
-type instrumentedService struct {
-	cri   runtime.ImageServiceClient
+type instrumentedAlphaService struct {
+	cri   runtime_alpha.ImageServiceClient
 	criMu sync.Mutex
 
-	config   map[string]*runtime.AuthConfig
+	config   map[string]*runtime_alpha.AuthConfig
 	configMu sync.Mutex
 }
 
-func (in *instrumentedService) credentials(host string, refspec reference.Spec) (string, string, error) {
+func (in *instrumentedAlphaService) credentials(host string, refspec reference.Spec) (string, string, error) {
 	if host == "docker.io" || host == "registry-1.docker.io" {
 		// Creds of "docker.io" is stored keyed by "https://index.docker.io/v1/".
 		host = "index.docker.io"
@@ -70,19 +75,23 @@ func (in *instrumentedService) credentials(host string, refspec reference.Spec) 
 	in.configMu.Lock()
 	defer in.configMu.Unlock()
 	if cfg, ok := in.config[refspec.String()]; ok {
-		return resolver.ParseAuth(cfg, host)
+		var v1cfg runtime.AuthConfig
+		if err := alphaReqToV1Req(cfg, &v1cfg); err != nil {
+			return "", "", err
+		}
+		return resolver.ParseAuth(&v1cfg, host)
 	}
 	return "", "", nil
 }
 
-func (in *instrumentedService) getCRI() (c runtime.ImageServiceClient) {
+func (in *instrumentedAlphaService) getCRI() (c runtime_alpha.ImageServiceClient) {
 	in.criMu.Lock()
 	c = in.cri
 	in.criMu.Unlock()
 	return
 }
 
-func (in *instrumentedService) ListImages(ctx context.Context, r *runtime.ListImagesRequest) (res *runtime.ListImagesResponse, err error) {
+func (in *instrumentedAlphaService) ListImages(ctx context.Context, r *runtime_alpha.ListImagesRequest) (res *runtime_alpha.ListImagesResponse, err error) {
 	cri := in.getCRI()
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
@@ -90,7 +99,7 @@ func (in *instrumentedService) ListImages(ctx context.Context, r *runtime.ListIm
 	return cri.ListImages(ctx, r)
 }
 
-func (in *instrumentedService) ImageStatus(ctx context.Context, r *runtime.ImageStatusRequest) (res *runtime.ImageStatusResponse, err error) {
+func (in *instrumentedAlphaService) ImageStatus(ctx context.Context, r *runtime_alpha.ImageStatusRequest) (res *runtime_alpha.ImageStatusResponse, err error) {
 	cri := in.getCRI()
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
@@ -98,7 +107,7 @@ func (in *instrumentedService) ImageStatus(ctx context.Context, r *runtime.Image
 	return cri.ImageStatus(ctx, r)
 }
 
-func (in *instrumentedService) PullImage(ctx context.Context, r *runtime.PullImageRequest) (res *runtime.PullImageResponse, err error) {
+func (in *instrumentedAlphaService) PullImage(ctx context.Context, r *runtime_alpha.PullImageRequest) (res *runtime_alpha.PullImageResponse, err error) {
 	cri := in.getCRI()
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
@@ -113,7 +122,7 @@ func (in *instrumentedService) PullImage(ctx context.Context, r *runtime.PullIma
 	return cri.PullImage(ctx, r)
 }
 
-func (in *instrumentedService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequest) (_ *runtime.RemoveImageResponse, err error) {
+func (in *instrumentedAlphaService) RemoveImage(ctx context.Context, r *runtime_alpha.RemoveImageRequest) (_ *runtime_alpha.RemoveImageResponse, err error) {
 	cri := in.getCRI()
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
@@ -128,12 +137,28 @@ func (in *instrumentedService) RemoveImage(ctx context.Context, r *runtime.Remov
 	return cri.RemoveImage(ctx, r)
 }
 
-func (in *instrumentedService) ImageFsInfo(ctx context.Context, r *runtime.ImageFsInfoRequest) (res *runtime.ImageFsInfoResponse, err error) {
+func (in *instrumentedAlphaService) ImageFsInfo(ctx context.Context, r *runtime_alpha.ImageFsInfoRequest) (res *runtime_alpha.ImageFsInfoResponse, err error) {
 	cri := in.getCRI()
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
 	}
 	return cri.ImageFsInfo(ctx, r)
+}
+
+// NOTE: Ported from https://github.com/containerd/containerd/blob/792294ce06bfbd1fe07b458bfa066e6ef8b17046/pkg/cri/server/instrumented_service.go#L1704-L1717
+func alphaReqToV1Req(
+	alphar interface{ Marshal() ([]byte, error) },
+	v1r interface{ Unmarshal(_ []byte) error },
+) error {
+	p, err := alphar.Marshal()
+	if err != nil {
+		return err
+	}
+
+	if err = v1r.Unmarshal(p); err != nil {
+		return err
+	}
+	return nil
 }
 
 func parseReference(ref string) (reference.Spec, error) {

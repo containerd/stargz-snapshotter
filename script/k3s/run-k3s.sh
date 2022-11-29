@@ -55,6 +55,15 @@ cat <<EOF >> "${TMP_K3S_REPO}/go.mod"
 replace github.com/containerd/stargz-snapshotter => "$(realpath ${REPO})"
 replace github.com/containerd/stargz-snapshotter/estargz => "$(realpath ${REPO}/estargz)"
 EOF
+
+# k3s doesn't imports the latest version of containerd that includes their own
+# CRI v1alpha API fork (github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2).
+# So we bring our own CRI v1alpha API fork in our k3s test.
+#
+# TODO: Once k3s bring contianerd version to newer than 234bf990dca4e81e89f549448aa6b555286eaa7a, we can switch import
+# to github.com/containerd/stargz-snapshotter/service/plugin
+sed -i "s|github.com/containerd/stargz-snapshotter/service/plugin|github.com/containerd/stargz-snapshotter/service/pluginforked|g" "${TMP_K3S_REPO}/pkg/containerd/builtins_linux.go"
+
 sed -i -E 's|(ENV DAPPER_RUN_ARGS .*)|\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 sed -i -E 's|(ENV DAPPER_ENV .*)|\1 DOCKER_BUILDKIT|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 (
