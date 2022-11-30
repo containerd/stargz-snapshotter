@@ -239,7 +239,7 @@ jobs:
         with:
           path: src/github.com/containerd/stargz-snapshotter
           fetch-depth: 25
-      - uses: containerd/project-checks@v1
+      - uses: containerd/project-checks@v1.1.0
         with:
           working-directory: src/github.com/containerd/stargz-snapshotter
       - name: Check proto generated code
