@@ -152,7 +152,7 @@ jobs:
       run: make test-cri-containerd
 
   test-cri-cri-o:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     name: CRIValidationCRIO
     strategy:
       fail-fast: false
@@ -162,7 +162,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Validate CRI-O through CRI
       env:
-        DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
+        DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.1.0"
         METADATA_STORE: ${{ matrix.metadata-store }}
       run: make test-cri-o
 

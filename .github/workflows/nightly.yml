@@ -69,13 +69,13 @@ jobs:
       run: make test-cri-containerd
 
   test-cri-o:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     name: CRIValidationCRIO
     steps:
     - uses: actions/checkout@v3
     - name: Varidate the runtime through CRI with CRI-O
       env:
-        DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
+        DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.1.0"
       run: make test-cri-o
 
   test-k3s:
