@@ -25,7 +25,7 @@ require (
 	github.com/rs/xid v1.4.0
 	github.com/sirupsen/logrus v1.9.0
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
-	golang.org/x/sys v0.2.0
+	golang.org/x/sys v0.3.0
 	google.golang.org/grpc v1.50.1
 	k8s.io/api v0.25.4
 	k8s.io/apimachinery v0.25.4
