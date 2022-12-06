@@ -42,7 +42,7 @@ import (
 	dconfig "github.com/containerd/containerd/remotes/docker/config"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	rhttp "github.com/hashicorp/go-retryablehttp"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 // Registry is registry settings configured

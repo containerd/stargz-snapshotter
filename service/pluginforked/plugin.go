@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package plugin
+package pluginfroked
 
 import (
 	"context"
@@ -26,14 +26,21 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 
-	runtime_alpha "github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
-	"github.com/containerd/stargz-snapshotter/service/keychain/crialpha"
 	"github.com/containerd/stargz-snapshotter/service/plugincore"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
+
+	// We have our own fork to enable to be imported to tools that don't import the recent commit of containerd (e.g. k3s).
+	runtime_alpha "github.com/containerd/stargz-snapshotter/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+
+	// We use CRI keychain that depends on our own CRI v1alpha fork.
+	"github.com/containerd/stargz-snapshotter/service/keychain/crialphaforked"
 )
 
-// This plugin requires containerd newer than 234bf990dca4e81e89f549448aa6b555286eaa7a.
-// If not, use "github.com/containerd/stargz-snapshotter/service/pluginforked" instead.
+// NOTE: When containerd >= 234bf990dca4e81e89f549448aa6b555286eaa7a can be imported,
+// use "github.com/containerd/stargz-snapshotter/service/plugin" instead.
+//
+// This plugin provides the forked CRI v1alpha API. This should be used if this plugin is imported to tools that
+// doesn't import containerd newer than 234bf990dca4e81e89f549448aa6b555286eaa7a.
 
 func init() {
 	plugincore.RegisterPlugin(registerCRIAlphaServer)
@@ -47,7 +54,7 @@ func registerCRIAlphaServer(ctx context.Context, criAddr string, rpc *grpc.Serve
 		}
 		return runtime_alpha.NewImageServiceClient(conn), nil
 	}
-	criAlphaCreds, criAlphaServer := crialpha.NewCRIAlphaKeychain(ctx, connectAlphaCRI)
+	criAlphaCreds, criAlphaServer := crialphaforked.NewCRIAlphaKeychain(ctx, connectAlphaCRI)
 	runtime_alpha.RegisterImageServiceServer(rpc, criAlphaServer)
 	return criAlphaCreds
 }
