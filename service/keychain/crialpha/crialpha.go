@@ -30,6 +30,8 @@ import (
 
 	runtime_alpha "github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
+
+	"github.com/containerd/stargz-snapshotter/util/criutil"
 )
 
 // containerd newer than 234bf990dca4e81e89f549448aa6b555286eaa7a is required for this plugin.
@@ -60,6 +62,8 @@ func NewCRIAlphaKeychain(ctx context.Context, connectCRI func() (runtime_alpha.I
 }
 
 type instrumentedAlphaService struct {
+	runtime_alpha.UnimplementedImageServiceServer
+
 	cri   runtime_alpha.ImageServiceClient
 	criMu sync.Mutex
 
@@ -76,7 +80,7 @@ func (in *instrumentedAlphaService) credentials(host string, refspec reference.S
 	defer in.configMu.Unlock()
 	if cfg, ok := in.config[refspec.String()]; ok {
 		var v1cfg runtime.AuthConfig
-		if err := alphaReqToV1Req(cfg, &v1cfg); err != nil {
+		if err := criutil.AlphaReqToV1Req(cfg, &v1cfg); err != nil {
 			return "", "", err
 		}
 		return resolver.ParseAuth(&v1cfg, host)
@@ -143,22 +147,6 @@ func (in *instrumentedAlphaService) ImageFsInfo(ctx context.Context, r *runtime_
 		return nil, errors.New("server is not initialized yet")
 	}
 	return cri.ImageFsInfo(ctx, r)
-}
-
-// NOTE: Ported from https://github.com/containerd/containerd/blob/792294ce06bfbd1fe07b458bfa066e6ef8b17046/pkg/cri/server/instrumented_service.go#L1704-L1717
-func alphaReqToV1Req(
-	alphar interface{ Marshal() ([]byte, error) },
-	v1r interface{ Unmarshal(_ []byte) error },
-) error {
-	p, err := alphar.Marshal()
-	if err != nil {
-		return err
-	}
-
-	if err = v1r.Unmarshal(p); err != nil {
-		return err
-	}
-	return nil
 }
 
 func parseReference(ref string) (reference.Spec, error) {

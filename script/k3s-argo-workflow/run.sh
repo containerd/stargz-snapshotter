@@ -138,6 +138,11 @@ sed -i "s|github.com/containerd/stargz-snapshotter/service/plugin|github.com/con
 sed -i "s|${K3S_CONTAINERD_REPO}|${TMP_K3S_CONTAINERD_REPO}|g" "${TMP_K3S_REPO}/go.mod"
 sed -i "s|github.com/k3s-io/stargz-snapshotter.*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
 
+# typeurl version stargz-snapshotter indirectly depends on is incompatible to the one github.com/k3s-io/containerd depends on.
+# We use older version of typeurl which the both of the above are compatible to.
+echo "replace github.com/containerd/typeurl => github.com/containerd/typeurl v1.0.2" >> "${TMP_K3S_REPO}/go.mod"
+cat "${TMP_K3S_REPO}/go.mod"
+
 sed -i -E 's|(ENV DAPPER_RUN_ARGS .*)|\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 sed -i -E 's|(ENV DAPPER_ENV .*)|\1 DOCKER_BUILDKIT|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 (
