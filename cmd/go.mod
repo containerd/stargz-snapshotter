@@ -10,7 +10,7 @@ require (
 	github.com/containerd/stargz-snapshotter/ipfs v0.13.0
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/go-metrics v0.0.1
-	github.com/goccy/go-json v0.9.11
+	github.com/goccy/go-json v0.10.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/ipfs/go-ipfs-http-client v0.4.0
 	github.com/ipfs/interface-go-ipfs-core v0.7.0
