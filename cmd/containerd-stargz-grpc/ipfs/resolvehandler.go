@@ -21,80 +21,71 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"os/exec"
+	"strconv"
+	"strings"
 
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/ipfs"
-	httpapi "github.com/ipfs/go-ipfs-http-client"
-	iface "github.com/ipfs/interface-go-ipfs-core"
-	ipath "github.com/ipfs/interface-go-ipfs-core/path"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 type ResolveHandler struct{}
 
 func (r *ResolveHandler) Handle(ctx context.Context, desc ocispec.Descriptor) (remote.Fetcher, int64, error) {
-	p, err := ipfs.GetPath(desc)
+	cid, err := ipfs.GetCID(desc)
 	if err != nil {
 		return nil, 0, err
 	}
-	client, err := httpapi.NewLocalApi()
+	sizeB, err := exec.Command("ipfs", "files", "stat", "--format=<size>", "/ipfs/"+cid).Output()
 	if err != nil {
 		return nil, 0, err
 	}
-	n, err := client.Unixfs().Get(ctx, p)
+	size, err := strconv.ParseInt(strings.TrimSuffix(string(sizeB), "\n"), 10, 64)
 	if err != nil {
 		return nil, 0, err
 	}
-	if _, ok := n.(interface {
-		io.ReaderAt
-	}); !ok {
-		return nil, 0, fmt.Errorf("ReaderAt is not implemented")
-	}
-	defer n.Close()
-	s, err := n.Size()
-	if err != nil {
-		return nil, 0, err
-	}
-	return &fetcher{client, p}, s, nil
+	return &fetcher{cid: cid, size: size}, size, nil
 }
 
 type fetcher struct {
-	api  iface.CoreAPI
-	path ipath.Path
+	cid  string
+	size int64
 }
 
 func (f *fetcher) Fetch(ctx context.Context, off int64, size int64) (io.ReadCloser, error) {
-	n, err := f.api.Unixfs().Get(ctx, f.path)
+	if off > f.size {
+		return nil, fmt.Errorf("offset is larger than the size of the blob %d(offset) > %d(blob size)", off, f.size)
+	}
+	cmd := exec.Command("ipfs", "cat", fmt.Sprintf("--offset=%d", off), fmt.Sprintf("--length=%d", size), f.cid)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
 	}
-	ra, ok := n.(interface {
-		io.ReaderAt
-	})
-	if !ok {
-		return nil, fmt.Errorf("ReaderAt is not implemented")
+	if err := cmd.Start(); err != nil {
+		return nil, err
 	}
-	return &readCloser{
-		Reader:    io.NewSectionReader(ra, off, size),
-		closeFunc: n.Close,
-	}, nil
+	pr, pw := io.Pipe()
+	go func() {
+		if _, err := io.CopyN(pw, stdout, size); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		if err := cmd.Wait(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return pr, nil
 }
 
 func (f *fetcher) Check() error {
-	n, err := f.api.Unixfs().Get(context.Background(), f.path)
-	if err != nil {
-		return err
-	}
-	if _, ok := n.(interface {
-		io.ReaderAt
-	}); !ok {
-		return fmt.Errorf("ReaderAt is not implemented")
-	}
-	return n.Close()
+	return exec.Command("ipfs", "files", "stat", "/ipfs/"+f.cid).Run()
 }
 
 func (f *fetcher) GenID(off int64, size int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.path.String(), off, size)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.cid, off, size)))
 	return fmt.Sprintf("%x", sum)
 }
 

@@ -29,7 +29,6 @@ import (
 	fsconfig "github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/ipfs"
-	httpapi "github.com/ipfs/go-ipfs-http-client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli"
 )
@@ -91,11 +90,7 @@ command.
 		}
 
 		if context.Bool("ipfs") {
-			ipfsClient, err := httpapi.NewLocalApi()
-			if err != nil {
-				return err
-			}
-			r, err := ipfs.NewResolver(ipfsClient, ipfs.ResolverOptions{
+			r, err := ipfs.NewResolver(ipfs.ResolverOptions{
 				Scheme: "ipfs",
 			})
 			if err != nil {

@@ -245,3 +245,5 @@ jobs:
       - name: Check proto generated code
         run: make validate-generated
         working-directory: src/github.com/containerd/stargz-snapshotter
+      - run: ./script/util/verify-no-patent.sh
+        working-directory: src/github.com/containerd/stargz-snapshotter
