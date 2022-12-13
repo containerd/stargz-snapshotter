@@ -21,6 +21,7 @@ REPO="${CONTEXT}../../"
 
 K3S_VERSION=master
 K3S_REPO=https://github.com/k3s-io/k3s
+K3S_CONTAINERD_REPO=https://github.com/k3s-io/containerd
 
 K3S_NODE_REPO=ghcr.io/stargz-containers
 K3S_NODE_IMAGE_NAME=k3s
@@ -31,10 +32,12 @@ K3S_CLUSTER_NAME="k3s-demo-cluster-$(date +%s%N | shasum | base64 | fold -w 10 |
 ORG_ARGOYAML=$(mktemp)
 TMP_K3S_REPO=$(mktemp -d)
 TMP_GOLANGCI=$(mktemp)
+TMP_K3S_CONTAINERD_REPO=$(mktemp -d)
 function cleanup {
     ORG_EXIT_CODE="${1}"
     rm "${ORG_ARGOYAML}" || true
     rm -rf "${TMP_K3S_REPO}" || true
+    rm -rf "${TMP_K3S_CONTAINERD_REPO}"
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
@@ -122,10 +125,7 @@ echo "result to ${RESULT_FILE}"
 wget -O "${ORG_ARGOYAML}" https://raw.githubusercontent.com/argoproj/argo-workflows/v3.4.3/manifests/quick-start-minimal.yaml
 
 git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
-cat <<EOF >> "${TMP_K3S_REPO}/go.mod"
-replace github.com/containerd/stargz-snapshotter => "$(realpath ${REPO})"
-replace github.com/containerd/stargz-snapshotter/estargz => "$(realpath ${REPO}/estargz)"
-EOF
+CONTAINERD_VERSION=$(cat "${TMP_K3S_REPO}/go.mod" | grep "github.com/k3s-io/containerd" | sed -E 's/.*=> [^ ]* ([^ ]*).*/\1/' | tr -d '\n')
 
 # k3s doesn't imports the latest version of containerd that includes their own
 # CRI v1alpha API fork (github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2).
@@ -133,7 +133,10 @@ EOF
 #
 # TODO: Once k3s bring contianerd version to newer than 234bf990dca4e81e89f549448aa6b555286eaa7a, we can switch import
 # to github.com/containerd/stargz-snapshotter/service/plugin
-sed -i "s|github.com/containerd/stargz-snapshotter/service/plugin|github.com/containerd/stargz-snapshotter/service/pluginforked|g" "${TMP_K3S_REPO}/pkg/containerd/builtins_linux.go"
+git clone -b ${CONTAINERD_VERSION} --depth 1 "${K3S_CONTAINERD_REPO}" "${TMP_K3S_CONTAINERD_REPO}"
+sed -i "s|github.com/containerd/stargz-snapshotter/service/plugin|github.com/containerd/stargz-snapshotter/service/pluginforked|g" "${TMP_K3S_CONTAINERD_REPO}/cmd/containerd/builtins_linux.go"
+sed -i "s|${K3S_CONTAINERD_REPO}|${TMP_K3S_CONTAINERD_REPO}|g" "${TMP_K3S_REPO}/go.mod"
+sed -i "s|github.com/k3s-io/stargz-snapshotter.*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
 
 sed -i -E 's|(ENV DAPPER_RUN_ARGS .*)|\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 sed -i -E 's|(ENV DAPPER_ENV .*)|\1 DOCKER_BUILDKIT|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
