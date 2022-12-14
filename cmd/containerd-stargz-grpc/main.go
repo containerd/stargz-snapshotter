@@ -37,6 +37,7 @@ import (
 	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/sys"
+	runtime_alpha "github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	dbmetadata "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/db"
 	ipfs "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/ipfs"
 	"github.com/containerd/stargz-snapshotter/fs"
@@ -44,6 +45,7 @@ import (
 	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
+	"github.com/containerd/stargz-snapshotter/service/keychain/crialpha"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
 	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
@@ -57,9 +59,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
-	runtime_alpha "github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
-	"github.com/containerd/stargz-snapshotter/service/keychain/crialpha"
 )
 
 const (

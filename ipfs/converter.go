@@ -17,81 +17,83 @@
 package ipfs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/platforms"
-	"github.com/ipfs/go-cid"
-	files "github.com/ipfs/go-ipfs-files"
-	iface "github.com/ipfs/interface-go-ipfs-core"
-	"github.com/ipfs/interface-go-ipfs-core/options"
-	ipath "github.com/ipfs/interface-go-ipfs-core/path"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // Push pushes the provided image ref to IPFS with converting it to IPFS-enabled format.
-func Push(ctx context.Context, client *containerd.Client, api iface.CoreAPI, ref string, layerConvert converter.ConvertFunc, platformMC platforms.MatchComparer) (ipath.Resolved, error) {
+func Push(ctx context.Context, client *containerd.Client, ref string, layerConvert converter.ConvertFunc, platformMC platforms.MatchComparer) (cidV1 string, _ error) {
+	return PushWithIPFSPath(ctx, client, ref, layerConvert, platformMC, nil)
+}
+
+func PushWithIPFSPath(ctx context.Context, client *containerd.Client, ref string, layerConvert converter.ConvertFunc, platformMC platforms.MatchComparer, ipfsPath *string) (cidV1 string, _ error) {
 	ctx, done, err := client.WithLease(ctx)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer done(ctx)
 	img, err := client.ImageService().Get(ctx, ref)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	desc, err := converter.IndexConvertFuncWithHook(layerConvert, true, platformMC, converter.ConvertHooks{
-		PostConvertHook: pushBlobHook(api),
+		PostConvertHook: pushBlobHook,
 	})(ctx, client.ContentStore(), img.Target)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	root, err := json.Marshal(desc)
 	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command("ipfs", "add", "-Q", "--pin=true", "--cid-version=1")
+	cmd.Stdin = bytes.NewReader(root)
+	if ipfsPath != nil {
+		cmd.Env = append(os.Environ(), fmt.Sprintf("IPFS_PATH=%s", *ipfsPath))
+	}
+	b, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(string(b), "\n"), nil
+}
+
+func pushBlobHook(ctx context.Context, cs content.Store, desc ocispec.Descriptor, newDesc *ocispec.Descriptor) (*ocispec.Descriptor, error) {
+	resultDesc := newDesc
+	if resultDesc == nil {
+		descCopy := desc
+		resultDesc = &descCopy
+	}
+	ra, err := cs.ReaderAt(ctx, *resultDesc)
+	if err != nil {
 		return nil, err
 	}
-	return api.Unixfs().Add(ctx, files.NewBytesFile(root), options.Unixfs.Pin(true), options.Unixfs.CidVersion(1))
-}
-
-func pushBlobHook(api iface.CoreAPI) converter.ConvertHookFunc {
-	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor, newDesc *ocispec.Descriptor) (*ocispec.Descriptor, error) {
-		resultDesc := newDesc
-		if resultDesc == nil {
-			descCopy := desc
-			resultDesc = &descCopy
-		}
-		ra, err := cs.ReaderAt(ctx, *resultDesc)
-		if err != nil {
-			return nil, err
-		}
-		p, err := api.Unixfs().Add(ctx, files.NewReaderFile(content.NewReader(ra)), options.Unixfs.Pin(true), options.Unixfs.CidVersion(1))
-		if err != nil {
-			return nil, err
-		}
-		// record IPFS URL using CIDv1 : https://docs.ipfs.io/how-to/address-ipfs-on-web/#native-urls
-		if p.Cid().Version() == 0 {
-			return nil, fmt.Errorf("CID verions 0 isn't supported")
-		}
-		resultDesc.URLs = []string{"ipfs://" + p.Cid().String()}
-		return resultDesc, nil
+	cmd := exec.Command("ipfs", "add", "-Q", "--pin=true", "--cid-version=1")
+	cmd.Stdin = content.NewReader(ra)
+	cidv1, err := cmd.Output()
+	if err != nil {
+		return nil, err
 	}
+	resultDesc.URLs = []string{"ipfs://" + strings.TrimSuffix(string(cidv1), "\n")}
+	return resultDesc, nil
 }
 
-func GetPath(desc ocispec.Descriptor) (ipath.Path, error) {
+func GetCID(desc ocispec.Descriptor) (string, error) {
 	for _, u := range desc.URLs {
 		if strings.HasPrefix(u, "ipfs://") {
-			// support only content addressable URL (ipfs://<CID>)
-			c, err := cid.Decode(u[7:])
-			if err != nil {
-				return nil, err
-			}
-			return ipath.IpfsPath(c), nil
+			return u[7:], nil
 		}
 	}
-	return nil, fmt.Errorf("no CID is recorded")
+	return "", fmt.Errorf("no CID is recorded")
 }

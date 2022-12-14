@@ -25,7 +25,6 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/ipfs"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
-	httpapi "github.com/ipfs/go-ipfs-http-client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -83,21 +82,16 @@ var IPFSPushCommand = cli.Command{
 		}
 		defer cancel()
 
-		ipfsClient, err := httpapi.NewLocalApi()
-		if err != nil {
-			return err
-		}
-
 		var layerConvert converter.ConvertFunc
 		if context.Bool("estargz") {
 			layerConvert = estargzconvert.LayerConvertFunc()
 		}
-		p, err := ipfs.Push(ctx, client, ipfsClient, srcRef, layerConvert, platformMC)
+		p, err := ipfs.Push(ctx, client, srcRef, layerConvert, platformMC)
 		if err != nil {
 			return err
 		}
-		logrus.WithField("CID", p.Cid().String()).Infof("Pushed")
-		fmt.Println(p.Cid().String())
+		logrus.WithField("CID", p).Infof("Pushed")
+		fmt.Println(p)
 
 		return nil
 	},

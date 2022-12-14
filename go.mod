@@ -38,9 +38,6 @@ replace (
 	// Import local package for estargz.
 	github.com/containerd/stargz-snapshotter/estargz => ./estargz
 
-	// Temporary fork for avoiding importing patent-protected code: https://github.com/hashicorp/golang-lru/issues/73
-	github.com/hashicorp/golang-lru => github.com/ktock/golang-lru v0.5.5-0.20211029085301-ec551be6f75c
-
 	// NOTE1: github.com/containerd/containerd v1.4.0 depends on github.com/urfave/cli v1.22.1
 	//        because of https://github.com/urfave/cli/issues/1092
 	// NOTE2: Automatic upgrade of this is disabled in denendabot.yml. When we remove this replace

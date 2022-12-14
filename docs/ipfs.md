@@ -10,6 +10,8 @@ To enable this feature, add the following configuration to `config.toml` of Star
 ipfs = true
 ```
 
+> NOTE: make sure `ipfs` command is available for stargz snapshotter via PATH environment variable.
+
 ## IPFS-enabled OCI Image
 
 For obtaining IPFS-enabled OCI Image, each descriptor in an OCI image must contain the following [IPFS URL](https://docs.ipfs.io/how-to/address-ipfs-on-web/#native-urls) in `urls` field.
