@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path"
 
@@ -29,12 +30,16 @@ import (
 )
 
 type resolver struct {
-	scheme string
+	scheme   string
+	ipfsPath string
 }
 
 type ResolverOptions struct {
 	// Scheme is the scheme to fetch the specified IPFS content. "ipfs" or "ipns".
 	Scheme string
+
+	// IPFSPath is the path to the IPFS repository directory.
+	IPFSPath string
 }
 
 // func NewResolver(client iface.CoreAPI, options ResolverOptions) (remotes.Resolver, error) {
@@ -43,7 +48,10 @@ func NewResolver(options ResolverOptions) (remotes.Resolver, error) {
 	if s != "ipfs" && s != "ipns" {
 		return nil, fmt.Errorf("unsupported scheme %q", s)
 	}
-	return &resolver{s}, nil
+	return &resolver{
+		scheme:   s,
+		ipfsPath: options.IPFSPath,
+	}, nil
 }
 
 // Resolve resolves the provided ref for IPFS. ref must be a CID.
@@ -51,7 +59,7 @@ func NewResolver(options ResolverOptions) (remotes.Resolver, error) {
 //
 //	it's incompatbile to the current reference specification.
 func (r *resolver) Resolve(ctx context.Context, ref string) (name string, desc ocispec.Descriptor, err error) {
-	rc, err := ipfsCat(path.Join("/", r.scheme, ref))
+	rc, err := ipfsCat(path.Join("/", r.scheme, ref), r.ipfsPath)
 	if err != nil {
 		return "", ocispec.Descriptor{}, err
 	}
@@ -82,11 +90,14 @@ func (f *fetcher) Fetch(ctx context.Context, desc ocispec.Descriptor) (io.ReadCl
 	if err != nil {
 		return nil, err
 	}
-	return ipfsCat(cid)
+	return ipfsCat(cid, f.r.ipfsPath)
 }
 
-func ipfsCat(p string) (io.ReadCloser, error) {
+func ipfsCat(p string, ipfsPath string) (io.ReadCloser, error) {
 	cmd := exec.Command("ipfs", "cat", p)
+	if ipfsPath != "" {
+		cmd.Env = append(os.Environ(), fmt.Sprintf("IPFS_PATH=%s", ipfsPath))
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
