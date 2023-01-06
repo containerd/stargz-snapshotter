@@ -48,7 +48,7 @@ func PushWithIPFSPath(ctx context.Context, client *containerd.Client, ref string
 		return "", err
 	}
 	desc, err := converter.IndexConvertFuncWithHook(layerConvert, true, platformMC, converter.ConvertHooks{
-		PostConvertHook: pushBlobHook,
+		PostConvertHook: pushBlobHook(ipfsPath),
 	})(ctx, client.ContentStore(), img.Target)
 	if err != nil {
 		return "", err
@@ -57,36 +57,43 @@ func PushWithIPFSPath(ctx context.Context, client *containerd.Client, ref string
 	if err != nil {
 		return "", err
 	}
+	errbuf := new(bytes.Buffer)
 	cmd := exec.Command("ipfs", "add", "-Q", "--pin=true", "--cid-version=1")
+	cmd.Stderr = errbuf
 	cmd.Stdin = bytes.NewReader(root)
 	if ipfsPath != nil {
 		cmd.Env = append(os.Environ(), fmt.Sprintf("IPFS_PATH=%s", *ipfsPath))
 	}
 	b, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed ipfs command: %s, %w", string(errbuf.Bytes()), err)
 	}
 	return strings.TrimSuffix(string(b), "\n"), nil
 }
 
-func pushBlobHook(ctx context.Context, cs content.Store, desc ocispec.Descriptor, newDesc *ocispec.Descriptor) (*ocispec.Descriptor, error) {
-	resultDesc := newDesc
-	if resultDesc == nil {
-		descCopy := desc
-		resultDesc = &descCopy
+func pushBlobHook(ipfsPath *string) converter.ConvertHookFunc {
+	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor, newDesc *ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		resultDesc := newDesc
+		if resultDesc == nil {
+			descCopy := desc
+			resultDesc = &descCopy
+		}
+		ra, err := cs.ReaderAt(ctx, *resultDesc)
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.Command("ipfs", "add", "-Q", "--pin=true", "--cid-version=1")
+		cmd.Stdin = content.NewReader(ra)
+		if ipfsPath != nil {
+			cmd.Env = append(os.Environ(), fmt.Sprintf("IPFS_PATH=%s", *ipfsPath))
+		}
+		cidv1, err := cmd.Output()
+		if err != nil {
+			return nil, err
+		}
+		resultDesc.URLs = []string{"ipfs://" + strings.TrimSuffix(string(cidv1), "\n")}
+		return resultDesc, nil
 	}
-	ra, err := cs.ReaderAt(ctx, *resultDesc)
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.Command("ipfs", "add", "-Q", "--pin=true", "--cid-version=1")
-	cmd.Stdin = content.NewReader(ra)
-	cidv1, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	resultDesc.URLs = []string{"ipfs://" + strings.TrimSuffix(string(cidv1), "\n")}
-	return resultDesc, nil
 }
 
 func GetCID(desc ocispec.Descriptor) (string, error) {
