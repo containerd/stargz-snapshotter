@@ -23,6 +23,9 @@ ARG CONMON_VERSION=v2.1.5
 ARG COMMON_VERSION=v0.49.2
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=registry.k8s.io/pause:3.6
 
+ARG CONTAINERIZED_SYSTEMD_VERSION=v0.1.1
+ARG SLIRP4NETNS_VERSION=v1.1.12
+
 # Used in CI
 ARG CRI_TOOLS_VERSION=v1.25.0
 
@@ -182,6 +185,36 @@ COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
 COPY --from=conmon-dev /out/bin/* /usr/local/bin/
 COPY --from=containers-common-dev /out/seccomp.json /usr/share/containers/
 COPY --from=stargz-store-dev /out/* /usr/local/bin/
+
+# Image for testing rootless Podman with Stargz Store.
+# This takes the same approach as nerdctl CI: https://github.com/containerd/nerdctl/blob/6341c8320984f7148b92dd33472d8eaca6dba756/Dockerfile#L302-L326
+FROM podman-base AS podman-rootless
+ARG CONTAINERIZED_SYSTEMD_VERSION
+ARG SLIRP4NETNS_VERSION
+RUN apt-get update -y && apt-get install -y \
+                         systemd systemd-sysv dbus dbus-user-session \
+                         openssh-server openssh-client uidmap
+RUN curl -o /usr/local/bin/slirp4netns --fail -L https://github.com/rootless-containers/slirp4netns/releases/download/${SLIRP4NETNS_VERSION}/slirp4netns-$(uname -m) && \
+    chmod +x /usr/local/bin/slirp4netns && \
+    curl -L -o /docker-entrypoint.sh https://raw.githubusercontent.com/AkihiroSuda/containerized-systemd/${CONTAINERIZED_SYSTEMD_VERSION}/docker-entrypoint.sh && \
+    chmod +x /docker-entrypoint.sh && \
+    curl -L -o /etc/containers/policy.json https://raw.githubusercontent.com/containers/skopeo/master/default-policy.json
+# storage.conf plugs Stargz Store into Podman as an Additional Layer Store
+COPY ./script/podman/config/storage.conf /home/rootless/.config/containers/storage.conf
+# Stargz Store systemd service for rootless Podman
+COPY ./script/podman/config/podman-rootless-stargz-store.service /home/rootless/.config/systemd/user/
+# test-podman-rootless.sh logins to the user via SSH
+COPY ./script/podman/config/test-podman-rootless.sh /test-podman-rootless.sh
+RUN ssh-keygen -q -t rsa -f /root/.ssh/id_rsa -N '' && \
+    useradd -m -s /bin/bash rootless && \
+    mkdir -p -m 0700 /home/rootless/.ssh && \
+    cp -a /root/.ssh/id_rsa.pub /home/rootless/.ssh/authorized_keys && \
+    mkdir -p /home/rootless/.local/share /home/rootless/.local/share/stargz-store/store && \
+    chown -R rootless:rootless /home/rootless
+VOLUME /home/rootless/.local/share
+
+ENTRYPOINT ["/docker-entrypoint.sh", "/test-podman-rootless.sh"]
+CMD ["/bin/bash", "--login", "-i"]
 
 # Image which can be used for interactive demo environment
 FROM containerd-base AS demo
