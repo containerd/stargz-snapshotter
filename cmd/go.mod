@@ -19,7 +19,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.4.0
 	github.com/sirupsen/logrus v1.9.0
-	github.com/urfave/cli v1.22.10
+	github.com/urfave/cli v1.22.11
 	go.etcd.io/bbolt v1.3.6
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.4.0
