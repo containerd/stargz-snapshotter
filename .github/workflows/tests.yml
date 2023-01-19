@@ -166,6 +166,14 @@ jobs:
         METADATA_STORE: ${{ matrix.metadata-store }}
       run: make test-cri-o
 
+  test-podman:
+    runs-on: ubuntu-22.04
+    name: PodmanRootless
+    steps:
+    - uses: actions/checkout@v3
+    - name: Test Podman (rootless)
+      run: make test-podman
+
   test-k3s:
     runs-on: ubuntu-22.04
     name: K3S

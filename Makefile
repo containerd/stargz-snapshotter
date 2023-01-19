@@ -108,6 +108,9 @@ test-cri-containerd:
 test-cri-o:
 	@./script/cri-o/test.sh
 
+test-podman:
+	@./script/podman/test.sh
+
 test-criauth:
 	@./script/criauth/test.sh
 
