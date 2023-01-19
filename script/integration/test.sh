@@ -27,7 +27,7 @@ CONTAINERD_NODE=testenv_integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
-IPFS_VERSION=v0.10.0
+IPFS_VERSION=v0.17.0
 
 source "${REPO}/script/util/utils.sh"
 

@@ -186,6 +186,14 @@ jobs:
     - name: Run test with k3s
       run: make test-k3s
 
+  test-ipfs:
+    runs-on: ubuntu-22.04
+    name: IPFS
+    steps:
+    - uses: actions/checkout@v3
+    - name: Run test
+      run: make test-ipfs
+
   test-k3s-argo-workflow:
     runs-on: ubuntu-22.04
     name: K3SArgoWorkflow

@@ -21,14 +21,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/platforms"
+	ipfsclient "github.com/containerd/stargz-snapshotter/ipfs/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -47,8 +46,18 @@ func PushWithIPFSPath(ctx context.Context, client *containerd.Client, ref string
 	if err != nil {
 		return "", err
 	}
+	var ipath string
+	if ipfsPath != nil {
+		ipath = *ipfsPath
+	}
+	// HTTP is only supported as of now. We can add https support here if needed (e.g. for connecting to it via proxy, etc)
+	iurl, err := ipfsclient.GetIPFSAPIAddress(ipath, "http")
+	if err != nil {
+		return "", err
+	}
+	iclient := ipfsclient.New(iurl)
 	desc, err := converter.IndexConvertFuncWithHook(layerConvert, true, platformMC, converter.ConvertHooks{
-		PostConvertHook: pushBlobHook(ipfsPath),
+		PostConvertHook: pushBlobHook(iclient),
 	})(ctx, client.ContentStore(), img.Target)
 	if err != nil {
 		return "", err
@@ -57,21 +66,10 @@ func PushWithIPFSPath(ctx context.Context, client *containerd.Client, ref string
 	if err != nil {
 		return "", err
 	}
-	errbuf := new(bytes.Buffer)
-	cmd := exec.Command("ipfs", "add", "-Q", "--pin=true", "--cid-version=1")
-	cmd.Stderr = errbuf
-	cmd.Stdin = bytes.NewReader(root)
-	if ipfsPath != nil {
-		cmd.Env = append(os.Environ(), fmt.Sprintf("IPFS_PATH=%s", *ipfsPath))
-	}
-	b, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed ipfs command: %s, %w", string(errbuf.Bytes()), err)
-	}
-	return strings.TrimSuffix(string(b), "\n"), nil
+	return iclient.Add(bytes.NewReader(root))
 }
 
-func pushBlobHook(ipfsPath *string) converter.ConvertHookFunc {
+func pushBlobHook(client *ipfsclient.Client) converter.ConvertHookFunc {
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor, newDesc *ocispec.Descriptor) (*ocispec.Descriptor, error) {
 		resultDesc := newDesc
 		if resultDesc == nil {
@@ -82,16 +80,11 @@ func pushBlobHook(ipfsPath *string) converter.ConvertHookFunc {
 		if err != nil {
 			return nil, err
 		}
-		cmd := exec.Command("ipfs", "add", "-Q", "--pin=true", "--cid-version=1")
-		cmd.Stdin = content.NewReader(ra)
-		if ipfsPath != nil {
-			cmd.Env = append(os.Environ(), fmt.Sprintf("IPFS_PATH=%s", *ipfsPath))
-		}
-		cidv1, err := cmd.Output()
+		cidv1, err := client.Add(content.NewReader(ra))
 		if err != nil {
 			return nil, err
 		}
-		resultDesc.URLs = []string{"ipfs://" + strings.TrimSuffix(string(cidv1), "\n")}
+		resultDesc.URLs = []string{"ipfs://" + cidv1}
 		return resultDesc, nil
 	}
 }

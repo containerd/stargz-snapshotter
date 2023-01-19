@@ -10,7 +10,7 @@ To enable this feature, add the following configuration to `config.toml` of Star
 ipfs = true
 ```
 
-> NOTE: make sure `ipfs` command is available for stargz snapshotter via PATH environment variable.
+> NOTE: containerd-stargz-grpc tries to connect to IPFS API written in `~/.ipfs/api` (or the file under `$IPFS_PATH` if configured) via HTTP (not HTTPS).
 
 ## IPFS-enabled OCI Image
 
