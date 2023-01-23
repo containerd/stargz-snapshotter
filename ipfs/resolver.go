@@ -21,17 +21,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"path"
 
 	"github.com/containerd/containerd/remotes"
+	ipfsclient "github.com/containerd/stargz-snapshotter/ipfs/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 type resolver struct {
-	scheme   string
-	ipfsPath string
+	scheme string
+	client *ipfsclient.Client
 }
 
 type ResolverOptions struct {
@@ -42,15 +41,19 @@ type ResolverOptions struct {
 	IPFSPath string
 }
 
-// func NewResolver(client iface.CoreAPI, options ResolverOptions) (remotes.Resolver, error) {
 func NewResolver(options ResolverOptions) (remotes.Resolver, error) {
 	s := options.Scheme
 	if s != "ipfs" && s != "ipns" {
 		return nil, fmt.Errorf("unsupported scheme %q", s)
 	}
+	// HTTP is only supported as of now. We can add https support here if needed (e.g. for connecting to it via proxy, etc)
+	iurl, err := ipfsclient.GetIPFSAPIAddress(options.IPFSPath, "http")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get IPFS URL from ipfs path")
+	}
 	return &resolver{
-		scheme:   s,
-		ipfsPath: options.IPFSPath,
+		scheme: s,
+		client: ipfsclient.New(iurl),
 	}, nil
 }
 
@@ -59,7 +62,7 @@ func NewResolver(options ResolverOptions) (remotes.Resolver, error) {
 //
 //	it's incompatbile to the current reference specification.
 func (r *resolver) Resolve(ctx context.Context, ref string) (name string, desc ocispec.Descriptor, err error) {
-	rc, err := ipfsCat(path.Join("/", r.scheme, ref), r.ipfsPath)
+	rc, err := r.client.Get(path.Join("/", r.scheme, ref), nil, nil)
 	if err != nil {
 		return "", ocispec.Descriptor{}, err
 	}
@@ -90,32 +93,5 @@ func (f *fetcher) Fetch(ctx context.Context, desc ocispec.Descriptor) (io.ReadCl
 	if err != nil {
 		return nil, err
 	}
-	return ipfsCat(cid, f.r.ipfsPath)
-}
-
-func ipfsCat(p string, ipfsPath string) (io.ReadCloser, error) {
-	cmd := exec.Command("ipfs", "cat", p)
-	if ipfsPath != "" {
-		cmd.Env = append(os.Environ(), fmt.Sprintf("IPFS_PATH=%s", ipfsPath))
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	pr, pw := io.Pipe()
-	go func() {
-		if _, err := io.Copy(pw, stdout); err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-		if err := cmd.Wait(); err != nil {
-			pw.CloseWithError(err)
-			return
-		}
-		pw.Close()
-	}()
-	return pr, nil
+	return f.r.client.Get(path.Join("/", f.r.scheme, cid), nil, nil)
 }
