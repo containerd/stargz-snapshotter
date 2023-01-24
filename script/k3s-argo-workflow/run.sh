@@ -125,21 +125,11 @@ echo "result to ${RESULT_FILE}"
 wget -O "${ORG_ARGOYAML}" https://raw.githubusercontent.com/argoproj/argo-workflows/v3.4.3/manifests/quick-start-minimal.yaml
 
 git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
-CONTAINERD_VERSION=$(cat "${TMP_K3S_REPO}/go.mod" | grep "github.com/k3s-io/containerd" | sed -E 's/.*=> [^ ]* ([^ ]*).*/\1/' | tr -d '\n')
-
-# k3s doesn't imports the latest version of containerd that includes their own
-# CRI v1alpha API fork (github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2).
-# So we bring our own CRI v1alpha API fork in our k3s test.
-#
-# TODO: Once k3s bring contianerd version to newer than 234bf990dca4e81e89f549448aa6b555286eaa7a, we can switch import
-# to github.com/containerd/stargz-snapshotter/service/plugin
-git clone -b ${CONTAINERD_VERSION} --depth 1 "${K3S_CONTAINERD_REPO}" "${TMP_K3S_CONTAINERD_REPO}"
-sed -i "s|github.com/containerd/stargz-snapshotter/service/plugin|github.com/containerd/stargz-snapshotter/service/pluginforked|g" "${TMP_K3S_CONTAINERD_REPO}/cmd/containerd/builtins_linux.go"
-sed -i "s|${K3S_CONTAINERD_REPO}|${TMP_K3S_CONTAINERD_REPO}|g" "${TMP_K3S_REPO}/go.mod"
 sed -i "s|github.com/k3s-io/stargz-snapshotter.*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
 
 # typeurl version stargz-snapshotter indirectly depends on is incompatible to the one github.com/k3s-io/containerd depends on.
 # We use older version of typeurl which the both of the above are compatible to.
+# We can remove this directive once k3s upgrades typeurl version to newer than v1.0.3-0.20220324183432-6193a0e03259.
 echo "replace github.com/containerd/typeurl => github.com/containerd/typeurl v1.0.2" >> "${TMP_K3S_REPO}/go.mod"
 cat "${TMP_K3S_REPO}/go.mod"
 

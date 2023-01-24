@@ -34,9 +34,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/util/criutil"
 )
 
-// containerd newer than 234bf990dca4e81e89f549448aa6b555286eaa7a is required for this plugin.
-// If not, use "github.com/containerd/stargz-snapshotter/service/keychain/crialphaforked" instead.
-
 // NewAlphaCRIKeychain provides creds passed through CRI PullImage API.
 // Same as NewCRIKeychain but for CRI v1alpha API.
 // Containerd doesn't drop v1alpha API support so our proxy also exposes this API as well.
