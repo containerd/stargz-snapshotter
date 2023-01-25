@@ -24,7 +24,7 @@ require (
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.4.0
 	google.golang.org/grpc v1.52.0
-	k8s.io/cri-api v0.27.0-alpha.0
+	k8s.io/cri-api v0.27.0-alpha.1
 )
 
 require (
