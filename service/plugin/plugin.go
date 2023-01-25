@@ -32,9 +32,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 )
 
-// This plugin requires containerd newer than 234bf990dca4e81e89f549448aa6b555286eaa7a.
-// If not, use "github.com/containerd/stargz-snapshotter/service/pluginforked" instead.
-
 func init() {
 	plugincore.RegisterPlugin(registerCRIAlphaServer)
 }
