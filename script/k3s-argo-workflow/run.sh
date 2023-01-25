@@ -125,7 +125,8 @@ echo "result to ${RESULT_FILE}"
 wget -O "${ORG_ARGOYAML}" https://raw.githubusercontent.com/argoproj/argo-workflows/v3.4.3/manifests/quick-start-minimal.yaml
 
 git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
-sed -i "s|github.com/k3s-io/stargz-snapshotter.*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
+sed -i "s|github.com/k3s-io/stargz-snapshotter .*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
+echo "replace github.com/containerd/stargz-snapshotter/estargz => $(realpath ${REPO})/estargz" >> "${TMP_K3S_REPO}/go.mod"
 
 # typeurl version stargz-snapshotter indirectly depends on is incompatible to the one github.com/k3s-io/containerd depends on.
 # We use older version of typeurl which the both of the above are compatible to.
