@@ -168,7 +168,7 @@ docker exec "${TEST_NODE_NAME}" systemctl restart stargz-store
 docker exec "${TEST_NODE_NAME}" systemctl restart crio
 CONNECTED=
 for i in $(seq 100) ; do
-    if docker exec "${TEST_NODE_NAME}" /go/bin/crictl stats ; then
+    if docker exec "${TEST_NODE_NAME}" /go/bin/crictl --runtime-endpoint=${CRIO_SOCK} stats ; then
         CONNECTED=true
         break
     fi

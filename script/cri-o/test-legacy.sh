@@ -59,7 +59,7 @@ TEST_NODE_ID=$(docker run --rm -d --privileged \
                       --tmpfs=/var/lib/stargz-store:suid \
                       "${NODE_TEST_IMAGE_NAME}")
 echo "Running node on: ${TEST_NODE_ID}"
-retry docker exec "${TEST_NODE_ID}" /go/bin/crictl stats
+retry docker exec "${TEST_NODE_ID}" /go/bin/crictl --runtime-endpoint=${CRIO_SOCK} stats
 
 # If container started successfully, varidate the runtime through CRI
 FAIL=
