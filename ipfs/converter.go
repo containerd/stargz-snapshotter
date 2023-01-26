@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"os"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/content"
@@ -47,6 +48,9 @@ func PushWithIPFSPath(ctx context.Context, client *containerd.Client, ref string
 		return "", err
 	}
 	var ipath string
+	if idir := os.Getenv("IPFS_PATH"); idir != "" {
+		ipath = idir
+	}
 	if ipfsPath != nil {
 		ipath = *ipfsPath
 	}

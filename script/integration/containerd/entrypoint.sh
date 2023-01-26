@@ -284,6 +284,9 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     # Tests with IPFS if standalone snapshotter
     echo "Testing with IPFS..."
 
+    export IPFS_PATH="/tmp/ipfs"
+    mkdir -p "${IPFS_PATH}"
+
     ipfs init
     ipfs daemon --offline &
     retry curl -X POST localhost:5001/api/v0/version >/dev/null 2>&1 # wait for up
