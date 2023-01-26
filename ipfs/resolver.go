@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"os"
 
 	"github.com/containerd/containerd/remotes"
 	ipfsclient "github.com/containerd/stargz-snapshotter/ipfs/client"
@@ -46,8 +47,15 @@ func NewResolver(options ResolverOptions) (remotes.Resolver, error) {
 	if s != "ipfs" && s != "ipns" {
 		return nil, fmt.Errorf("unsupported scheme %q", s)
 	}
+	var ipath string
+	if idir := os.Getenv("IPFS_PATH"); idir != "" {
+		ipath = idir
+	}
+	if options.IPFSPath != "" {
+		ipath = options.IPFSPath
+	}
 	// HTTP is only supported as of now. We can add https support here if needed (e.g. for connecting to it via proxy, etc)
-	iurl, err := ipfsclient.GetIPFSAPIAddress(options.IPFSPath, "http")
+	iurl, err := ipfsclient.GetIPFSAPIAddress(ipath, "http")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get IPFS URL from ipfs path")
 	}

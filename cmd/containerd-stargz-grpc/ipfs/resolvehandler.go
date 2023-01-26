@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/ipfs"
@@ -35,8 +36,12 @@ func (r *ResolveHandler) Handle(ctx context.Context, desc ocispec.Descriptor) (r
 	if err != nil {
 		return nil, 0, err
 	}
+	var ipath string
+	if idir := os.Getenv("IPFS_PATH"); idir != "" {
+		ipath = idir
+	}
 	// HTTP is only supported as of now. We can add https support here if needed (e.g. for connecting to it via proxy, etc)
-	iurl, err := ipfsclient.GetIPFSAPIAddress("", "http")
+	iurl, err := ipfsclient.GetIPFSAPIAddress(ipath, "http")
 	if err != nil {
 		return nil, 0, err
 	}
