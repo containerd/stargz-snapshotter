@@ -38,8 +38,8 @@ FROM golang:1.19.5-bullseye AS golang-base
 FROM golang-base AS containerd-dev
 ARG CONTAINERD_VERSION
 RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
-    git clone -b ${CONTAINERD_VERSION} --depth 1 \
-              https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
+    git clone -b remotesnapshotterlabels --depth 1 \
+              https://github.com/ktock/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
     make && DESTDIR=/out/ PREFIX= make install
 
