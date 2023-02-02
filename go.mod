@@ -7,7 +7,7 @@ require (
 	github.com/containerd/containerd v1.7.0-beta.2
 	github.com/containerd/continuity v0.3.0
 	github.com/containerd/stargz-snapshotter/estargz v0.14.1
-	github.com/docker/cli v20.10.23+incompatible
+	github.com/docker/cli v23.0.0+incompatible
 	github.com/docker/go-metrics v0.0.1
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/hanwen/go-fuse/v2 v2.1.1-0.20220112183258-f57e95bda82d
