@@ -61,6 +61,17 @@ echo "replace github.com/containerd/stargz-snapshotter/estargz => $(realpath ${R
 # We use older version of typeurl which the both of the above are compatible to.
 # We can remove this directive once k3s upgrades typeurl version to newer than v1.0.3-0.20220324183432-6193a0e03259.
 echo "replace github.com/containerd/typeurl => github.com/containerd/typeurl v1.0.2" >> "${TMP_K3S_REPO}/go.mod"
+
+# Suppress the following import error
+# github.com/k3s-io/k3s/pkg/daemons/executor imports
+# 	k8s.io/kubernetes/cmd/kube-controller-manager/app imports
+# 	k8s.io/kubernetes/pkg/cloudprovider/providers imports
+# 	k8s.io/legacy-cloud-providers/gce imports
+# 	cloud.google.com/go/compute/metadata: ambiguous import: found package cloud.google.com/go/compute/metadata in multiple modules:
+# 	cloud.google.com/go/compute v1.7.0 (/home/ktock/go/pkg/mod/cloud.google.com/go/compute@v1.7.0/metadata)
+# 	cloud.google.com/go/compute/metadata v0.2.0 (/home/ktock/go/pkg/mod/cloud.google.com/go/compute/metadata@v0.2.0)
+echo "require cloud.google.com/go/compute/metadata v0.2.0 // indirect" >> "${TMP_K3S_REPO}/go.mod"
+
 cat "${TMP_K3S_REPO}/go.mod"
 
 sed -i -E 's|(ENV DAPPER_RUN_ARGS .*)|\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
