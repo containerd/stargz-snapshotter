@@ -45,6 +45,7 @@ function retry {
 }
 
 cd "${SS_REPO}"
+git config --global --add safe.directory "${SS_REPO}"
 PREFIX=/out/ make ctr-remote
 mv /out/ctr-remote /bin/ctr-remote
 
