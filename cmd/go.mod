@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/containerd/containerd v1.7.0-beta.2
-	github.com/containerd/go-cni v1.1.7
+	github.com/containerd/go-cni v1.1.8
 	github.com/containerd/stargz-snapshotter v0.14.1
 	github.com/containerd/stargz-snapshotter/estargz v0.14.1
 	github.com/containerd/stargz-snapshotter/ipfs v0.14.1
@@ -43,7 +43,7 @@ require (
 	github.com/containerd/go-runc v1.0.0 // indirect
 	github.com/containerd/ttrpc v1.1.1-0.20220420014843-944ef4a40df3 // indirect
 	github.com/containerd/typeurl v1.0.3-0.20220422153119-7f6e6d160d67 // indirect
-	github.com/containernetworking/cni v1.1.1 // indirect
+	github.com/containernetworking/cni v1.1.2 // indirect
 	github.com/containernetworking/plugins v1.1.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
