@@ -36,10 +36,11 @@ cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM golang:${GOBASE_VERSION}
 RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3
 EOF
+MAKECMD="make ${@} PREFIX=/tmp/out/"
 docker build -t "${IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
 docker run --rm --privileged \
        --device /dev/fuse \
        --tmpfs /tmp:exec,mode=777 \
        -w /go/src/github.com/containerd/stargz-snapshotter \
        -v "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro" \
-       "${IMAGE_NAME}" make ${@} PREFIX=/tmp/out/
+       "${IMAGE_NAME}" /bin/sh -c "git config --global --add safe.directory '/go/src/github.com/containerd/stargz-snapshotter' && ${MAKECMD}"

@@ -42,6 +42,7 @@ function retry {
 
 update-ca-certificates
 
+git config --global --add safe.directory "${SS_REPO}"
 cd "${SS_REPO}"
 PREFIX=/out/ make ctr-remote
 
