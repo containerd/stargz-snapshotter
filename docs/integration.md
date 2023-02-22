@@ -91,6 +91,13 @@ See [`./INSTALL.md`](./INSTALL.md#install-stargz-store-for-cri-opodman-with-syst
 
 ### Docker
 
+#### Moby
+
+Moby supports lazy pulling of eStargz since [`5c1d6c957b97321c8577e10ddbffe6e01981617a`](https://github.com/moby/moby/commit/5c1d6c957b97321c8577e10ddbffe6e01981617a) .
+See [`./INSTALL.md`](./INSTALL.md#install-stargz-snapshotter-for-dockermoby-with-systemd) for details.
+
+#### Docker Desktop
+
 Docker Desktop 4.12.0 "Containerd Image Store (Beta)" uses stargz-snapshotter.
 Refer to [Docker documentation](https://docs.docker.com/desktop/containerd/).
 

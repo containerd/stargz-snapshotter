@@ -119,3 +119,58 @@ We assume that you are using CRI-O newer than https://github.com/cri-o/cri-o/pul
   systemctl enable --now stargz-store
   systemctl restart cri-o # if you are using CRI-O
   ```
+
+## Install Stargz Snapshotter for Docker(Moby) with Systemd
+
+- Docker(Moby) newer than [`5c1d6c957b97321c8577e10ddbffe6e01981617a`](https://github.com/moby/moby/commit/5c1d6c957b97321c8577e10ddbffe6e01981617a) is needed on your host. The commit is expected to be included in Docker v24.
+
+- Download stargz-snapshotter release tarball from [the release page](https://github.com/containerd/stargz-snapshotter/releases).
+
+- Enable `containerd-snapshotter` feature and `stargz` snapshotter in Docker. Add the following to docker's configuration file (typically: /etc/docker/daemon.json).
+  ```json
+  {
+    "features": {
+      "containerd-snapshotter": true
+    },
+    "storage-driver": "stargz"
+  }
+  ```
+
+- Enable stargz snapshotter in containerd. Add the following configuration to containerd's configuration file (typically: /etc/containerd/config.toml).
+  ```toml
+  version = 2
+
+  # Plug stargz snapshotter into containerd
+  [proxy_plugins]
+    [proxy_plugins.stargz]
+      type = "snapshot"
+      address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+  ```
+
+- Install fuse
+
+  ###### centos
+  ```
+  # centos 7
+  yum install fuse
+  # centos 8
+  dnf install fuse
+
+  modprobe fuse
+  ```
+
+  ###### ubuntu
+
+  ```
+  apt-get install fuse
+  modprobe fuse
+  ```
+
+- Start stargz-snapshotter and restart containerd and docker
+  ```
+  tar -C /usr/local/bin -xvf stargz-snapshotter-${version}-linux-${arch}.tar.gz containerd-stargz-grpc ctr-remote
+  wget -O /etc/systemd/system/stargz-snapshotter.service https://raw.githubusercontent.com/containerd/stargz-snapshotter/${version}/script/config/etc/systemd/system/stargz-snapshotter.service
+  systemctl enable --now stargz-snapshotter
+  systemctl restart containerd
+  systemctl restart docker
+  ```
