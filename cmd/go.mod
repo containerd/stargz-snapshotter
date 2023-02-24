@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/containerd/containerd v1.7.0-beta.3
-	github.com/containerd/go-cni v1.1.8
+	github.com/containerd/go-cni v1.1.9
 	github.com/containerd/stargz-snapshotter v0.14.1
 	github.com/containerd/stargz-snapshotter/estargz v0.14.1
 	github.com/containerd/stargz-snapshotter/ipfs v0.14.1
@@ -12,10 +12,10 @@ require (
 	github.com/docker/go-metrics v0.0.1
 	github.com/goccy/go-json v0.10.0
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/klauspost/compress v1.15.15
+	github.com/klauspost/compress v1.16.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.0-rc2.0.20221005185240-3a7f492d3f1b
-	github.com/opencontainers/runtime-spec v1.0.3-0.20220825212826-86290f6a00fb
+	github.com/opencontainers/runtime-spec v1.1.0-rc.1
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.4.0
 	github.com/sirupsen/logrus v1.9.0
@@ -24,7 +24,7 @@ require (
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.5.0
 	google.golang.org/grpc v1.53.0
-	k8s.io/cri-api v0.27.0-alpha.1
+	k8s.io/cri-api v0.27.0-alpha.2
 )
 
 require (
@@ -67,7 +67,7 @@ require (
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
-	github.com/hanwen/go-fuse/v2 v2.1.1-0.20220112183258-f57e95bda82d // indirect
+	github.com/hanwen/go-fuse/v2 v2.2.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.2 // indirect
@@ -113,10 +113,10 @@ require (
 	go.opentelemetry.io/otel/trace v1.11.1 // indirect
 	golang.org/x/crypto v0.1.0 // indirect
 	golang.org/x/mod v0.6.0 // indirect
-	golang.org/x/net v0.5.0 // indirect
+	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/oauth2 v0.4.0 // indirect
-	golang.org/x/term v0.4.0 // indirect
-	golang.org/x/text v0.6.0 // indirect
+	golang.org/x/term v0.5.0 // indirect
+	golang.org/x/text v0.7.0 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	golang.org/x/tools v0.2.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
@@ -125,9 +125,9 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.26.1 // indirect
-	k8s.io/apimachinery v0.26.1 // indirect
-	k8s.io/client-go v0.26.1 // indirect
+	k8s.io/api v0.26.2 // indirect
+	k8s.io/apimachinery v0.26.2 // indirect
+	k8s.io/client-go v0.26.2 // indirect
 	k8s.io/klog/v2 v2.80.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20221012153701-172d655c2280 // indirect
 	k8s.io/utils v0.0.0-20221108210102-8e77b1f39fe2 // indirect
