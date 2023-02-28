@@ -78,8 +78,8 @@ github.com/containerd/continuity v0.3.0 h1:nisirsYROK15TAMVukJOUyGJjz4BNQJBVsNvA
 github.com/containerd/continuity v0.3.0/go.mod h1:wJEAIwKOm/pBZuBd0JmeTvnLquTB1Ag8espWhkykbPM=
 github.com/containerd/fifo v1.0.0 h1:6PirWBr9/L7GDamKr+XM0IeUFXu5mf3M/BPpH9gaLBU=
 github.com/containerd/fifo v1.0.0/go.mod h1:ocF/ME1SX5b1AOlWi9r677YJmCPSwwWnQ9O123vzpE4=
-github.com/containerd/go-cni v1.1.8 h1:/tPhnTpTmu/LPywPEMVqn2nJCZ7VEsuMFwcFLPdF4mY=
-github.com/containerd/go-cni v1.1.8/go.mod h1:fTJBazSSt2KF+XqfQArQICbF/cuHa1w1BYrHKPNkzZU=
+github.com/containerd/go-cni v1.1.9 h1:ORi7P1dYzCwVM6XPN4n3CbkuOx/NZ2DOqy+SHRdo9rU=
+github.com/containerd/go-cni v1.1.9/go.mod h1:XYrZJ1d5W6E2VOvjffL3IZq0Dz6bsVlERHbekNK90PM=
 github.com/containerd/go-runc v1.0.0 h1:oU+lLv1ULm5taqgV/CJivypVODI4SUz1znWjv3nNYS0=
 github.com/containerd/go-runc v1.0.0/go.mod h1:cNU0ZbCgCQVZK4lgG3P+9tn9/PaJNmoDXPpoJhDR+Ok=
 github.com/containerd/ttrpc v1.1.1-0.20220420014843-944ef4a40df3 h1:BhCp66ofL8oYcdelc3CBXc2/Pfvvgx+s+mrp9TvNgn8=
