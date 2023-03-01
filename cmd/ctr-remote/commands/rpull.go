@@ -25,6 +25,7 @@ import (
 	"github.com/containerd/containerd/cmd/ctr/commands/content"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
+	ctdsnapshotters "github.com/containerd/containerd/pkg/snapshotters"
 	"github.com/containerd/containerd/snapshots"
 	fsconfig "github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/source"
@@ -57,6 +58,10 @@ command.
 			Name:  "ipfs",
 			Usage: "Pull image from IPFS. Specify an IPFS CID as a reference. (experimental)",
 		},
+		cli.BoolFlag{
+			Name:  "use-containerd-labels",
+			Usage: "Use labels defined in containerd project",
+		},
 	), commands.SnapshotterFlags...),
 	Action: func(context *cli.Context) error {
 		var (
@@ -84,6 +89,7 @@ command.
 			return err
 		}
 		config.FetchConfig = fc
+		config.containerdLabels = context.Bool("use-containerd-labels")
 
 		if context.Bool(skipContentVerifyOpt) {
 			config.skipVerify = true
@@ -111,6 +117,7 @@ type rPullConfig struct {
 	*content.FetchConfig
 	skipVerify  bool
 	snapshotter string
+	containerdLabels bool
 }
 
 func pull(ctx context.Context, client *containerd.Client, ref string, config *rPullConfig) error {
@@ -130,6 +137,14 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *rP
 		}))
 	}
 
+	var labelHandler func(h images.Handler) images.Handler
+	prefetchSize := int64(10*1024*1024)
+	if config.containerdLabels {
+		labelHandler = source.AppendExtraLabelsHandler(prefetchSize, ctdsnapshotters.AppendInfoHandlerWrapper(ref))
+	} else {
+		labelHandler = source.AppendDefaultLabelsHandlerWrapper(ref, prefetchSize)
+	}
+
 	log.G(pCtx).WithField("image", ref).Debug("fetching")
 	labels := commands.LabelArgs(config.Labels)
 	if _, err := client.Pull(pCtx, ref, []containerd.RemoteOpt{
@@ -139,7 +154,7 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *rP
 		containerd.WithSchema1Conversion,
 		containerd.WithPullUnpack,
 		containerd.WithPullSnapshotter(config.snapshotter, snOpts...),
-		containerd.WithImageHandlerWrapper(source.AppendDefaultLabelsHandlerWrapper(ref, 10*1024*1024)),
+		containerd.WithImageHandlerWrapper(labelHandler),
 	}...); err != nil {
 		return err
 	}

@@ -26,16 +26,32 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+// TODO: switch to "github.com/containerd/containerd/pkg/snapshotters" once all tools using
+//
+//	stargz-snapshotter (e.g. k3s) move to containerd version where that pkg is available.
 const (
-	// targetRefLabel is a label which contains image reference passed from CRI plugin.
+	// targetRefLabel is a label which contains image reference and will be passed
+	// to snapshotters.
 	targetRefLabel = "containerd.io/snapshot/cri.image-ref"
-
-	// targetDigestLabel is a label which contains layer digest passed from CRI plugin.
-	targetDigestLabel = "containerd.io/snapshot/cri.layer-digest"
-
+	// targetLayerDigestLabel is a label which contains layer digest and will be passed
+	// to snapshotters.
+	targetLayerDigestLabel = "containerd.io/snapshot/cri.layer-digest"
 	// targetImageLayersLabel is a label which contains layer digests contained in
-	// the target image and is passed from CRI plugin.
+	// the target image and will be passed to snapshotters for preparing layers in
+	// parallel. Skipping some layers is allowed and only affects performance.
 	targetImageLayersLabel = "containerd.io/snapshot/cri.image-layers"
+)
+
+const (
+	// targetImageURLsLabelPrefix is a label prefix which constructs a map from the layer index to
+	// urls of the layer descriptor. This isn't contained in the set of the labels passed from CRI plugin but
+	// some clients (e.g. nerdctl) passes this for preserving url field in the OCI descriptor.
+	targetImageURLsLabelPrefix = "containerd.io/snapshot/remote/urls."
+
+	// targetURsLLabel is a label which contains layer URL. This is only used to pass URL from containerd
+	// to snapshotter. This isn't contained in the set of the labels passed from CRI plugin but
+	// some clients (e.g. nerdctl) passes this for preserving url field in the OCI descriptor.
+	targetURLsLabel = "containerd.io/snapshot/remote/urls"
 )
 
 func sourceFromCRILabels(hosts source.RegistryHosts) source.GetSources {
@@ -49,7 +65,7 @@ func sourceFromCRILabels(hosts source.RegistryHosts) source.GetSources {
 			return nil, err
 		}
 
-		digestStr, ok := labels[targetDigestLabel]
+		digestStr, ok := labels[targetLayerDigestLabel]
 		if !ok {
 			return nil, fmt.Errorf("digest hasn't been passed")
 		}
@@ -58,30 +74,38 @@ func sourceFromCRILabels(hosts source.RegistryHosts) source.GetSources {
 			return nil, err
 		}
 
-		var layersDgst []digest.Digest
+		var neighboringLayers []ocispec.Descriptor
 		if l, ok := labels[targetImageLayersLabel]; ok {
 			layersStr := strings.Split(l, ",")
-			for _, l := range layersStr {
+			for i, l := range layersStr {
 				d, err := digest.Parse(l)
 				if err != nil {
 					return nil, err
 				}
 				if d.String() != target.String() {
-					layersDgst = append(layersDgst, d)
+					desc := ocispec.Descriptor{Digest: d}
+					if urls, ok := labels[targetImageURLsLabelPrefix+fmt.Sprintf("%d", i)]; ok {
+						desc.URLs = strings.Split(urls, ",")
+					}
+					neighboringLayers = append(neighboringLayers, desc)
 				}
 			}
 		}
 
-		var layers []ocispec.Descriptor
-		for _, dgst := range append([]digest.Digest{target}, layersDgst...) {
-			layers = append(layers, ocispec.Descriptor{Digest: dgst})
+		targetDesc := ocispec.Descriptor{
+			Digest:      target,
+			Annotations: labels,
 		}
+		if targetURLs, ok := labels[targetURLsLabel]; ok {
+			targetDesc.URLs = append(targetDesc.URLs, strings.Split(targetURLs, ",")...)
+		}
+
 		return []source.Source{
 			{
 				Hosts:    hosts,
 				Name:     refspec,
 				Target:   ocispec.Descriptor{Digest: target},
-				Manifest: ocispec.Manifest{Layers: layers},
+				Manifest: ocispec.Manifest{Layers: append([]ocispec.Descriptor{targetDesc}, neighboringLayers...)},
 			},
 		}, nil
 	}
