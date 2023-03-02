@@ -44,6 +44,7 @@ USR_STARGZSN_PLAIN_STARGZ=$(mktemp -d)
 
 USR_NORMALSN_IPFS=$(mktemp -d)
 USR_STARGZSN_IPFS=$(mktemp -d)
+USR_STARGZSN_CTD_IPFS=$(mktemp -d)
 
 LOG_FILE=$(mktemp)
 function cleanup {
@@ -64,6 +65,7 @@ function cleanup {
 
     rm -rf "${USR_NORMALSN_IPFS}" || true
     rm -rf "${USR_STARGZSN_IPFS}" || true
+    rm -rf "${USR_STARGZSN_CTD_IPFS}" || true
     rm "${LOG_FILE}"
     exit "${ORG_EXIT_CODE}"
 }
@@ -291,12 +293,19 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     ipfs daemon --offline &
     retry curl -X POST localhost:5001/api/v0/version >/dev/null 2>&1 # wait for up
 
-    # stargz snapshotter
+    # stargz snapshotter (default labels)
     ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
     CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:22.04")
     reboot_containerd
     run_and_check_remote_snapshots ctr-remote i rpull --ipfs "${CID}"
     copy_out_dir "${CID}" "/usr" "${USR_STARGZSN_IPFS}" "stargz"
+
+    # stargz snapshotter (containerd labels)
+    ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
+    CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:22.04")
+    reboot_containerd
+    run_and_check_remote_snapshots ctr-remote i rpull --containerd-labels --ipfs "${CID}"
+    copy_out_dir "${CID}" "/usr" "${USR_STARGZSN_CTD_IPFS}" "stargz"
 
     # overlayfs snapshotter
     ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
@@ -305,8 +314,11 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     ctr-remote i rpull --snapshotter=overlayfs --ipfs "${CID}"
     copy_out_dir "${CID}" "/usr" "${USR_NORMALSN_IPFS}" "overlayfs"
 
-    echo "Diffing between two root filesystems(normal vs stargz snapshotter, IPFS rootfs)"
+    echo "Diffing between two root filesystems(normal vs stargz snapshotter(default labels), IPFS rootfs)"
     diff --no-dereference -qr "${USR_NORMALSN_IPFS}/" "${USR_STARGZSN_IPFS}/"
+
+    echo "Diffing between two root filesystems(normal vs stargz snapshotter(containerd labels), IPFS rootfs)"
+    diff --no-dereference -qr "${USR_NORMALSN_IPFS}/" "${USR_STARGZSN_CTD_IPFS}/"
 
     kill_all ipfs
 fi
