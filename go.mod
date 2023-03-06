@@ -4,9 +4,9 @@ go 1.19
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/containerd/containerd v1.7.0-rc.0
+	github.com/containerd/containerd v1.7.0-rc.1
 	github.com/containerd/continuity v0.3.0
-	github.com/containerd/stargz-snapshotter/estargz v0.14.1
+	github.com/containerd/stargz-snapshotter/estargz v0.14.2
 	github.com/docker/cli v23.0.1+incompatible
 	github.com/docker/go-metrics v0.0.1
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
@@ -41,7 +41,7 @@ require (
 	github.com/containerd/cgroups v1.1.0 // indirect
 	github.com/containerd/cgroups/v3 v3.0.0 // indirect
 	github.com/containerd/fifo v1.0.0 // indirect
-	github.com/containerd/go-cni v1.1.9-0.20230211172349-6603d5bd8941 // indirect
+	github.com/containerd/go-cni v1.1.9 // indirect
 	github.com/containerd/ttrpc v1.1.1-0.20230127163717-32fab2374638 // indirect
 	github.com/containerd/typeurl/v2 v2.1.0 // indirect
 	github.com/containernetworking/cni v1.1.2 // indirect
