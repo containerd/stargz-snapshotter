@@ -304,7 +304,7 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     ctr-remote i pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
     CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:22.04")
     reboot_containerd
-    run_and_check_remote_snapshots ctr-remote i rpull --containerd-labels --ipfs "${CID}"
+    run_and_check_remote_snapshots ctr-remote i rpull --use-containerd-labels --ipfs "${CID}"
     copy_out_dir "${CID}" "/usr" "${USR_STARGZSN_CTD_IPFS}" "stargz"
 
     # overlayfs snapshotter
