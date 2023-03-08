@@ -104,7 +104,7 @@ func sourceFromCRILabels(hosts source.RegistryHosts) source.GetSources {
 			{
 				Hosts:    hosts,
 				Name:     refspec,
-				Target:   ocispec.Descriptor{Digest: target},
+				Target:   targetDesc,
 				Manifest: ocispec.Manifest{Layers: append([]ocispec.Descriptor{targetDesc}, neighboringLayers...)},
 			},
 		}, nil
