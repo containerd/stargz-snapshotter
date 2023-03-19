@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: K3S
     steps:
-    - uses: actions/setup-go@v3
+    - uses: actions/setup-go@v4
       with:
         go-version: '1.19.x'
     - name: Install k3d
