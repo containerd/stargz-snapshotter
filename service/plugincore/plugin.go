@@ -17,7 +17,6 @@
 package plugincore
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -55,7 +54,7 @@ type Config struct {
 	Registry resolver.Registry `toml:"registry"`
 }
 
-func RegisterPlugin(registerCRIAlphaServer func(ctx context.Context, criAddr string, rpc *grpc.Server) resolver.Credential) {
+func RegisterPlugin() {
 	ctdplugin.Register(&ctdplugin.Registration{
 		Type:   ctdplugin.SnapshotPlugin,
 		ID:     "stargz",
@@ -104,7 +103,6 @@ func RegisterPlugin(registerCRIAlphaServer func(ctx context.Context, criAddr str
 				// Create a gRPC server
 				rpc := grpc.NewServer()
 				runtime.RegisterImageServiceServer(rpc, criServer)
-				criAlphaCreds := registerCRIAlphaServer(ctx, criAddr, rpc)
 				// Prepare the directory for the socket
 				if err := os.MkdirAll(filepath.Dir(addr), 0700); err != nil {
 					return nil, fmt.Errorf("failed to create directory %q: %w", filepath.Dir(addr), err)
@@ -123,7 +121,7 @@ func RegisterPlugin(registerCRIAlphaServer func(ctx context.Context, criAddr str
 						log.G(ctx).WithError(err).Warnf("error on serving via socket %q", addr)
 					}
 				}()
-				credsFuncs = append(credsFuncs, criAlphaCreds, criCreds)
+				credsFuncs = append(credsFuncs, criCreds)
 			}
 
 			// TODO(ktock): print warn if old configuration is specified.

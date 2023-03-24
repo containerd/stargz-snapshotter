@@ -37,7 +37,6 @@ import (
 	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/sys"
-	runtime_alpha "github.com/containerd/containerd/third_party/k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	dbmetadata "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/db"
 	ipfs "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/ipfs"
 	"github.com/containerd/stargz-snapshotter/fs"
@@ -45,7 +44,6 @@ import (
 	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
-	"github.com/containerd/stargz-snapshotter/service/keychain/crialpha"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
 	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
@@ -160,18 +158,9 @@ func main() {
 			}
 			return runtime.NewImageServiceClient(conn), nil
 		}
-		connectAlphaCRI := func() (runtime_alpha.ImageServiceClient, error) {
-			conn, err := newCRIConn(criAddr)
-			if err != nil {
-				return nil, err
-			}
-			return runtime_alpha.NewImageServiceClient(conn), nil
-		}
 		f, criServer := cri.NewCRIKeychain(ctx, connectCRI)
-		fAlpha, criAlphaServer := crialpha.NewCRIAlphaKeychain(ctx, connectAlphaCRI)
 		runtime.RegisterImageServiceServer(rpc, criServer)
-		runtime_alpha.RegisterImageServiceServer(rpc, criAlphaServer)
-		credsFuncs = append(credsFuncs, f, fAlpha)
+		credsFuncs = append(credsFuncs, f)
 	}
 	fsOpts := []fs.Option{fs.WithMetricsLogLevel(logrus.InfoLevel)}
 	if config.IPFS {
