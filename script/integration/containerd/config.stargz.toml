@@ -3,6 +3,7 @@ ipfs = true
 
 [blob]
 check_always = true
+max_retries = 1
 
 [[resolver.host."registry-integration.test".mirrors]]
 host = "registry-alt.test:5000"
