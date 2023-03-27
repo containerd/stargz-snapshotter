@@ -21,8 +21,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"os"
+	"strings"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/content"

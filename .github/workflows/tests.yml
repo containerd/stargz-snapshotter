@@ -28,6 +28,10 @@ jobs:
   linter:
     runs-on: ubuntu-22.04
     name: Linter
+    strategy:
+      fail-fast: false
+      matrix:
+        targetdir: [".", "./estargz", "./cmd", "./ipfs"]
     steps:
     - uses: actions/checkout@v3
       with:
@@ -40,6 +44,7 @@ jobs:
       with:
         version: v1.49.0
         args: --verbose
+        working-directory: ${{ matrix.targetdir }}
 
   integration:
     runs-on: ubuntu-22.04

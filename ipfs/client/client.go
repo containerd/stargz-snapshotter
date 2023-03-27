@@ -50,9 +50,9 @@ func New(ipfsAPIAddress string) *Client {
 // Please see details at: https://docs.ipfs.tech/reference/kubo/rpc/#api-v0-files-stat
 type FileInfo struct {
 	Blocks         int    `json:"Blocks"`
-	CumulativeSize uint64 `json:"CumulativeSize": "<uint64>"`
-	Hash           string `json:"Hash": "<string>"`
-	Local          bool   `json:"Local": "<bool>"`
+	CumulativeSize uint64 `json:"CumulativeSize"`
+	Hash           string `json:"Hash"`
+	Local          bool   `json:"Local"`
 	Size           uint64 `json:"Size"`
 	SizeLocal      uint64 `json:"SizeLocal"`
 	Type           string `json:"Type"`
