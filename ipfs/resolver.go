@@ -21,8 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path"
 	"os"
+	"path"
 
 	"github.com/containerd/containerd/remotes"
 	ipfsclient "github.com/containerd/stargz-snapshotter/ipfs/client"

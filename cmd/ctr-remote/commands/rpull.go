@@ -115,8 +115,8 @@ command.
 
 type rPullConfig struct {
 	*content.FetchConfig
-	skipVerify  bool
-	snapshotter string
+	skipVerify       bool
+	snapshotter      string
 	containerdLabels bool
 }
 
@@ -138,7 +138,7 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *rP
 	}
 
 	var labelHandler func(h images.Handler) images.Handler
-	prefetchSize := int64(10*1024*1024)
+	prefetchSize := int64(10 * 1024 * 1024)
 	if config.containerdLabels {
 		labelHandler = source.AppendExtraLabelsHandler(prefetchSize, ctdsnapshotters.AppendInfoHandlerWrapper(ref))
 	} else {
@@ -151,7 +151,6 @@ func pull(ctx context.Context, client *containerd.Client, ref string, config *rP
 		containerd.WithPullLabels(labels),
 		containerd.WithResolver(config.Resolver),
 		containerd.WithImageHandler(h),
-		containerd.WithSchema1Conversion,
 		containerd.WithPullUnpack,
 		containerd.WithPullSnapshotter(config.snapshotter, snOpts...),
 		containerd.WithImageHandlerWrapper(labelHandler),
