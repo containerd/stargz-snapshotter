@@ -66,14 +66,14 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.Regist
 		}) {
 			client := rhttp.NewClient()
 			client.Logger = nil // disable logging every request
-			tr := client.StandardClient()
 			if h.RequestTimeoutSec >= 0 {
 				if h.RequestTimeoutSec == 0 {
-					tr.Timeout = defaultRequestTimeoutSec * time.Second
+					client.HTTPClient.Timeout = defaultRequestTimeoutSec * time.Second
 				} else {
-					tr.Timeout = time.Duration(h.RequestTimeoutSec) * time.Second
+					client.HTTPClient.Timeout = time.Duration(h.RequestTimeoutSec) * time.Second
 				}
 			} // h.RequestTimeoutSec < 0 means "no timeout"
+			tr := client.StandardClient()
 			var header http.Header
 			var err error
 			if h.Header != nil {
