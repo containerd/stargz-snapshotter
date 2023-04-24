@@ -157,7 +157,8 @@ jobs:
       run: make test-cri-containerd
 
   test-cri-cri-o:
-    runs-on: ubuntu-18.04
+    runs-on: macos-12
+    timeout-minutes: 40
     name: CRIValidationCRIO
     strategy:
       fail-fast: false
@@ -165,11 +166,19 @@ jobs:
         metadata-store: ["memory", "db"]
     steps:
     - uses: actions/checkout@v3
-    - name: Validate CRI-O through CRI
+    - name: Start vagrant
+      env:
+        VAGRANT_EXPERIMENTAL: "disks"
+      run: vagrant up
+    - name: Setup environment
       env:
         DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
         METADATA_STORE: ${{ matrix.metadata-store }}
-      run: make test-cri-o
+      run: |
+        vagrant ssh default -c "echo export DOCKER_BUILD_ARGS=$DOCKER_BUILD_ARGS >> ~/.runenv"
+        vagrant ssh default -c "echo export METADATA_STORE=$METADATA_STORE >> ~/.runenv"
+    - name: Validate CRI-O through CRI
+      run: vagrant ssh default -c "source ~/.runenv && cd /vagrant && make test-cri-o"
 
   test-podman:
     runs-on: ubuntu-22.04
