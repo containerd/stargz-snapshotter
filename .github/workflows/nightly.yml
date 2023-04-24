@@ -69,14 +69,21 @@ jobs:
       run: make test-cri-containerd
 
   test-cri-o:
-    runs-on: ubuntu-18.04
+    runs-on: macos-12
+    timeout-minutes: 40
     name: CRIValidationCRIO
     steps:
     - uses: actions/checkout@v3
-    - name: Varidate the runtime through CRI with CRI-O
+    - name: Start vagrant
+      env:
+        VAGRANT_EXPERIMENTAL: "disks"
+      run: vagrant up
+    - name: Setup environment
       env:
         DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
-      run: make test-cri-o
+      run: vagrant ssh default -c "echo export DOCKER_BUILD_ARGS=$DOCKER_BUILD_ARGS >> ~/.runenv"
+    - name: Validate CRI-O through CRI
+      run: vagrant ssh default -c "source ~/.runenv && cd /vagrant && make test-cri-o"
 
   test-k3s:
     runs-on: ubuntu-22.04
