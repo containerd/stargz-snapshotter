@@ -157,13 +157,18 @@ jobs:
       run: make test-cri-containerd
 
   test-cri-cri-o:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     name: CRIValidationCRIO
     strategy:
       fail-fast: false
       matrix:
         metadata-store: ["memory", "db"]
     steps:
+    - name: Install the latest docker
+      run: |
+        sudo apt-get remove moby-cli moby-engine
+        wget -O get-docker.sh https://get.docker.com
+        sh get-docker.sh
     - uses: actions/checkout@v3
     - name: Validate CRI-O through CRI
       env:
