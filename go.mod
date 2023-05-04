@@ -21,7 +21,7 @@ require (
 	github.com/prometheus/client_golang v1.15.0
 	github.com/rs/xid v1.5.0
 	github.com/sirupsen/logrus v1.9.0
-	golang.org/x/sync v0.1.0
+	golang.org/x/sync v0.2.0
 	golang.org/x/sys v0.7.0
 	google.golang.org/grpc v1.54.0
 	google.golang.org/protobuf v1.30.0
