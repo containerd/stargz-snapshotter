@@ -122,3 +122,10 @@ test-k3s-argo-workflow:
 
 test-ipfs:
 	@./script/ipfs/test.sh
+
+validate-vendor:
+	$(eval TMPDIR := $(shell mktemp -d))
+	@cp -R $(CURDIR) ${TMPDIR}
+	@(cd ${TMPDIR}/stargz-snapshotter && make vendor)
+	@diff -r -u -q $(CURDIR) ${TMPDIR}/stargz-snapshotter
+	@rm -rf ${TMPDIR}
