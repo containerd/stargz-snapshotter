@@ -256,7 +256,7 @@ jobs:
   project:
     name: Project Checks
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/setup-go@v4
         with:
@@ -272,4 +272,6 @@ jobs:
         run: make validate-generated
         working-directory: src/github.com/containerd/stargz-snapshotter
       - run: ./script/util/verify-no-patent.sh
+        working-directory: src/github.com/containerd/stargz-snapshotter
+      - run: make validate-vendor
         working-directory: src/github.com/containerd/stargz-snapshotter
