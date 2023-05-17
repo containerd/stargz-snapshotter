@@ -5,9 +5,9 @@ go 1.19
 require (
 	github.com/containerd/containerd v1.7.1
 	github.com/containerd/go-cni v1.1.9
-	github.com/containerd/stargz-snapshotter v0.14.3
+	github.com/containerd/stargz-snapshotter v0.0.0-00010101000000-000000000000
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3
-	github.com/containerd/stargz-snapshotter/ipfs v0.14.3
+	github.com/containerd/stargz-snapshotter/ipfs v0.0.0-00010101000000-000000000000
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/go-metrics v0.0.1
 	github.com/goccy/go-json v0.10.2
