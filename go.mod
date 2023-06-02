@@ -7,12 +7,12 @@ require (
 	github.com/containerd/containerd v1.7.2
 	github.com/containerd/continuity v0.4.1
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3
-	github.com/docker/cli v24.0.0+incompatible
+	github.com/docker/cli v24.0.2+incompatible
 	github.com/docker/go-metrics v0.0.1
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/hanwen/go-fuse/v2 v2.3.0
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/hashicorp/go-retryablehttp v0.7.2
+	github.com/hashicorp/go-retryablehttp v0.7.4
 	github.com/klauspost/compress v1.16.5
 	github.com/moby/sys/mountinfo v0.6.2
 	github.com/opencontainers/go-digest v1.0.0
@@ -20,14 +20,14 @@ require (
 	github.com/opencontainers/runtime-spec v1.1.0-rc.2
 	github.com/prometheus/client_golang v1.15.1
 	github.com/rs/xid v1.5.0
-	github.com/sirupsen/logrus v1.9.2
+	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/sync v0.2.0
 	golang.org/x/sys v0.8.0
 	google.golang.org/grpc v1.55.0
 	k8s.io/api v0.27.2
 	k8s.io/apimachinery v0.27.2
 	k8s.io/client-go v0.27.2
-	k8s.io/cri-api v0.28.0-alpha.0
+	k8s.io/cri-api v0.28.0-alpha.1
 )
 
 require (
@@ -93,10 +93,10 @@ require (
 	go.opentelemetry.io/otel v1.14.0 // indirect
 	go.opentelemetry.io/otel/trace v1.14.0 // indirect
 	golang.org/x/mod v0.9.0 // indirect
-	golang.org/x/net v0.8.0 // indirect
+	golang.org/x/net v0.9.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
-	golang.org/x/term v0.6.0 // indirect
-	golang.org/x/text v0.8.0 // indirect
+	golang.org/x/term v0.7.0 // indirect
+	golang.org/x/text v0.9.0 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	golang.org/x/tools v0.7.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
