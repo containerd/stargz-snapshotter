@@ -24,3 +24,9 @@ run:
     - images
     - out
     - script
+
+issues:
+  exclude-rules:
+    - linters:
+        - revive
+      text: "unused-parameter"
