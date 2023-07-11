@@ -412,9 +412,8 @@ func TestSort(t *testing.T) {
 							if err != nil {
 								if err == io.EOF {
 									break
-								} else {
-									t.Fatalf("Failed to parse tar file: %v", err)
 								}
+								t.Fatalf("Failed to parse tar file: %v", err)
 							}
 
 							if !reflect.DeepEqual(gotH, wantH) {
