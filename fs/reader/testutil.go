@@ -304,10 +304,8 @@ func testCacheVerify(t *testing.T, factory metadata.Store) {
 						if err != nil {
 							t.Fatalf("failed to make new reader: %v", err)
 						}
-						if verifier != nil {
-							vr.verifier = verifier.verifier
-							vr.r.verifier = verifier.verifier
-						}
+						vr.verifier = verifier.verifier
+						vr.r.verifier = verifier.verifier
 
 						off2id, id2path, err := prepareMap(vr.Metadata(), vr.Metadata().RootID(), "")
 						if err != nil || off2id == nil || id2path == nil {
