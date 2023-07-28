@@ -316,8 +316,9 @@ func (o *snapshotter) commit(ctx context.Context, isRemote bool, name, key strin
 		return err
 	}
 
+	rollback := true
 	defer func() {
-		if err != nil {
+		if rollback {
 			if rerr := t.Rollback(); rerr != nil {
 				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
 			}
@@ -342,6 +343,7 @@ func (o *snapshotter) commit(ctx context.Context, isRemote bool, name, key strin
 		return fmt.Errorf("failed to commit snapshot: %w", err)
 	}
 
+	rollback = false
 	return t.Commit()
 }
 
