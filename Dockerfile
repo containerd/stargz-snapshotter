@@ -32,7 +32,7 @@ ARG CRI_TOOLS_VERSION=v1.27.0
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
-FROM golang:1.20.6-bullseye AS golang-base
+FROM golang:1.20.7-bullseye AS golang-base
 
 # Build containerd
 FROM golang-base AS containerd-dev
