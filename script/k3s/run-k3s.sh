@@ -18,7 +18,7 @@ set -euo pipefail
 
 K3S_VERSION=master
 K3S_REPO=https://github.com/k3s-io/k3s
-K3S_CONTAINERD_REPO=https://github.com/k3s-io/containerd
+K3S_CONTAINERD_REPO=https://github.com/pdtpartners/containerd
 
 REGISTRY_HOST=k3s-private-registry
 K3S_NODE_REPO=ghcr.io/stargz-containers
@@ -55,6 +55,8 @@ trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 echo "Preparing node image..."
 git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
 sed -i "s|github.com/k3s-io/stargz-snapshotter .*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
+sed -i "s|github.com/k3s-io/containerd v1.7.3-k3s1|github.com/pdtpartners/containerd v1.7.2-stargz|g" "${TMP_K3S_REPO}/go.mod"
+
 echo "replace github.com/containerd/stargz-snapshotter/estargz => $(realpath ${REPO})/estargz" >> "${TMP_K3S_REPO}/go.mod"
 
 # typeurl version stargz-snapshotter indirectly depends on is incompatible to the one github.com/k3s-io/containerd depends on.
@@ -66,6 +68,8 @@ cat "${TMP_K3S_REPO}/go.mod"
 
 sed -i -E 's|(ENV DAPPER_RUN_ARGS .*)|\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 sed -i -E 's|(ENV DAPPER_ENV .*)|\1 DOCKER_BUILDKIT|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
+sed -i -E 's|github.com/k3s-io/containerd|github.com/pdtpartners/containerd|g' "${TMP_K3S_REPO}/scripts/download"
+
 (
     cd "${TMP_K3S_REPO}" && \
         git config user.email "dummy@example.com" && \

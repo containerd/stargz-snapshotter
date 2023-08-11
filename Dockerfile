@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-ARG CONTAINERD_VERSION=v1.7.2
+ARG CONTAINERD_VERSION=v1.7.2-stargz
 ARG RUNC_VERSION=v1.1.7
 ARG CNI_PLUGINS_VERSION=v1.3.0
 ARG NERDCTL_VERSION=1.4.0
@@ -32,14 +32,14 @@ ARG CRI_TOOLS_VERSION=v1.27.0
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
-FROM golang:1.20.6-bullseye AS golang-base
+FROM golang:1.20.7-bullseye AS golang-base
 
 # Build containerd
 FROM golang-base AS containerd-dev
 ARG CONTAINERD_VERSION
 RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     git clone -b ${CONTAINERD_VERSION} --depth 1 \
-              https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
+              https://github.com/pdtpartners/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
     make && DESTDIR=/out/ PREFIX= make install
 
@@ -49,7 +49,7 @@ ARG CONTAINERD_VERSION
 COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
 RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     git clone -b ${CONTAINERD_VERSION} --depth 1 \
-      https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
+      https://github.com/pdtpartners/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
     echo 'require github.com/containerd/stargz-snapshotter v0.0.0' >> go.mod && \
     echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> go.mod && \

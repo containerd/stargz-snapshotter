@@ -218,7 +218,7 @@ func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Inte
 }
 
 func (kc *keychain) runWorker() {
-	for kc.processNextItem() {
+	for kc.processNextItem() { //nolint:all
 		// continue looping
 	}
 }

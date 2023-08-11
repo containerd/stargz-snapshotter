@@ -2,7 +2,7 @@ name: Tests
 on:
   push:
     branches:
-      - main
+      - v1.7.2-stargz
   pull_request:
 
 env:
@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=v1.7.2-stargz"] # released version & v1.7.2-stargz version
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         exclude:
@@ -61,7 +61,7 @@ jobs:
         - metadata-store: "db"
           builtin: "true"
         - metadata-store: "db"
-          buildargs: "--build-arg=CONTAINERD_VERSION=main"
+          buildargs: "--build-arg=CONTAINERD_VERSION=v1.7.2-stargz"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -79,7 +79,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=v1.7.2-stargz"] # released version & v1.7.2-stargz version
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -95,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=v1.7.2-stargz"] # released version & v1.7.2-stargz version
         builtin: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -116,7 +116,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=v1.7.2-stargz"] # released version & v1.7.2-stargz version
         builtin: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -137,7 +137,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=v1.7.2-stargz"] # released version & v1.7.2-stargz version
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         exclude:
@@ -146,7 +146,7 @@ jobs:
         - metadata-store: "db"
           builtin: "true"
         - metadata-store: "db"
-          buildargs: "--build-arg=CONTAINERD_VERSION=main"
+          buildargs: "--build-arg=CONTAINERD_VERSION=v1.7.2-stargz"
     steps:
     - uses: actions/checkout@v3
     - name: Validate containerd through CRI
