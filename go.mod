@@ -4,8 +4,8 @@ go 1.19
 
 require (
 	github.com/containerd/console v1.0.3
-	github.com/containerd/containerd v1.7.3
-	github.com/containerd/continuity v0.4.1
+	github.com/containerd/containerd v1.7.4
+	github.com/containerd/continuity v0.4.2-0.20230616210509-1e0d26eb2381
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3
 	github.com/docker/cli v24.0.5+incompatible
 	github.com/docker/go-metrics v0.0.1
@@ -31,8 +31,8 @@ require (
 )
 
 require (
-	github.com/AdaLogics/go-fuzz-headers v0.0.0-20230106234847-43070de90fa1 // indirect
-	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20221215162035-5330a85ea652 // indirect
+	github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24 // indirect
+	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/Microsoft/hcsshim v0.10.0-rc.8 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -45,7 +45,6 @@ require (
 	github.com/containerd/typeurl/v2 v2.1.1 // indirect
 	github.com/containernetworking/cni v1.1.2 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
-	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/docker v23.0.3+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
