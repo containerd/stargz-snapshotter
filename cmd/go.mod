@@ -145,3 +145,5 @@ replace (
 	github.com/containerd/stargz-snapshotter/estargz => ../estargz
 	github.com/containerd/stargz-snapshotter/ipfs => ../ipfs
 )
+
+replace github.com/containerd/containerd => github.com/pdtpartners/containerd v1.7.2-stargz
