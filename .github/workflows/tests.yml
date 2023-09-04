@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: Build
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Build all
       run: ./script/util/make.sh build -j2
 
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: Test
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Test all
       run: ./script/util/make.sh test-all -j2
 
@@ -33,7 +33,7 @@ jobs:
       matrix:
         targetdir: [".", "./estargz", "./cmd", "./ipfs"]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         fetch-depth: '0'
     - uses: actions/setup-go@v4
@@ -65,7 +65,7 @@ jobs:
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Run integration test
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
@@ -83,7 +83,7 @@ jobs:
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Run test for optimize subcommand of ctr-remote
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
@@ -103,7 +103,7 @@ jobs:
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Run test for pulling image from private registry on Kubernetes
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
@@ -124,7 +124,7 @@ jobs:
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Run test for pulling image from private registry on Kubernetes with CRI keychain mode
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
@@ -148,7 +148,7 @@ jobs:
         - metadata-store: "db"
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Validate containerd through CRI
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
@@ -169,7 +169,7 @@ jobs:
         sudo apt-get remove moby-cli moby-engine
         wget -O get-docker.sh https://get.docker.com
         sh get-docker.sh
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Validate CRI-O through CRI
       env:
         DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
@@ -180,7 +180,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: PodmanRootless
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Test Podman (rootless)
       run: make test-podman
 
@@ -200,7 +200,7 @@ jobs:
       run: |
         sudo wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.9.3/yq_linux_amd64
         sudo chmod +x /usr/local/bin/yq
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Run test with k3s
       run: make test-k3s
 
@@ -208,7 +208,7 @@ jobs:
     runs-on: ubuntu-22.04
     name: IPFS
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Run test
       run: make test-ipfs
 
@@ -230,7 +230,7 @@ jobs:
         gunzip argo-linux-amd64.gz
         sudo mv argo-linux-amd64 /usr/local/bin/argo
         sudo chmod +x /usr/local/bin/argo
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Prepare directories
       run: mkdir "${RESULT_DIR}"
     - name: Get instance information
@@ -261,7 +261,7 @@ jobs:
       - uses: actions/setup-go@v4
         with:
           go-version: '1.19.x'
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           path: src/github.com/containerd/stargz-snapshotter
           fetch-depth: 25

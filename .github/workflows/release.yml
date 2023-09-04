@@ -17,7 +17,7 @@ jobs:
     env:
       OUTPUT_DIR: ${{ github.workspace }}/out
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Build Binary
       env:
         DOCKER_BUILDKIT: 1
@@ -46,7 +46,7 @@ jobs:
     env:
       OUTPUT_DIR: ${{ github.workspace }}/builds
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Download Builds
       uses: actions/download-artifact@v3
       with:
