@@ -31,7 +31,7 @@ jobs:
       run: |
           sudo apt-get update && sudo apt-get --no-install-recommends install -y gnuplot
           pip install numpy
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Prepare directories
       run: mkdir "${BENCHMARK_RESULT_DIR}" "${BENCHMARK_LOG_DIR}"
     - name: Get instance information
