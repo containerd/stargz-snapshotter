@@ -51,12 +51,16 @@ import (
 
 const (
 	blockSize         = 4096
-	whiteoutPrefix    = ".wh."
-	whiteoutOpaqueDir = whiteoutPrefix + whiteoutPrefix + ".opq"
-	opaqueXattrValue  = "y"
-	stateDirName      = ".stargz-snapshotter"
-	statFileMode      = syscall.S_IFREG | 0400 // -r--------
-	stateDirMode      = syscall.S_IFDIR | 0500 // dr-x------
+	physicalBlockSize = 512
+	// physicalBlockRatio is the ratio of blockSize to physicalBlockSize.
+	// It can be used to convert from # blockSize-byte blocks to # physicalBlockSize-byte blocks
+	physicalBlockRatio = blockSize / physicalBlockSize
+	whiteoutPrefix     = ".wh."
+	whiteoutOpaqueDir  = whiteoutPrefix + whiteoutPrefix + ".opq"
+	opaqueXattrValue   = "y"
+	stateDirName       = ".stargz-snapshotter"
+	statFileMode       = syscall.S_IFREG | 0400 // -r--------
+	stateDirMode       = syscall.S_IFDIR | 0500 // dr-x------
 )
 
 type OverlayOpaqueType int
@@ -652,10 +656,7 @@ func entryToAttr(ino uint64, e metadata.Attr, out *fuse.Attr) fusefs.StableAttr 
 		out.Size = uint64(len(e.LinkName))
 	}
 	out.Blksize = blockSize
-	out.Blocks = out.Size / uint64(out.Blksize)
-	if out.Size%uint64(out.Blksize) > 0 {
-		out.Blocks++
-	}
+	out.Blocks = (out.Size + uint64(out.Blksize) - 1) / uint64(out.Blksize) * physicalBlockRatio
 	mtime := e.ModTime
 	out.SetTimes(nil, &mtime, nil)
 	out.Mode = fileModeToSystemMode(e.Mode)
@@ -732,7 +733,7 @@ func (fs *fs) statFileToAttr(size uint64, out *fuse.Attr) fusefs.StableAttr {
 	out.Ino = fs.inodeOfStatFile()
 	out.Size = size
 	out.Blksize = blockSize
-	out.Blocks = out.Size / uint64(out.Blksize)
+	out.Blocks = (out.Size + uint64(out.Blksize) - 1) / uint64(out.Blksize) * physicalBlockRatio
 	out.Nlink = 1
 
 	// Root can read it ("-r-------- root root").
