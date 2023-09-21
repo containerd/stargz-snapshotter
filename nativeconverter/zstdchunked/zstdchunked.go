@@ -221,8 +221,8 @@ func convertMediaTypeToZstd(mt string) (string, error) {
 	switch ociMediaType {
 	case ocispec.MediaTypeImageLayer, ocispec.MediaTypeImageLayerGzip, ocispec.MediaTypeImageLayerZstd:
 		return ocispec.MediaTypeImageLayerZstd, nil
-	case ocispec.MediaTypeImageLayerNonDistributable, ocispec.MediaTypeImageLayerNonDistributableGzip, ocispec.MediaTypeImageLayerNonDistributableZstd:
-		return ocispec.MediaTypeImageLayerNonDistributableZstd, nil
+	case ocispec.MediaTypeImageLayerNonDistributable, ocispec.MediaTypeImageLayerNonDistributableGzip, ocispec.MediaTypeImageLayerNonDistributableZstd: //nolint:staticcheck // deprecated
+		return ocispec.MediaTypeImageLayerNonDistributableZstd, nil //nolint:staticcheck // deprecated
 	default:
 		return "", fmt.Errorf("unknown mediatype %q", mt)
 	}
