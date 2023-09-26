@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	dcfile "github.com/docker/cli/cli/config/configfile"
 	corev1 "k8s.io/api/core/v1"

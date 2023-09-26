@@ -25,10 +25,10 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/defaults"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/platforms"
 	ctdplugin "github.com/containerd/containerd/plugin"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"

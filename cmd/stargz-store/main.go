@@ -29,7 +29,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/containerd/containerd/log"
+	"github.com/containerd/log"
 	dbmetadata "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/db"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/metadata"
@@ -93,7 +93,7 @@ func main() {
 		config Config
 	)
 	// Streams log of standard lib (go-fuse uses this) into debug log
-	// Snapshotter should use "github.com/containerd/containerd/log" otherwise
+	// Snapshotter should use "github.com/containerd/log" otherwise
 	// logs are always printed as "debug" mode.
 	golog.SetOutput(log.G(ctx).WriterLevel(logrus.DebugLevel))
 

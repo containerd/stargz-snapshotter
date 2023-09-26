@@ -29,8 +29,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
