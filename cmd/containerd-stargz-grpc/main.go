@@ -33,10 +33,10 @@ import (
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"
 	"github.com/containerd/containerd/defaults"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/sys"
+	"github.com/containerd/log"
 	dbmetadata "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/db"
 	ipfs "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/ipfs"
 	"github.com/containerd/stargz-snapshotter/fs"
@@ -116,7 +116,7 @@ func main() {
 		config snapshotterConfig
 	)
 	// Streams log of standard lib (go-fuse uses this) into debug log
-	// Snapshotter should use "github.com/containerd/containerd/log" otherwize
+	// Snapshotter should use "github.com/containerd/log" otherwize
 	// logs are always printed as "debug" mode.
 	golog.SetOutput(log.G(ctx).WriterLevel(logrus.DebugLevel))
 

@@ -6,6 +6,7 @@ require (
 	github.com/containerd/console v1.0.3
 	github.com/containerd/containerd v1.7.6
 	github.com/containerd/continuity v0.4.2
+	github.com/containerd/log v0.1.0
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3
 	github.com/docker/cli v24.0.5+incompatible
 	github.com/docker/go-metrics v0.0.1

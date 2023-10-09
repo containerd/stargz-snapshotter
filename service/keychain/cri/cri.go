@@ -23,9 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
 	distribution "github.com/containerd/containerd/reference/docker"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )

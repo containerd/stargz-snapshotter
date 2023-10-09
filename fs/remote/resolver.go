@@ -38,9 +38,9 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"

@@ -20,10 +20,10 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
+	"github.com/containerd/log"
 	stargzfs "github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	"github.com/containerd/stargz-snapshotter/fs/source"
