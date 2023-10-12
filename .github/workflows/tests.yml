@@ -230,6 +230,11 @@ jobs:
         gunzip argo-linux-amd64.gz
         sudo mv argo-linux-amd64 /usr/local/bin/argo
         sudo chmod +x /usr/local/bin/argo
+    - name: Workaround for freeing up more disk space
+      # https://github.com/actions/runner-images/issues/2606
+      run: |
+        sudo rm -rf /usr/local/lib/android # will release about 10 GB if you don't need Android
+        sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
     - uses: actions/checkout@v4
     - name: Prepare directories
       run: mkdir "${RESULT_DIR}"
