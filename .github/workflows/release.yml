@@ -57,15 +57,11 @@ jobs:
       run: |
         RELEASE_TAG="${GITHUB_REF##*/}"
         cat <<EOF > ${GITHUB_WORKSPACE}/release-note.txt
-        ${RELEASE_TAG}
-
         (TBD)
         EOF
-        ASSET_FLAGS=()
+        ASSET_ARGS=()
         ls -al ${OUTPUT_DIR}/
         for A in "amd64" "arm-v7" "arm64" "ppc64le" "s390x" ; do
-          for F in ${OUTPUT_DIR}/builds-${A}/* ; do
-            ASSET_FLAGS+=("-a" "$F")
-          done
+          ASSET_ARGS+=("${OUTPUT_DIR}/builds-${A}/*")
         done
-        hub release create "${ASSET_FLAGS[@]}" -F ${GITHUB_WORKSPACE}/release-note.txt --draft "${RELEASE_TAG}"
+        gh release create -F ${GITHUB_WORKSPACE}/release-note.txt --draft --title "${RELEASE_TAG}" "${RELEASE_TAG}" "${ASSET_ARGS[@]}"
