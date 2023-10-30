@@ -58,8 +58,8 @@ jobs:
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         exclude:
-        - buildargs: ""
-          builtin: "true"
+        # - buildargs: ""
+        #   builtin: "true"
         - metadata-store: "db"
           builtin: "true"
         # - metadata-store: "db"
@@ -103,9 +103,9 @@ jobs:
         # buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         buildargs: [""]
         builtin: ["true", "false"]
-        exclude:
-        - buildargs: ""
-          builtin: "true"
+        # exclude:
+        # - buildargs: ""
+        #   builtin: "true"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -126,9 +126,9 @@ jobs:
         # buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         buildargs: [""]
         builtin: ["true", "false"]
-        exclude:
-        - buildargs: ""
-          builtin: "true"
+        # exclude:
+        # - buildargs: ""
+        #   builtin: "true"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -151,8 +151,8 @@ jobs:
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         exclude:
-        - buildargs: ""
-          builtin: "true"
+        # - buildargs: ""
+        #   builtin: "true"
         - metadata-store: "db"
           builtin: "true"
         # - metadata-store: "db"

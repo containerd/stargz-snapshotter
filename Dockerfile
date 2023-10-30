@@ -63,6 +63,16 @@ RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
       echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> integration/client/go.mod && \
       echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> integration/client/go.mod ; \
     fi && \
+    if [ "$(echo -n ${CONTAINERD_VERSION} | head -c 4)" = "v1.7" ] ; then \
+      # containerd v1.7 doesn't support cri-api >= v0.28 which adds RuntimeConfig API
+      echo 'replace k8s.io/cri-api => k8s.io/cri-api v0.27.1' >> go.mod ; \
+      if [ -f api/go.mod ] ; then \
+        echo 'replace k8s.io/cri-api => k8s.io/cri-api v0.27.1' >> api/go.mod ; \
+      fi ; \
+      if [ -f integration/client/go.mod ] ; then \
+        echo 'replace k8s.io/cri-api => k8s.io/cri-api v0.27.1' >> integration/client/go.mod ; \
+      fi ; \
+    fi && \
     echo 'package main \nimport _ "github.com/containerd/stargz-snapshotter/service/plugin"' > cmd/containerd/builtins_stargz_snapshotter.go && \
     make vendor && make && DESTDIR=/out/ PREFIX= make install
 
