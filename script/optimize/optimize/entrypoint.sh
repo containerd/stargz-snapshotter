@@ -205,7 +205,9 @@ echo "Checking optimized image..."
 WORKING_DIR=$(mktemp -d)
 git config --global --add safe.directory '/go/src/github.com/containerd/stargz-snapshotter'
 PREFIX=/tmp/out/ make clean
-PREFIX=/tmp/out/ GO_BUILD_FLAGS="-race" make ctr-remote # Check data race
+# temporary disable -race flag to run test with statically built binaries
+# PREFIX=/tmp/out/ GO_BUILD_FLAGS="-race" make ctr-remote # Check data race
+PREFIX=/tmp/out/ make ctr-remote
 /tmp/out/ctr-remote ${OPTIMIZE_COMMAND} -entrypoint='[ "/accessor" ]' "${ORG_IMAGE_TAG}" "${OPT_IMAGE_TAG}"
 nerdctl push "${OPT_IMAGE_TAG}" || true
 cat <<EOF > "${WORKING_DIR}/0-want"
