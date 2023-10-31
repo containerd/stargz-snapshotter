@@ -29,6 +29,8 @@ jobs:
         if [ "${ARCH_ID}" == "arm-v7" ] ; then
           BUILD_ARGS="--build-arg=TARGETARCH=arm --build-arg=GOARM=7"
         fi
+        # make binaries static
+        BUILD_ARGS="$BUILD_ARGS --build-arg=CGO_ENABLED=0"
         TAR_FILE_NAME="stargz-snapshotter-${RELEASE_TAG}-linux-${ARCH_ID}.tar.gz"
         SHA256SUM_FILE_NAME="${TAR_FILE_NAME}.sha256sum"
         docker build ${BUILD_ARGS} --target release-binaries -o - . | gzip > "${OUTPUT_DIR}/${TAR_FILE_NAME}"
