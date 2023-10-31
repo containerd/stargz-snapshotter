@@ -66,4 +66,4 @@ jobs:
         for A in "amd64" "arm-v7" "arm64" "ppc64le" "s390x" ; do
           ASSET_ARGS+=("${OUTPUT_DIR}/builds-${A}/*")
         done
-        gh release create -F ${GITHUB_WORKSPACE}/release-note.txt --draft --title "${RELEASE_TAG}" "${RELEASE_TAG}" "${ASSET_ARGS[@]}"
+        gh release create -F ${GITHUB_WORKSPACE}/release-note.txt --draft --title "${RELEASE_TAG}" "${RELEASE_TAG}" ${ASSET_ARGS[@]}
