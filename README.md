@@ -147,7 +147,7 @@ $ docker buildx build -t ghcr.io/ktock/hello:esgz \
 
 > NOTE2: Docker still does not support lazy pulling of eStargz.
 
-eStargz-enaled BuildKit (v0.10) will be [included to Docker v22.XX](https://github.com/moby/moby/blob/v22.06.0-beta.0/vendor.mod#L51) however you can build eStargz images with the prior version using Buildx [driver](https://github.com/docker/buildx/blob/master/docs/reference/buildx_create.md#-set-the-builder-driver-to-use---driver) feature.
+eStargz-enabled BuildKit (v0.10) will be [included to Docker v22.XX](https://github.com/moby/moby/blob/v22.06.0-beta.0/vendor.mod#L51) however you can build eStargz images with the prior version using Buildx [driver](https://github.com/docker/buildx/blob/master/docs/reference/buildx_create.md#-set-the-builder-driver-to-use---driver) feature.
 You can enable the specific version of BuildKit using [`docker buildx create`](https://docs.docker.com/engine/reference/commandline/buildx_create/) (this example specifies `v0.10.3`).
 
 ```
