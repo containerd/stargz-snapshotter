@@ -1,6 +1,8 @@
 module github.com/containerd/stargz-snapshotter
 
-go 1.19
+go 1.21
+
+toolchain go1.21.3
 
 require (
 	github.com/containerd/console v1.0.3
@@ -28,7 +30,7 @@ require (
 	k8s.io/api v0.28.3
 	k8s.io/apimachinery v0.28.3
 	k8s.io/client-go v0.28.3
-	k8s.io/cri-api v0.29.0-alpha.2
+	k8s.io/cri-api v0.30.0-alpha.0
 )
 
 require (
@@ -59,7 +61,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.3.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
