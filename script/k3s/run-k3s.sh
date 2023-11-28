@@ -64,8 +64,8 @@ echo "replace github.com/containerd/typeurl => github.com/containerd/typeurl v1.
 
 cat "${TMP_K3S_REPO}/go.mod"
 
-sed -i -E 's|(ENV DAPPER_RUN_ARGS .*)|\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
-sed -i -E 's|(ENV DAPPER_ENV .*)|\1 DOCKER_BUILDKIT|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
+sed -i -E 's|DAPPER_RUN_ARGS="([^"]*)"|DAPPER_RUN_ARGS="\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro"|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
+sed -i -E 's|DAPPER_ENV="([^"]*)"|DAPPER_ENV="\1 DOCKER_BUILDKIT"|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 (
     cd "${TMP_K3S_REPO}" && \
         git config user.email "dummy@example.com" && \
