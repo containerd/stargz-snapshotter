@@ -920,9 +920,11 @@ func checkVerifyInvalidTOCEntryFail(filename string) check {
 				}
 				if sampleEntry == nil {
 					t.Fatalf("TOC must contain at least one regfile or chunk entry other than the rewrite target")
+					return
 				}
 				if targetEntry == nil {
 					t.Fatalf("rewrite target not found")
+					return
 				}
 				targetEntry.Offset = sampleEntry.Offset
 			},
