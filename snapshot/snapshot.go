@@ -471,18 +471,21 @@ func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Trans
 }
 
 func (o *snapshotter) cleanupSnapshotDirectory(ctx context.Context, dir string) error {
-
-	// On a remote snapshot, the layer is mounted on the "fs" directory.
-	// We use Filesystem's Unmount API so that it can do necessary finalization
-	// before/after the unmount.
-	mp := filepath.Join(dir, "fs")
-	if err := o.fs.Unmount(ctx, mp); err != nil {
-		log.G(ctx).WithError(err).WithField("dir", mp).Debug("failed to unmount")
+	if err := o.unmountSnapshotDirectory(ctx, dir); err != nil {
+		log.G(ctx).WithError(err).WithField("dir", dir).Debug("failed to unmount")
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("failed to remove directory %q: %w", dir, err)
 	}
 	return nil
+}
+
+func (o *snapshotter) unmountSnapshotDirectory(ctx context.Context, dir string) error {
+	// On a remote snapshot, the layer is mounted on the "fs" directory.
+	// We use Filesystem's Unmount API so that it can do necessary finalization
+	// before/after the unmount.
+	mp := filepath.Join(dir, "fs")
+	return o.fs.Unmount(ctx, mp)
 }
 
 func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string, opts []snapshots.Opt) (_ storage.Snapshot, err error) {
@@ -656,10 +659,26 @@ func (o *snapshotter) Close() error {
 	// unmount all mounts including Committed
 	const cleanupCommitted = true
 	ctx := context.Background()
-	if err := o.cleanup(ctx, cleanupCommitted); err != nil {
-		log.G(ctx).WithError(err).Warn("failed to cleanup")
+	if err := o.unmountAllSnapshots(ctx, cleanupCommitted); err != nil {
+		log.G(ctx).WithError(err).Warn("failed to unmount snapshots on close")
 	}
 	return o.ms.Close()
+}
+
+func (o *snapshotter) unmountAllSnapshots(ctx context.Context, cleanupCommitted bool) error {
+	cleanup, err := o.cleanupDirectories(ctx, cleanupCommitted)
+	if err != nil {
+		return err
+	}
+
+	log.G(ctx).Debugf("unmount: dirs=%v", cleanup)
+	for _, dir := range cleanup {
+		if err := o.unmountSnapshotDirectory(ctx, dir); err != nil {
+			log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to unmount directory")
+		}
+	}
+
+	return nil
 }
 
 // prepareRemoteSnapshot tries to prepare the snapshot as a remote snapshot
