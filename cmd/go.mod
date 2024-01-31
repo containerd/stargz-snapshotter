@@ -98,7 +98,7 @@ require (
 	github.com/multiformats/go-multihash v0.1.0 // indirect
 	github.com/multiformats/go-varint v0.0.6 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/opencontainers/runc v1.1.5 // indirect
+	github.com/opencontainers/runc v1.1.12 // indirect
 	github.com/opencontainers/selinux v1.11.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.17.0 // indirect
