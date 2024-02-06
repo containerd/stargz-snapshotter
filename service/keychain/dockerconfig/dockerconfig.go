@@ -19,7 +19,7 @@ package dockerconfig
 import (
 	"context"
 
-	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	"github.com/docker/cli/cli/config"

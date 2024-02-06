@@ -24,10 +24,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images/converter"
-	"github.com/containerd/containerd/platforms"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images/converter"
+	"github.com/containerd/platforms"
 	ipfsclient "github.com/containerd/stargz-snapshotter/ipfs/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )

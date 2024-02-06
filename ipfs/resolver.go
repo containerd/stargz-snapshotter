@@ -24,7 +24,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/containerd/v2/core/remotes"
 	ipfsclient "github.com/containerd/stargz-snapshotter/ipfs/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
