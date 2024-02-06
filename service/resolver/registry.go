@@ -21,8 +21,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	rhttp "github.com/hashicorp/go-retryablehttp"
 )

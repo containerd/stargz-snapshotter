@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/containerd/containerd/cmd/ctr/commands"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	digest "github.com/opencontainers/go-digest"

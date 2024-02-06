@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/containerd/containerd/cmd/ctr/app"
-	"github.com/containerd/containerd/pkg/seed" //nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
+	"github.com/containerd/containerd/v2/cmd/ctr/app"
+	"github.com/containerd/containerd/v2/pkg/seed" //nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/commands"
 	"github.com/urfave/cli"
 )
