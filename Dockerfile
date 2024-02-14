@@ -250,7 +250,7 @@ ENTRYPOINT [ "/usr/local/bin/kind-entrypoint.sh", "/usr/local/bin/entrypoint", "
 
 # Image for testing CRI-O with Stargz Store.
 # NOTE: This cannot be used for the node image of KinD.
-FROM ubuntu:23.04 AS crio-stargz-store
+FROM ubuntu:24.04 AS crio-stargz-store
 ARG CNI_PLUGINS_VERSION
 ARG CRIO_TEST_PAUSE_IMAGE_NAME
 ENV container docker
