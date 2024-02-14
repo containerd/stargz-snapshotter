@@ -26,11 +26,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math"
+	"math/big"
 	"net/http"
 	"os"
 	"path"
@@ -979,8 +981,11 @@ func hasStateFile(t *testing.T, id string) check {
 		}
 
 		// wanted data
-		rand.Seed(time.Now().UnixNano())
-		wantErr := fmt.Errorf("test-%d", rand.Int63())
+		b, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
+		if err != nil {
+			panic(err)
+		}
+		wantErr := fmt.Errorf("test-%d", b.Int64())
 
 		// report the data
 		root.fs.s.report(wantErr)

@@ -77,7 +77,7 @@ type KubeconfigKeychainConfig struct {
 type ResolverConfig resolver.Config
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
+	rand.Seed(time.Now().UnixNano()) //nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
 	flag.Parse()
 	mountPoint := flag.Arg(0)
 	lvl, err := logrus.ParseLevel(*logLevel)

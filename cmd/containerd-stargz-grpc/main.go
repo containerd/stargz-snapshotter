@@ -96,7 +96,7 @@ type snapshotterConfig struct {
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
+	rand.Seed(time.Now().UnixNano()) //nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
 	flag.Parse()
 	lvl, err := logrus.ParseLevel(*logLevel)
 	if err != nil {

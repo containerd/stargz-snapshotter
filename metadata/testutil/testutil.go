@@ -20,7 +20,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
@@ -36,10 +35,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 	digest "github.com/opencontainers/go-digest"
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 var allowedPrefix = [4]string{"", "./", "/", "../"}
 
