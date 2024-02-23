@@ -382,10 +382,13 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string, labels map[s
 		return fmt.Errorf("layer not registered")
 	}
 
-	// Check the blob connectivity and try to refresh the connection on failure
-	if err := fs.check(ctx, l, labels); err != nil {
-		log.G(ctx).WithError(err).Warn("check failed")
-		return err
+	if l.Info().FetchedSize < l.Info().Size {
+		// Image contents hasn't fully cached yet.
+		// Check the blob connectivity and try to refresh the connection on failure
+		if err := fs.check(ctx, l, labels); err != nil {
+			log.G(ctx).WithError(err).Warn("check failed")
+			return err
+		}
 	}
 
 	// Wait for prefetch compeletion
