@@ -184,7 +184,9 @@ jobs:
       env:
         DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
         METADATA_STORE: ${{ matrix.metadata-store }}
-      run: make test-cri-o
+      run: |
+        sudo swapoff -a
+        make test-cri-o
 
   test-podman:
     runs-on: ubuntu-22.04
