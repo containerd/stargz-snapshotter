@@ -28,7 +28,7 @@ require (
 	k8s.io/api v0.29.2
 	k8s.io/apimachinery v0.29.2
 	k8s.io/client-go v0.29.2
-	k8s.io/cri-api v0.30.0-alpha.2
+	k8s.io/cri-api v0.30.0-alpha.3
 )
 
 require (
