@@ -241,7 +241,7 @@ func (n *refnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 		case *layernode:
 			copyAttr(&out.Attr, &tn.attr)
 		default:
-			log.G(ctx).Warn("rootnode.Lookup: uknown node type detected")
+			log.G(ctx).Warn("refnode.Lookup: uknown node type detected")
 			return nil, syscall.EIO
 		}
 		out.Attr.Ino = cn.StableAttr().Ino
