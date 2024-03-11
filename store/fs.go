@@ -26,6 +26,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -58,17 +59,21 @@ const (
 
 func Mount(ctx context.Context, mountpoint string, layerManager *LayerManager, debug bool) error {
 	timeSec := time.Second
-	rawFS := fusefs.NewNodeFS(&rootnode{
-		fs: &fs{
-			layerManager: layerManager,
-			nodeMap:      new(idMap),
-			layerMap:     new(idMap),
-		},
-	}, &fusefs.Options{
-		AttrTimeout:     &timeSec,
-		EntryTimeout:    &timeSec,
-		NullPermissions: true,
-	})
+	fs := &fs{
+		layerManager: layerManager,
+		nodeMap:      new(idMap),
+		layerMap:     new(idMap),
+	}
+	rawFS := &fsLocker{
+		RawFileSystem: fusefs.NewNodeFS(&rootnode{
+			fs: fs,
+		}, &fusefs.Options{
+			AttrTimeout:     &timeSec,
+			EntryTimeout:    &timeSec,
+			NullPermissions: true,
+		}),
+	}
+	fs.fsLocker = rawFS.wLocker()
 	mountOpts := &fuse.MountOptions{
 		AllowOther: true, // allow users other than root&mounter to access fs
 		FsName:     "stargzstore",
@@ -88,6 +93,21 @@ func Mount(ctx context.Context, mountpoint string, layerManager *LayerManager, d
 	return server.WaitMount()
 }
 
+type fsLocker struct {
+	fuse.RawFileSystem
+	mu sync.RWMutex
+}
+
+func (fs *fsLocker) Lookup(cancel <-chan struct{}, header *fuse.InHeader, name string, out *fuse.EntryOut) (status fuse.Status) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	return fs.RawFileSystem.Lookup(cancel, header, name, out)
+}
+
+func (fs *fsLocker) wLocker() sync.Locker {
+	return &(fs.mu)
+}
+
 type fs struct {
 	layerManager *LayerManager
 
@@ -103,6 +123,8 @@ type fs struct {
 
 	knownNode   map[string]map[string]*layerReleasable
 	knownNodeMu sync.Mutex
+
+	fsLocker sync.Locker
 }
 
 type layerReleasable struct {
@@ -137,18 +159,34 @@ func isForgotten(n *fusefs.Inode) bool {
 }
 
 type inoReleasable struct {
-	n fusefs.InodeEmbedder
+	n        fusefs.InodeEmbedder
+	fsLocker sync.Locker
+
+	g            singleflight.Group
+	isReleasable atomic.Bool
 }
 
 func (r *inoReleasable) releasable() bool {
-	return r.n.EmbeddedInode().Forgotten()
+	go r.g.Do("releasable", func() (interface{}, error) {
+		// Forgotten accesses the internal variables that are initialized during call
+		// to Lookup API. We want to avoid accessing these variables before they're fully
+		// initialized so we use a lock.
+		r.fsLocker.Lock()
+		forgotten := r.n.EmbeddedInode().Forgotten()
+		r.fsLocker.Unlock()
+		if forgotten {
+			r.isReleasable.Store(true)
+		}
+		return nil, nil
+	})
+	return r.isReleasable.Load()
 }
 
 func (fs *fs) newInodeWithID(ctx context.Context, p func(uint32) fusefs.InodeEmbedder) (*fusefs.Inode, syscall.Errno) {
 	var ino fusefs.InodeEmbedder
 	if err := fs.nodeMap.add(func(id uint32) (releasable, error) {
 		ino = p(id)
-		return &inoReleasable{ino}, nil
+		return &inoReleasable{n: ino, fsLocker: fs.fsLocker}, nil
 	}); err != nil || ino == nil {
 		log.G(ctx).WithError(err).Debug("cannot generate ID")
 		return nil, syscall.EIO
