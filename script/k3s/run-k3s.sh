@@ -79,6 +79,11 @@ sed -i -E 's|DAPPER_ENV="([^"]*)"|DAPPER_ENV="\1 DOCKER_BUILDKIT"|g' "${TMP_K3S_
         REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${K3S_NODE_TAG}" SKIP_VALIDATE=1 make
 )
 cat <<EOF > "${TMP_BUILTIN_CONF}"
+mirrors:
+  ${REGISTRY_HOST}:5000:
+    endpoint:
+      - ${REGISTRY_HOST}:5000
+      - ${REGISTRY_HOST}:5001 # dummy
 configs:
   ${REGISTRY_HOST}:5000:
     tls:
