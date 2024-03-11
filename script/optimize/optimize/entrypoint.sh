@@ -128,8 +128,7 @@ function check_uncompressed_size {
 function check_optimization {
     local TARGET=${1}
 
-    LOCAL_WORKING_DIR="${WORKING_DIR}/$(date '+%H%M%S')"
-    mkdir "${LOCAL_WORKING_DIR}"
+    LOCAL_WORKING_DIR="$(mktemp -d --tmpdir=${WORKING_DIR}/)"
     nerdctl pull "${TARGET}" && nerdctl save "${TARGET}" | tar xv -C "${LOCAL_WORKING_DIR}"
     LAYERS="$(cat "${LOCAL_WORKING_DIR}/manifest.json" | jq -r '.[0].Layers[]')"
 
