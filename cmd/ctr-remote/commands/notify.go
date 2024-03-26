@@ -21,11 +21,11 @@ import (
 	"os"
 
 	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/service"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // FanotifyCommand notifies filesystem event under the specified directory.
-var FanotifyCommand = cli.Command{
+var FanotifyCommand = &cli.Command{
 	Name:   "fanotify",
 	Hidden: true,
 	Action: func(context *cli.Context) error {

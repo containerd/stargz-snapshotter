@@ -23,7 +23,7 @@ import (
 	"github.com/containerd/containerd/v2/cmd/ctr/app"
 	"github.com/containerd/containerd/v2/pkg/seed" //nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/commands"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 func init() {
@@ -33,7 +33,7 @@ func init() {
 }
 
 func main() {
-	customCommands := []cli.Command{
+	customCommands := []*cli.Command{
 		commands.RpullCommand,
 		commands.OptimizeCommand,
 		commands.ConvertCommand,
@@ -43,7 +43,7 @@ func main() {
 	app := app.New()
 	for i := range app.Commands {
 		if app.Commands[i].Name == "images" {
-			sc := map[string]cli.Command{}
+			sc := map[string]*cli.Command{}
 			for _, subcmd := range customCommands {
 				sc[subcmd.Name] = subcmd
 			}

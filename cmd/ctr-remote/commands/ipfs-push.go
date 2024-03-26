@@ -27,27 +27,28 @@ import (
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // IPFSPushCommand pushes an image to IPFS
-var IPFSPushCommand = cli.Command{
+var IPFSPushCommand = &cli.Command{
 	Name:      "ipfs-push",
 	Usage:     "push an image to IPFS (experimental)",
 	ArgsUsage: "[flags] <image_ref>",
 	Flags: []cli.Flag{
 		// platform flags
-		cli.StringSliceFlag{
+		&cli.StringSliceFlag{
 			Name:  "platform",
 			Usage: "Add content for a specific platform",
 			Value: &cli.StringSlice{},
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "all-platforms",
 			Usage: "Add content for all platforms",
 		},
-		cli.BoolTFlag{
+		&cli.BoolFlag{
 			Name:  "estargz",
+			Value: true,
 			Usage: "Convert the image into eStargz",
 		},
 	},
