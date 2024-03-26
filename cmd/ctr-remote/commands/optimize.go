@@ -45,74 +45,74 @@ import (
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 const defaultPeriod = 10
 
 // OptimizeCommand converts and optimizes an image
-var OptimizeCommand = cli.Command{
+var OptimizeCommand = &cli.Command{
 	Name:      "optimize",
 	Usage:     "optimize an image with user-specified workload",
 	ArgsUsage: "[flags] <source_ref> <target_ref>...",
 	Flags: append([]cli.Flag{
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "reuse",
 			Usage: "reuse eStargz (already optimized) layers without further conversion",
 		},
-		cli.StringSliceFlag{
+		&cli.StringSliceFlag{
 			Name:  "platform",
 			Usage: "Pull content from a specific platform",
 			Value: &cli.StringSlice{},
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "all-platforms",
 			Usage: "targeting all platform of the source image",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "wait-on-signal",
 			Usage: "ignore context cancel and keep the container running until it receives SIGINT (Ctrl + C) sent manually",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "wait-on-line",
 			Usage: "Substring of a stdout line to be waited. When this string is detected, the container will be killed.",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "no-optimize",
 			Usage: "convert image without optimization",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "record-out",
 			Usage: "record the monitor log to the specified file",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "oci",
 			Usage: "convert Docker media types to OCI media types",
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "estargz-compression-level",
 			Usage: "eStargz compression level",
 			Value: gzip.BestCompression,
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "estargz-external-toc",
 			Usage: "Separate TOC JSON into another image (called \"TOC image\"). The name of TOC image is the original + \"-esgztoc\" suffix. Both eStargz and the TOC image should be pushed to the same registry. stargz-snapshotter refers to the TOC image when it pulls the result eStargz image.",
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "estargz-chunk-size",
 			Usage: "eStargz chunk size (not applied to zstd:chunked)",
 			Value: 0,
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "estargz-min-chunk-size",
 			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand (not applied to zstd:chunked)",
 			Value: 0,
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "zstdchunked",
 			Usage: "use zstd compression instead of gzip (a.k.a zstd:chunked)",
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "zstdchunked-compression-level",
 			Usage: "zstd:chunked compression level",
 			Value: 3, // SpeedDefault; see also https://pkg.go.dev/github.com/klauspost/compress/zstd#EncoderLevel
