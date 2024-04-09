@@ -24,7 +24,7 @@ require (
 	go.etcd.io/bbolt v1.3.9
 	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.18.0
-	google.golang.org/grpc v1.62.1
+	google.golang.org/grpc v1.63.2
 	k8s.io/cri-api v0.30.0-alpha.2
 )
 
@@ -116,14 +116,14 @@ require (
 	golang.org/x/exp v0.0.0-20230725012225-302865e7556b // indirect
 	golang.org/x/mod v0.14.0 // indirect
 	golang.org/x/net v0.21.0 // indirect
-	golang.org/x/oauth2 v0.16.0 // indirect
+	golang.org/x/oauth2 v0.17.0 // indirect
 	golang.org/x/term v0.17.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.16.1 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
-	google.golang.org/genproto v0.0.0-20240123012728-ef4313101c80 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240123012728-ef4313101c80 // indirect
+	google.golang.org/genproto v0.0.0-20240227224415-6ceb2ff114de // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240227224415-6ceb2ff114de // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
