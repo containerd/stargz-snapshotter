@@ -21,6 +21,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 )
 
+// Config is configuration for stargz snapshotter service.
 type Config struct {
 	config.Config
 
