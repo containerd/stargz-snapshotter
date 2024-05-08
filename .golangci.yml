@@ -3,15 +3,13 @@
 
 linters:
   enable:
-    - structcheck
-    - varcheck
     - staticcheck
     - unconvert
     - gofmt
     - goimports
     - revive
     - ineffassign
-    - vet
+    - govet
     - unused
     - misspell
   disable:
@@ -19,14 +17,14 @@ linters:
 
 run:
   deadline: 4m
-  skip-dirs:
-    - docs
-    - images
-    - out
-    - script
 
 issues:
   exclude-rules:
     - linters:
         - revive
       text: "unused-parameter"
+  exclude-dirs:
+    - docs
+    - images
+    - out
+    - script
