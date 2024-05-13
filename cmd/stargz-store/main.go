@@ -132,9 +132,8 @@ func main() {
 				Fatalf("failed to prepare mountpoint %q", mountPoint)
 		}
 	}
-	if !config.Config.DisableVerification {
-		log.G(ctx).Warnf("content verification is not supported; switching to non-verification mode")
-		config.Config.DisableVerification = true
+	if config.Config.DisableVerification {
+		log.G(ctx).Fatalf("content verification can't be disabled")
 	}
 	mt, err := getMetadataStore(*rootDir, config)
 	if err != nil {
