@@ -18,7 +18,7 @@ ARG CNI_PLUGINS_VERSION=v1.4.1
 ARG NERDCTL_VERSION=1.7.6
 
 ARG PODMAN_VERSION=v5.1.1
-ARG CRIO_VERSION=main
+ARG CRIO_VERSION=v1.31.0
 ARG CONMON_VERSION=v2.1.11
 ARG COMMON_VERSION=v0.58.2
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=registry.k8s.io/pause:3.6
@@ -108,7 +108,7 @@ ARG CTR_REMOTE_BUILD_FLAGS
 COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
 ARG CGO_ENABLED
 RUN cd $GOPATH/src/github.com/containerd/stargz-snapshotter && \
-    PREFIX=/out/ GOARCH=${TARGETARCH:-amd64} GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make stargz-store
+    PREFIX=/out/ GOARCH=${TARGETARCH:-amd64} GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make stargz-store stargz-store-helper
 
 # Build podman
 FROM golang-base AS podman-dev

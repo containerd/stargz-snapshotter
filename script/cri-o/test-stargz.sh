@@ -20,6 +20,7 @@ CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
 
 REGISTRY_HOST="cri-registry"
+REGISTRY_HOST_AUTH="cri-registry-auth"
 TEST_NODE_NAME="cri-testenv-container"
 CRIO_SOCK=unix:///run/crio/crio.sock
 PREPARE_NODE_NAME="cri-prepare-node"
@@ -36,6 +37,9 @@ STORE_CONFIG=$(mktemp)
 TMPFILE=$(mktemp)
 LOG_FILE=$(mktemp)
 MIRROR_TMP=$(mktemp -d)
+AUTH_DIR=$(mktemp -d)
+DOCKERCONFIG=$(mktemp)
+echo "${DOCKER_COMPOSE_YAML}"
 function cleanup {
     ORG_EXIT_CODE="${1}"
     docker compose -f "${DOCKER_COMPOSE_YAML}" down -v || true
@@ -46,6 +50,8 @@ function cleanup {
     rm "${TMPFILE}" || true
     rm "${LOG_FILE}" || true
     rm -rf "${MIRROR_TMP}" || true
+    rm -rf "${AUTH_DIR}" || true
+    rm "${DOCKERCONFIG}" || true
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
@@ -70,6 +76,12 @@ function retry {
     fi
 }
 
+DUMMYUSER=dummyuser
+DUMMYPASS=dummypass
+echo "Preparing creds..."
+prepare_creds "${AUTH_DIR}" "${REGISTRY_HOST_AUTH}" "${DUMMYUSER}" "${DUMMYPASS}"
+echo -n '{"auths":{"'"${REGISTRY_HOST_AUTH}"':5000":{"auth":"'$(echo -n "${DUMMYUSER}:${DUMMYPASS}" | base64 -i -w 0)'"}}}' > "${DOCKERCONFIG}"
+
 # Prepare the testing node and registry
 cat <<EOF > "${DOCKER_COMPOSE_YAML}"
 version: "3.3"
@@ -84,6 +96,7 @@ services:
     - /dev/fuse:/dev/fuse
     - "critest-crio-data:/var/lib/containers"
     - "critest-crio-stargz-store-data:/var/lib/stargz-store"
+    - ${AUTH_DIR}:/auth
   image-prepare:
     image: "${PREPARE_NODE_IMAGE}"
     container_name: "${PREPARE_NODE_NAME}"
@@ -100,9 +113,21 @@ services:
     - "critest-prepare-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
     - "${REPO}:/go/src/github.com/containerd/stargz-snapshotter:ro"
     - "${MIRROR_TMP}:/tools/"
+    - ${AUTH_DIR}:/auth
   registry:
     image: registry:2
     container_name: ${REGISTRY_HOST}
+  registryauth:
+    image: registry:2
+    container_name: ${REGISTRY_HOST_AUTH}
+    environment:
+    - REGISTRY_AUTH=htpasswd
+    - REGISTRY_AUTH_HTPASSWD_REALM="Registry Realm"
+    - REGISTRY_AUTH_HTPASSWD_PATH=/auth/auth/htpasswd
+    - REGISTRY_HTTP_TLS_CERTIFICATE=/auth/certs/domain.crt
+    - REGISTRY_HTTP_TLS_KEY=/auth/certs/domain.key
+    volumes:
+    - ${AUTH_DIR}:/auth
 volumes:
   critest-crio-data:
   critest-crio-stargz-store-data:
@@ -112,6 +137,18 @@ EOF
 docker compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate
 
 retry docker exec "${PREPARE_NODE_NAME}" curl -k --head "http://${REGISTRY_HOST}:5000/v2/"
+
+# Mirror images used for auth test
+docker exec "${PREPARE_NODE_NAME}" cp /auth/certs/domain.crt /usr/local/share/ca-certificates
+docker exec "${PREPARE_NODE_NAME}" update-ca-certificates
+docker exec "${PREPARE_NODE_NAME}" go install github.com/google/go-containerregistry/cmd/crane@latest
+docker exec "${PREPARE_NODE_NAME}" mkdir /root/.docker/
+docker cp "${DOCKERCONFIG}" "${PREPARE_NODE_NAME}:/root/.docker/config.json"
+docker exec "${PREPARE_NODE_NAME}" crane copy ghcr.io/stargz-containers/ubuntu:22.04-esgz "${REGISTRY_HOST_AUTH}":5000/ubuntu:22.04-esgz
+
+# Configure registry cert
+docker exec "${TEST_NODE_NAME}" cp /auth/certs/domain.crt /usr/local/share/ca-certificates
+docker exec "${TEST_NODE_NAME}" update-ca-certificates
 
 # Mirror and optimize all images used in tests
 echo "${REGISTRY_HOST}:5000" > "${MIRROR_TMP}/host"
@@ -183,6 +220,11 @@ echo "===== VERSION INFORMATION ====="
 docker exec "${TEST_NODE_NAME}" runc --version
 docker exec "${TEST_NODE_NAME}" crio --version
 echo "==============================="
+
+# Do auth test
+docker exec "${TEST_NODE_NAME}" /go/bin/crictl --runtime-endpoint=${CRIO_SOCK} pull --creds "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST_AUTH}":5000/ubuntu:22.04-esgz
+
+# Do CRI Validation test
 docker exec "${TEST_NODE_NAME}" /go/bin/critest --runtime-endpoint=${CRIO_SOCK}
 
 echo "Check all remote snapshots are created successfully"
