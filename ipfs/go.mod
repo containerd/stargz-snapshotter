@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/containerd/containerd v1.7.16
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/multiformats/go-multiaddr v0.12.3
+	github.com/multiformats/go-multiaddr v0.12.4
 	github.com/opencontainers/image-spec v1.1.0
 )
 
