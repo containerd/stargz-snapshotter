@@ -13,21 +13,22 @@
 #   limitations under the License.
 
 ARG CONTAINERD_VERSION=v1.7.16
-ARG RUNC_VERSION=v1.1.7
-ARG CNI_PLUGINS_VERSION=v1.3.0
-ARG NERDCTL_VERSION=1.4.0
+ARG RUNC_VERSION=v1.1.12
+ARG CNI_PLUGINS_VERSION=v1.4.1
+ARG NERDCTL_VERSION=1.7.6
 
-ARG PODMAN_VERSION=v4.5.0
-ARG CRIO_VERSION=v1.27.0
-ARG CONMON_VERSION=v2.1.7
-ARG COMMON_VERSION=v0.53.0
+ARG PODMAN_VERSION=v5.0.2
+ARG CRIO_VERSION=v1.30.0
+ARG CONMON_VERSION=v2.1.11
+ARG COMMON_VERSION=v0.58.2
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=registry.k8s.io/pause:3.6
+ARG NETAVARK_VERSION=v1.10.3
 
 ARG CONTAINERIZED_SYSTEMD_VERSION=v0.1.1
-ARG SLIRP4NETNS_VERSION=v1.2.0
+ARG SLIRP4NETNS_VERSION=v1.3.0
 
 # Used in CI
-ARG CRI_TOOLS_VERSION=v1.27.0
+ARG CRI_TOOLS_VERSION=v1.30.0
 
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
@@ -118,7 +119,8 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
     make && make install PREFIX=/out/
 
 # Build CRI-O
-FROM golang-base AS cri-o-dev
+# FROM golang-base AS cri-o-dev
+FROM golang:1.22-bullseye AS cri-o-dev
 ARG CRIO_VERSION
 RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
     git clone https://github.com/cri-o/cri-o $GOPATH/src/github.com/cri-o/cri-o && \
@@ -178,12 +180,13 @@ COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
 
 # Base image which contains podman with stargz-store
-FROM golang-base AS podman-base
+FROM ubuntu:22.04 AS podman-base
 ARG TARGETARCH
 ARG CNI_PLUGINS_VERSION
 ARG PODMAN_VERSION
-RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3 libgpgme-dev \
-                         iptables libyajl-dev && \
+ARG NETAVARK_VERSION
+RUN apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y fuse3 libgpgme-dev \
+                         iptables libyajl-dev curl ca-certificates libglib2.0 libseccomp-dev wget && \
     # Make CNI plugins manipulate iptables instead of nftables
     # as this test runs in a Docker container that network is configured with iptables.
     # c.f. https://github.com/moby/moby/issues/26824
@@ -191,6 +194,13 @@ RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3 libgpg
     mkdir -p /etc/containers /etc/cni/net.d /opt/cni/bin && \
     curl -qsSL https://raw.githubusercontent.com/containers/podman/${PODMAN_VERSION}/cni/87-podman-bridge.conflist | tee /etc/cni/net.d/87-podman-bridge.conflist && \
     curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
+
+RUN mkdir /tmp/netavark ; \
+    wget -O /tmp/netavark/netavark.gz https://github.com/containers/netavark/releases/download/${NETAVARK_VERSION}/netavark.gz ; \
+    gunzip /tmp/netavark/netavark.gz ; \
+    mkdir -p /usr/local/libexec/podman ; \
+    mv /tmp/netavark/netavark /usr/local/libexec/podman/ ; \
+    chmod 0755 /usr/local/libexec/podman/netavark
 
 COPY --from=podman-dev /out/bin/* /usr/local/bin/
 COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
@@ -215,6 +225,9 @@ RUN curl -o /usr/local/bin/slirp4netns --fail -L https://github.com/rootless-con
 COPY ./script/podman/config/storage.conf /home/rootless/.config/containers/storage.conf
 # Stargz Store systemd service for rootless Podman
 COPY ./script/podman/config/podman-rootless-stargz-store.service /home/rootless/.config/systemd/user/
+
+COPY ./script/podman/config/containers.conf /home/rootless/.config/containers/containers.conf
+
 # test-podman-rootless.sh logins to the user via SSH
 COPY ./script/podman/config/test-podman-rootless.sh /test-podman-rootless.sh
 RUN ssh-keygen -q -t rsa -f /root/.ssh/id_rsa -N '' && \
