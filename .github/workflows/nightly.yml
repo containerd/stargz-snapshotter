@@ -82,7 +82,10 @@ jobs:
     - name: Varidate the runtime through CRI with CRI-O
       env:
         DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
-      run: make test-cri-o
+      run: |
+        # needed to pass "runtime should output OOMKilled reason" test
+        sudo swapoff -a
+        make test-cri-o
 
   test-k3s:
     runs-on: ubuntu-22.04
