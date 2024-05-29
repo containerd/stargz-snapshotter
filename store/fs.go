@@ -100,32 +100,18 @@ type fs struct {
 	// inodes numbers of noeds inside each `diff` directory are prefixed by an unique uint32
 	// so that they don't conflict with nodes outside `diff` directories.
 	layerMap *idMap
-
-	knownNode   map[string]map[string]*layerReleasable
-	knownNodeMu sync.Mutex
 }
 
 type layerReleasable struct {
-	n        fusefs.InodeEmbedder
-	released bool
-	mu       sync.Mutex
+	n fusefs.InodeEmbedder
 }
 
 func (lh *layerReleasable) releasable() bool {
-	lh.mu.Lock()
-	released := lh.released
-	lh.mu.Unlock()
-	return released && isForgotten(lh.n.EmbeddedInode())
-}
-
-func (lh *layerReleasable) release() {
-	lh.mu.Lock()
-	lh.released = true
-	lh.mu.Unlock()
+	return isForgotten(lh.n.EmbeddedInode())
 }
 
 func isForgotten(n *fusefs.Inode) bool {
-	if !n.Forgotten() {
+	if !n.Initialized() || !n.Forgotten() {
 		return false
 	}
 	for _, cn := range n.Children() {
@@ -141,7 +127,7 @@ type inoReleasable struct {
 }
 
 func (r *inoReleasable) releasable() bool {
-	return r.n.EmbeddedInode().Forgotten()
+	return r.n.EmbeddedInode().Initialized() && r.n.EmbeddedInode().Forgotten()
 }
 
 func (fs *fs) newInodeWithID(ctx context.Context, p func(uint32) fusefs.InodeEmbedder) (*fusefs.Inode, syscall.Errno) {
@@ -192,7 +178,7 @@ func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 			out.Attr.Ino = uint64(ino)
 			cn.Attr.Ino = uint64(ino)
 			sAttr.Ino = uint64(ino)
-			return n.NewInode(ctx, cn, sAttr)
+			return n.NewPersistentInode(ctx, cn, sAttr)
 		})
 	}
 	refBytes, err := base64.StdEncoding.DecodeString(name)
@@ -216,7 +202,7 @@ func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 		out.Attr.Ino = uint64(ino)
 		cn.attr.Ino = uint64(ino)
 		sAttr.Ino = uint64(ino)
-		return n.NewInode(ctx, cn, sAttr)
+		return n.NewPersistentInode(ctx, cn, sAttr)
 	})
 }
 
@@ -263,7 +249,7 @@ func (n *refnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 		out.Attr.Ino = uint64(ino)
 		cn.attr.Ino = uint64(ino)
 		sAttr.Ino = uint64(ino)
-		return n.NewInode(ctx, cn, sAttr)
+		return n.NewPersistentInode(ctx, cn, sAttr)
 	})
 }
 
@@ -284,19 +270,13 @@ func (n *refnode) Rmdir(ctx context.Context, name string) syscall.Errno {
 		return syscall.EIO
 	}
 	if current == 0 {
-		n.fs.knownNodeMu.Lock()
-		lh, ok := n.fs.knownNode[n.ref.String()][targetDigest.String()]
-		if !ok {
-			n.fs.knownNodeMu.Unlock()
-			log.G(ctx).WithError(err).Warnf("node of layer %v/%v is not registered", n.ref, targetDigest)
-			return syscall.EIO
+		if cn := n.GetChild(name); cn != nil {
+			cn.RmAllChildren()
+			n.RmChild(name)
 		}
-		lh.release()
-		delete(n.fs.knownNode[n.ref.String()], targetDigest.String())
-		if len(n.fs.knownNode[n.ref.String()]) == 0 {
-			delete(n.fs.knownNode, n.ref.String())
+		if len(n.Children()) == 0 {
+			n.EmbeddedInode().RmAllChildren()
 		}
-		n.fs.knownNodeMu.Unlock()
 	}
 	log.G(ctx).WithField("refcounter", current).Infof("layer %v/%v is marked as RELEASE", n.ref, targetDigest)
 	return syscall.ENOENT
@@ -330,6 +310,37 @@ var _ = (fusefs.NodeLookuper)((*layernode)(nil))
 
 // Lookup routes to the target file stored in the pool, based on the specified file name.
 func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fusefs.Inode, syscall.Errno) {
+	if cn := n.GetChild(name); cn != nil {
+		found := false
+		switch tn := cn.Operations().(type) {
+		case *fusefs.MemSymlink:
+			copyAttr(&out.Attr, &tn.Attr)
+			found = true
+		case *fusefs.MemRegularFile:
+			copyAttr(&out.Attr, &tn.Attr)
+			found = true
+		case *blobnode:
+			copyAttr(&out.Attr, &tn.attr)
+			found = true
+		default:
+			log.G(ctx).Debug("layernode.Lookup: uknown node type detected; trying NodeGetattrer provided by layer root node")
+			if na, ok := cn.Operations().(fusefs.NodeGetattrer); ok {
+				var ao fuse.AttrOut
+				errno := na.Getattr(ctx, nil, &ao)
+				if errno != 0 {
+					return nil, errno
+				}
+				copyAttr(&out.Attr, &ao.Attr)
+				found = true
+			}
+		}
+		if !found {
+			log.G(ctx).Warn("layernode.Lookup: uknown node type detected")
+			return nil, syscall.EIO
+		}
+		out.Attr.Ino = cn.StableAttr().Ino
+		return cn, 0
+	}
 	switch name {
 	case layerInfoLink:
 		info, err := n.fs.layerManager.getLayerInfo(ctx, n.refnode.ref, n.digest)
@@ -350,27 +361,9 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 			out.Attr.Ino = uint64(ino)
 			cn.Attr.Ino = uint64(ino)
 			sAttr.Ino = uint64(ino)
-			return n.NewInode(ctx, cn, sAttr)
+			return n.NewPersistentInode(ctx, cn, sAttr)
 		})
 	case layerLink, blobLink:
-
-		// Check if layer is already known
-		if name == layerLink {
-			n.fs.knownNodeMu.Lock()
-			if lh, ok := n.fs.knownNode[n.refnode.ref.String()][n.digest.String()]; ok {
-				var ao fuse.AttrOut
-				if errno := lh.n.(fusefs.NodeGetattrer).Getattr(ctx, nil, &ao); errno != 0 {
-					return nil, errno
-				}
-				copyAttr(&out.Attr, &ao.Attr)
-				n.fs.knownNodeMu.Unlock()
-				return n.NewInode(ctx, lh.n, fusefs.StableAttr{
-					Mode: out.Attr.Mode,
-					Ino:  out.Attr.Ino,
-				}), 0
-			}
-			n.fs.knownNodeMu.Unlock()
-		}
 
 		// Resolve layer
 		l, err := n.fs.layerManager.getLayer(ctx, n.refnode.ref, n.digest)
@@ -398,7 +391,7 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 				out.Attr.Ino = uint64(ino)
 				cn.attr.Ino = uint64(ino)
 				sAttr.Ino = uint64(ino)
-				return n.NewInode(ctx, cn, sAttr)
+				return n.NewPersistentInode(ctx, cn, sAttr)
 			})
 		}
 
@@ -417,21 +410,12 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 			}
 
 			copyAttr(&out.Attr, &ao.Attr)
-			cn = n.NewInode(ctx, root, fusefs.StableAttr{
+			cn = n.NewPersistentInode(ctx, root, fusefs.StableAttr{
 				Mode: out.Attr.Mode,
 				Ino:  out.Attr.Ino,
 			})
 
 			rr := &layerReleasable{n: root}
-			n.fs.knownNodeMu.Lock()
-			if n.fs.knownNode == nil {
-				n.fs.knownNode = make(map[string]map[string]*layerReleasable)
-			}
-			if n.fs.knownNode[n.refnode.ref.String()] == nil {
-				n.fs.knownNode[n.refnode.ref.String()] = make(map[string]*layerReleasable)
-			}
-			n.fs.knownNode[n.refnode.ref.String()][n.digest.String()] = rr
-			n.fs.knownNodeMu.Unlock()
 			return rr, nil
 		})
 		if err != nil || errno != 0 {

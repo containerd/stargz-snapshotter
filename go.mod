@@ -117,3 +117,5 @@ require (
 
 // Import local package for estargz.
 replace github.com/containerd/stargz-snapshotter/estargz => ./estargz
+
+replace github.com/hanwen/go-fuse/v2 => github.com/ktock/go-fuse/v2 v2.1.1-0.20240611080711-f59a74eb644a
