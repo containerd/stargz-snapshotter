@@ -25,6 +25,7 @@ source "${REPO}/script/util/utils.sh"
 
 CNI_PLUGINS_VERSION=$(get_version_from_arg "${REPO}/Dockerfile" "CNI_PLUGINS_VERSION")
 CRI_TOOLS_VERSION=$(get_version_from_arg "${REPO}/Dockerfile" "CRI_TOOLS_VERSION")
+PAUSE_IMAGE_NAME=$(get_version_from_arg "${REPO}/Dockerfile" "PAUSE_IMAGE_NAME_TEST")
 GINKGO_VERSION=v1.16.5
 
 if [ "${CRI_NO_RECREATE:-}" != "true" ] ; then
@@ -58,6 +59,8 @@ version = 2
 [debug]
   format = "json"
   level = "debug"
+[plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "${PAUSE_IMAGE_NAME}"
 [plugins."io.containerd.grpc.v1.cri".containerd]
   default_runtime_name = "runc"
   snapshotter = "stargz"

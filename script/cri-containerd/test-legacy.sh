@@ -17,12 +17,16 @@
 set -euo pipefail
 
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
+REPO="${CONTEXT}../../"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
 SNAPSHOTTER_SOCK=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 
 source "${CONTEXT}/const.sh"
+source "${REPO}/script/util/utils.sh"
 
 IMAGE_LIST="${1}"
+
+PAUSE_IMAGE_NAME=$(get_version_from_arg "${REPO}/Dockerfile" "PAUSE_IMAGE_NAME_TEST")
 
 LOG_TMP=$(mktemp)
 LIST_TMP=$(mktemp)
@@ -67,7 +71,7 @@ fi
 # Dump all names of images used in the test
 docker exec -i "${TEST_NODE_ID}" journalctl -xu containerd > "${LOG_TMP}"
 cat "${LOG_TMP}" | grep PullImage | sed -E 's/.*PullImage \\"([^\\]*)\\".*/\1/g' > "${LIST_TMP}"
-cat "${LOG_TMP}" | grep SandboxImage | sed -E 's/.*SandboxImage:([^ ]*).*/\1/g' >> "${LIST_TMP}"
+echo ${PAUSE_IMAGE_NAME} >> "${LIST_TMP}"
 cat "${LIST_TMP}" | sort | uniq > "${IMAGE_LIST}"
 
 docker kill "${TEST_NODE_ID}"
