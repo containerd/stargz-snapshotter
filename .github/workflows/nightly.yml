@@ -82,7 +82,10 @@ jobs:
     - name: Varidate the runtime through CRI with CRI-O
       env:
         DOCKER_BUILD_ARGS: "--build-arg=RUNC_VERSION=v1.0.3"
-      run: make test-cri-o
+      run: |
+        # needed to pass "runtime should output OOMKilled reason" test
+        sudo swapoff -a
+        make test-cri-o
 
   test-k3s:
     runs-on: ubuntu-22.04
@@ -90,7 +93,7 @@ jobs:
     steps:
     - uses: actions/setup-go@v5
       with:
-        go-version: '1.21.x'
+        go-version: '1.22.x'
     - name: Install k3d
       run: |
         wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.6.0/install.sh | bash

@@ -33,7 +33,7 @@ ARG CRI_TOOLS_VERSION=v1.30.0
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
-FROM golang:1.21.5-bullseye AS golang-base
+FROM golang:1.22.3-bullseye AS golang-base
 
 # Build containerd
 FROM golang-base AS containerd-dev
@@ -78,7 +78,7 @@ RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     make vendor && make && DESTDIR=/out/ PREFIX= make install
 
 # Build runc
-FROM golang-base AS runc-dev
+FROM golang:1.21-bullseye AS runc-dev
 ARG RUNC_VERSION
 RUN apt-get update -y && apt-get install -y libseccomp-dev && \
     git clone -b ${RUNC_VERSION} --depth 1 \
@@ -254,7 +254,7 @@ RUN apt-get update && apt-get install -y iptables && \
     curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
 
 # Image which can be used as a node image for KinD (containerd with builtin snapshotter)
-FROM kindest/node:v1.29.2 AS kind-builtin-snapshotter
+FROM kindest/node:v1.30.0 AS kind-builtin-snapshotter
 COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 COPY ./script/config/ /
@@ -295,7 +295,7 @@ COPY ./script/config-cri-o/ /
 ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 
 # Image which can be used as a node image for KinD
-FROM kindest/node:v1.29.2
+FROM kindest/node:v1.30.0
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /

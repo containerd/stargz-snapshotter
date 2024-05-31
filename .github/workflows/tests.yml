@@ -38,7 +38,7 @@ jobs:
         fetch-depth: '0'
     - uses: actions/setup-go@v5
       with:
-        go-version: '1.21.x'
+        go-version: '1.22.x'
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v6.0.1
       with:
@@ -203,7 +203,7 @@ jobs:
     steps:
     - uses: actions/setup-go@v5
       with:
-        go-version: '1.21.x'
+        go-version: '1.22.x'
     - name: Install k3d
       run: |
         wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.6.0/install.sh | bash
@@ -233,7 +233,7 @@ jobs:
     steps:
     - uses: actions/setup-go@v5
       with:
-        go-version: '1.21.x'
+        go-version: '1.22.x'
     - name: Install k3d
       run: |
         wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.6.0/install.sh | bash
@@ -278,12 +278,12 @@ jobs:
     steps:
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21.x'
+          go-version: '1.22.x'
       - uses: actions/checkout@v4
         with:
           path: src/github.com/containerd/stargz-snapshotter
           fetch-depth: 25
-      - uses: containerd/project-checks@v1
+      - uses: containerd/project-checks@v1.1.0
         with:
           working-directory: src/github.com/containerd/stargz-snapshotter
       - name: Check proto generated code

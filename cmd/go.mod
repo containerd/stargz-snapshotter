@@ -1,6 +1,6 @@
 module github.com/containerd/stargz-snapshotter/cmd
 
-go 1.21
+go 1.22.0
 
 require (
 	github.com/containerd/containerd v1.7.16
@@ -25,7 +25,7 @@ require (
 	golang.org/x/sync v0.7.0
 	golang.org/x/sys v0.19.0
 	google.golang.org/grpc v1.63.2
-	k8s.io/cri-api v0.30.0-alpha.2
+	k8s.io/cri-api v0.30.1
 )
 
 require (
@@ -128,9 +128,9 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.29.3 // indirect
-	k8s.io/apimachinery v0.29.3 // indirect
-	k8s.io/client-go v0.29.3 // indirect
+	k8s.io/api v0.30.1 // indirect
+	k8s.io/apimachinery v0.30.1 // indirect
+	k8s.io/client-go v0.30.1 // indirect
 	k8s.io/klog/v2 v2.120.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b // indirect
