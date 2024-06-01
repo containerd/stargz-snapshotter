@@ -71,6 +71,7 @@ fi
 # Dump all names of images used in the test
 docker exec -i "${TEST_NODE_ID}" journalctl -xu containerd > "${LOG_TMP}"
 cat "${LOG_TMP}" | grep PullImage | sed -E 's/.*PullImage \\"([^\\]*)\\".*/\1/g' > "${LIST_TMP}"
+cat "${LOG_TMP}" | grep SandboxImage | sed -E 's/.*SandboxImage:([^ ]*).*/\1/g' >> "${LIST_TMP}" || true
 echo ${PAUSE_IMAGE_NAME} >> "${LIST_TMP}"
 cat "${LIST_TMP}" | sort | uniq > "${IMAGE_LIST}"
 
