@@ -230,28 +230,6 @@ bin  boot  dev  etc  home  lib  lib32  lib64  libx32  media  mnt  opt  proc  roo
 
 > NOTE: You can perform lazy pulling from any OCI-compatible registries (e.g. docker.io, ghcr.io, etc) as long as the image is formatted as eStargz.
 
-### Registry-side conversion with `estargz.kontain.me`
-
-You can convert arbitrary images into eStargz on the registry-side, using [`estargz.kontain.me`](https://estargz.kontain.me).
-`estargz.kontain.me/[image]` serves eStargz-converted version of an arbitrary public image.
-
-For example, the following Kubernetes manifest performs lazy pulling of eStargz-formatted version of `docker.io/library/nginx:1.21.1` that is converted by `estargz.kontain.me`.
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: nginx
-spec:
-  containers:
-  - name: nginx
-    image: estargz.kontain.me/docker.io/library/nginx:1.21.1
-    ports:
-    - containerPort: 80
-```
-
-> WARNING: Before trying this method, read [caveats from kontain.me](https://github.com/imjasonh/kontain.me#caveats). If you rely on it in production, you should copy the image to your own registry or build eStargz by your own using `ctr-remote` as described in the following.
-
 ## Importing Stargz Snapshotter as go module
 
 Currently, Stargz Snapshotter repository contains two Go modules as the following and both of them need to be imported.
