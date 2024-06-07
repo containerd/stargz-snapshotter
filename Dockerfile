@@ -34,7 +34,7 @@ ARG CRI_TOOLS_VERSION=v1.30.0
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
-FROM golang:1.22.3-bullseye AS golang-base
+FROM golang:1.22.4-bullseye AS golang-base
 
 # Build containerd
 FROM golang-base AS containerd-dev
@@ -79,7 +79,7 @@ RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     make vendor && make && DESTDIR=/out/ PREFIX= make install
 
 # Build runc
-FROM golang:1.21-bullseye AS runc-dev
+FROM golang:1.22-bullseye AS runc-dev
 ARG RUNC_VERSION
 RUN apt-get update -y && apt-get install -y libseccomp-dev && \
     git clone -b ${RUNC_VERSION} --depth 1 \
