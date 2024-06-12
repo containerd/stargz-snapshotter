@@ -22,27 +22,27 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/containerd/containerd/cmd/ctr/commands"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // GetTOCDigestCommand outputs TOC info of a layer
-var GetTOCDigestCommand = cli.Command{
+var GetTOCDigestCommand = &cli.Command{
 	Name:      "get-toc-digest",
 	Usage:     "get the digest of TOC of a layer",
 	ArgsUsage: "<layer digest>",
 	Flags: []cli.Flag{
 		// zstd:chunked flags
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "zstdchunked",
 			Usage: "parse layer as zstd:chunked",
 		},
 		// other flags for debugging
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "dump-toc",
 			Usage: "dump TOC instead of digest. Note that the dumped TOC might be formatted with indents so may have different digest against the original in the layer",
 		},
