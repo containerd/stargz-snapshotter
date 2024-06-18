@@ -8,27 +8,27 @@ require (
 	github.com/containerd/continuity v0.4.3
 	github.com/containerd/log v0.1.0
 	github.com/containerd/stargz-snapshotter/estargz v0.15.1
-	github.com/docker/cli v26.1.1+incompatible
+	github.com/docker/cli v26.1.4+incompatible
 	github.com/docker/go-metrics v0.0.1
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/hanwen/go-fuse/v2 v2.5.1
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/hashicorp/go-retryablehttp v0.7.5
-	github.com/klauspost/compress v1.17.8
+	github.com/hashicorp/go-retryablehttp v0.7.7
+	github.com/klauspost/compress v1.17.9
 	github.com/moby/sys/mountinfo v0.7.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
-	github.com/prometheus/client_golang v1.19.0
+	github.com/prometheus/client_golang v1.19.1
 	github.com/rs/xid v1.5.0
 	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/sync v0.7.0
-	golang.org/x/sys v0.19.0
+	golang.org/x/sys v0.21.0
 	google.golang.org/grpc v1.63.2
-	k8s.io/api v0.30.1
-	k8s.io/apimachinery v0.30.1
-	k8s.io/client-go v0.30.1
-	k8s.io/cri-api v0.30.1
+	k8s.io/api v0.30.2
+	k8s.io/apimachinery v0.30.2
+	k8s.io/client-go v0.30.2
+	k8s.io/cri-api v0.30.2
 )
 
 require (

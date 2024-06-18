@@ -11,9 +11,9 @@ require (
 	github.com/containerd/stargz-snapshotter/ipfs v0.15.1
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/go-metrics v0.0.1
-	github.com/goccy/go-json v0.10.2
+	github.com/goccy/go-json v0.10.3
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/klauspost/compress v1.17.8
+	github.com/klauspost/compress v1.17.9
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
@@ -23,9 +23,9 @@ require (
 	github.com/urfave/cli v1.22.15
 	go.etcd.io/bbolt v1.3.10
 	golang.org/x/sync v0.7.0
-	golang.org/x/sys v0.19.0
+	golang.org/x/sys v0.21.0
 	google.golang.org/grpc v1.63.2
-	k8s.io/cri-api v0.30.1
+	k8s.io/cri-api v0.30.2
 )
 
 require (
@@ -48,7 +48,7 @@ require (
 	github.com/containernetworking/plugins v1.2.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/docker/cli v26.1.1+incompatible // indirect
+	github.com/docker/cli v26.1.4+incompatible // indirect
 	github.com/docker/docker v24.0.9+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
@@ -71,7 +71,7 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.5.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
-	github.com/hashicorp/go-retryablehttp v0.7.5 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/imdario/mergo v0.3.13 // indirect
 	github.com/intel/goresctrl v0.3.0 // indirect
 	github.com/ipfs/go-cid v0.1.0 // indirect
@@ -92,14 +92,14 @@ require (
 	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.2.0 // indirect
-	github.com/multiformats/go-multiaddr v0.12.3 // indirect
+	github.com/multiformats/go-multiaddr v0.12.4 // indirect
 	github.com/multiformats/go-multibase v0.2.0 // indirect
 	github.com/multiformats/go-multihash v0.2.3 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/selinux v1.11.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/client_golang v1.19.0 // indirect
+	github.com/prometheus/client_golang v1.19.1 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
@@ -126,9 +126,9 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.30.1 // indirect
-	k8s.io/apimachinery v0.30.1 // indirect
-	k8s.io/client-go v0.30.1 // indirect
+	k8s.io/api v0.30.2 // indirect
+	k8s.io/apimachinery v0.30.2 // indirect
+	k8s.io/client-go v0.30.2 // indirect
 	k8s.io/klog/v2 v2.120.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b // indirect
