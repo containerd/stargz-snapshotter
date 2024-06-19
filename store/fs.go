@@ -384,9 +384,17 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 				return nil, syscall.EIO
 			}
 			log.G(ctx).WithField(remoteSnapshotLogKey, prepareFailed).
-				WithField("layerdigest", n.digest).
+				WithField("digest", n.digest).
 				WithError(err).
 				Debugf("error resolving layer (context error: %v)", cErr)
+			log.G(ctx).WithError(err).Warnf("failed to mount layer %q: %q", name, n.digest)
+			return nil, syscall.EIO
+		}
+		if err := l.Verify(n.digest); err != nil {
+			log.G(ctx).WithField(remoteSnapshotLogKey, prepareFailed).
+				WithField("digest", n.digest).
+				WithError(err).
+				Debugf("failed to verify layer")
 			log.G(ctx).WithError(err).Warnf("failed to mount layer %q: %q", name, n.digest)
 			return nil, syscall.EIO
 		}

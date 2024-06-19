@@ -108,6 +108,7 @@ type Info struct {
 	FetchedSize  int64     // layer fetched size in bytes
 	PrefetchSize int64     // layer prefetch size in bytes
 	ReadTime     time.Time // last time the layer was read
+	TOCDigest    digest.Digest
 }
 
 // Resolver resolves the layer location and provieds the handler of that layer.
@@ -415,6 +416,7 @@ func (l *layer) Info() Info {
 		FetchedSize:  l.blob.FetchedSize(),
 		PrefetchSize: l.prefetchedSize(),
 		ReadTime:     readTime,
+		TOCDigest:    l.verifiableReader.Metadata().TOCDigest(),
 	}
 }
 
