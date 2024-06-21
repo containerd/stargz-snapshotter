@@ -26,12 +26,12 @@ import (
 
 	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/labels"
 	"github.com/containerd/containerd/reference"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	esgzexternaltoc "github.com/containerd/stargz-snapshotter/estargz/externaltoc"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"

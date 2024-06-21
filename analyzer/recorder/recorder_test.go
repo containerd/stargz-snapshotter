@@ -28,7 +28,7 @@ import (
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/content/local"
-	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/testutil"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
