@@ -31,11 +31,11 @@ import (
 	"time"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
-	"github.com/containerd/containerd/contrib/snapshotservice"
-	"github.com/containerd/containerd/defaults"
-	"github.com/containerd/containerd/pkg/dialer"
-	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/sys"
+	"github.com/containerd/containerd/v2/contrib/snapshotservice"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/defaults"
+	"github.com/containerd/containerd/v2/pkg/dialer"
+	"github.com/containerd/containerd/v2/pkg/sys"
 	"github.com/containerd/log"
 	dbmetadata "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/db"
 	ipfs "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/ipfs"
@@ -51,7 +51,6 @@ import (
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	metrics "github.com/docker/go-metrics"
 	"github.com/pelletier/go-toml"
-	"github.com/sirupsen/logrus"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
@@ -63,7 +62,7 @@ import (
 const (
 	defaultAddress             = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
 	defaultConfigPath          = "/etc/containerd-stargz-grpc/config.toml"
-	defaultLogLevel            = logrus.InfoLevel
+	defaultLogLevel            = log.InfoLevel
 	defaultRootDir             = "/var/lib/containerd-stargz-grpc"
 	defaultImageServiceAddress = "/run/containerd/containerd.sock"
 )
@@ -98,7 +97,8 @@ type snapshotterConfig struct {
 func main() {
 	rand.Seed(time.Now().UnixNano()) //nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
 	flag.Parse()
-	lvl, err := logrus.ParseLevel(*logLevel)
+	log.SetFormat(log.JSONFormat)
+	err := log.SetLevel(*logLevel)
 	if err != nil {
 		log.L.WithError(err).Fatal("failed to prepare logger")
 	}
@@ -106,10 +106,6 @@ func main() {
 		fmt.Println("containerd-stargz-grpc", version.Version, version.Revision)
 		return
 	}
-	logrus.SetLevel(lvl)
-	logrus.SetFormatter(&logrus.JSONFormatter{
-		TimestampFormat: log.RFC3339NanoFixed,
-	})
 
 	var (
 		ctx    = log.WithLogger(context.Background(), log.L)
@@ -118,7 +114,7 @@ func main() {
 	// Streams log of standard lib (go-fuse uses this) into debug log
 	// Snapshotter should use "github.com/containerd/log" otherwize
 	// logs are always printed as "debug" mode.
-	golog.SetOutput(log.G(ctx).WriterLevel(logrus.DebugLevel))
+	golog.SetOutput(log.G(ctx).WriterLevel(log.DebugLevel))
 
 	// Get configuration from specified file
 	tree, err := toml.LoadFile(*configPath)
@@ -162,7 +158,7 @@ func main() {
 		runtime.RegisterImageServiceServer(rpc, criServer)
 		credsFuncs = append(credsFuncs, f)
 	}
-	fsOpts := []fs.Option{fs.WithMetricsLogLevel(logrus.InfoLevel)}
+	fsOpts := []fs.Option{fs.WithMetricsLogLevel(log.InfoLevel)}
 	if config.IPFS {
 		fsOpts = append(fsOpts, fs.WithResolveHandler("ipfs", new(ipfs.ResolveHandler)))
 	}

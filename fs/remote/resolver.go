@@ -38,8 +38,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cache"

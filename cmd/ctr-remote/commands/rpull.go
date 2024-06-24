@@ -20,18 +20,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/cmd/ctr/commands"
-	"github.com/containerd/containerd/cmd/ctr/commands/content"
-	"github.com/containerd/containerd/images"
-	ctdsnapshotters "github.com/containerd/containerd/pkg/snapshotters"
-	"github.com/containerd/containerd/snapshots"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	ctdsnapshotters "github.com/containerd/containerd/v2/pkg/snapshotters"
 	"github.com/containerd/log"
 	fsconfig "github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/ipfs"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 const (
@@ -40,7 +40,7 @@ const (
 )
 
 // RpullCommand is a subcommand to pull an image from a registry levaraging stargz snapshotter
-var RpullCommand = cli.Command{
+var RpullCommand = &cli.Command{
 	Name:      "rpull",
 	Usage:     "pull an image from a registry levaraging stargz snapshotter",
 	ArgsUsage: "[flags] <ref>",
@@ -50,15 +50,15 @@ After pulling an image, it should be ready to use the same reference in a run
 command. 
 `,
 	Flags: append(append(commands.RegistryFlags, commands.LabelFlag,
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  skipContentVerifyOpt,
 			Usage: "Skip content verification for layers contained in this image.",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "ipfs",
 			Usage: "Pull image from IPFS. Specify an IPFS CID as a reference. (experimental)",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "use-containerd-labels",
 			Usage: "Use labels defined in containerd project",
 		},

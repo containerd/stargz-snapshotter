@@ -25,12 +25,13 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/containerd/containerd/cmd/ctr/commands"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/images/converter"
-	"github.com/containerd/containerd/images/converter/uncompress"
-	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/images/converter"
+	"github.com/containerd/containerd/v2/core/images/converter/uncompress"
+	"github.com/containerd/log"
+	"github.com/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	esgzexternaltocconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz/externaltoc"
@@ -38,12 +39,11 @@ import (
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/klauspost/compress/zstd"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // ConvertCommand converts an image
-var ConvertCommand = cli.Command{
+var ConvertCommand = &cli.Command{
 	Name:      "convert",
 	Usage:     "convert an image",
 	ArgsUsage: "[flags] <source_ref> <target_ref>...",
@@ -56,72 +56,72 @@ When '--all-platforms' is given all images in a manifest list must be available.
 `,
 	Flags: []cli.Flag{
 		// estargz flags
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "estargz",
 			Usage: "convert legacy tar(.gz) layers to eStargz for lazy pulling. Should be used in conjunction with '--oci'",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "estargz-record-in",
 			Usage: "Read 'ctr-remote optimize --record-out=<FILE>' record file",
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "estargz-compression-level",
 			Usage: "eStargz compression level",
 			Value: gzip.BestCompression,
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "estargz-chunk-size",
 			Usage: "eStargz chunk size",
 			Value: 0,
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "estargz-min-chunk-size",
 			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand.",
 			Value: 0,
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "estargz-external-toc",
 			Usage: "Separate TOC JSON into another image (called \"TOC image\"). The name of TOC image is the original + \"-esgztoc\" suffix. Both eStargz and the TOC image should be pushed to the same registry. stargz-snapshotter refers to the TOC image when it pulls the result eStargz image.",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "estargz-keep-diff-id",
 			Usage: "convert to esgz without changing diffID (cannot be used in conjunction with '--estargz-record-in'. must be specified with '--estargz-external-toc')",
 		},
 		// zstd:chunked flags
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "zstdchunked",
 			Usage: "use zstd compression instead of gzip (a.k.a zstd:chunked). Must be used in conjunction with '--oci'.",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "zstdchunked-record-in",
 			Usage: "Read 'ctr-remote optimize --record-out=<FILE>' record file",
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "zstdchunked-compression-level",
 			Usage: "zstd:chunked compression level",
 			Value: 3, // SpeedDefault; see also https://pkg.go.dev/github.com/klauspost/compress/zstd#EncoderLevel
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "zstdchunked-chunk-size",
 			Usage: "zstd:chunked chunk size",
 			Value: 0,
 		},
 		// generic flags
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "uncompress",
 			Usage: "convert tar.gz layers to uncompressed tar layers",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "oci",
 			Usage: "convert Docker media types to OCI media types",
 		},
 		// platform flags
-		cli.StringSliceFlag{
+		&cli.StringSliceFlag{
 			Name:  "platform",
 			Usage: "Convert content for a specific platform",
 			Value: &cli.StringSlice{},
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "all-platforms",
 			Usage: "Convert content for all platforms",
 		},
@@ -183,7 +183,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 				layerConvertFunc = estargzconvert.LayerConvertFunc(esgzOpts...)
 			}
 			if !context.Bool("oci") {
-				logrus.Warn("option --estargz should be used in conjunction with --oci")
+				log.L.Warn("option --estargz should be used in conjunction with --oci")
 			}
 			if context.Bool("uncompress") {
 				return errors.New("option --estargz conflicts with --uncompress")
@@ -239,7 +239,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			// Cleanly cancel conversion
 			select {
 			case s := <-sigCh:
-				logrus.Infof("Got %v", s)
+				log.G(ctx).Infof("Got %v", s)
 				cancel()
 			case <-ctx.Done():
 			}
