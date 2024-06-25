@@ -181,7 +181,7 @@ COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
 
 # Base image which contains podman with stargz-store
-FROM ubuntu:22.04 AS podman-base
+FROM ubuntu:24.04 AS podman-base
 ARG TARGETARCH
 ARG CNI_PLUGINS_VERSION
 ARG PODMAN_VERSION
