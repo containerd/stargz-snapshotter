@@ -10,7 +10,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Build
     steps:
     - uses: actions/checkout@v4
@@ -18,7 +18,7 @@ jobs:
       run: ./script/util/make.sh build -j2
 
   test:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Test
     steps:
     - uses: actions/checkout@v4
@@ -26,7 +26,7 @@ jobs:
       run: ./script/util/make.sh test-all -j2
 
   linter:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Linter
     strategy:
       fail-fast: false
@@ -47,7 +47,7 @@ jobs:
         working-directory: ${{ matrix.targetdir }}
 
   integration:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Integration
     strategy:
       fail-fast: false
@@ -76,7 +76,7 @@ jobs:
       run: make integration
 
   test-optimize:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Optimize
     strategy:
       fail-fast: false
@@ -94,7 +94,7 @@ jobs:
       run: make test-optimize
 
   test-kind:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Kind
     strategy:
       fail-fast: false
@@ -117,7 +117,7 @@ jobs:
       run: make test-kind
 
   test-criauth:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: CRIAuth
     strategy:
       fail-fast: false
@@ -140,7 +140,7 @@ jobs:
       run: make test-criauth
 
   test-cri-containerd:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: CRIValidationContainerd
     strategy:
       fail-fast: false
@@ -167,7 +167,7 @@ jobs:
       run: make test-cri-containerd
 
   test-cri-cri-o:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: CRIValidationCRIO
     strategy:
       fail-fast: false
@@ -190,7 +190,7 @@ jobs:
         make test-cri-o
 
   test-podman:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: PodmanRootless
     steps:
     - uses: actions/checkout@v4
@@ -198,7 +198,7 @@ jobs:
       run: make test-podman
 
   test-k3s:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: K3S
     steps:
     - uses: actions/setup-go@v5
@@ -218,7 +218,7 @@ jobs:
       run: make test-k3s
 
   test-ipfs:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: IPFS
     steps:
     - uses: actions/checkout@v4
@@ -226,7 +226,7 @@ jobs:
       run: make test-ipfs
 
   test-k3s-argo-workflow:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: K3SArgoWorkflow
     env:
       RESULT_DIR: ${{ github.workspace }}/argo-workflow/
@@ -273,7 +273,7 @@ jobs:
 
   project:
     name: Project Checks
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/setup-go@v5
