@@ -103,11 +103,11 @@ EOF
 cp "${REPO}/script/criauth/mirror.sh" "${MIRROR_TMP}/mirror.sh"
 if ! ( cd "${CONTEXT}" && \
            docker network create "${REGISTRY_NETWORK}" && \
-           docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
+           docker compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
            docker exec "${PREPARE_NODE_NAME}" /bin/bash /tools/mirror.sh \
                   "${TESTIMAGE_ORIGIN}" "${TESTIMAGE}" ) ; then
     echo "Failed to prepare private registry"
-    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+    docker compose -f "${DOCKER_COMPOSE_YAML}" down -v
     docker network rm "${REGISTRY_NETWORK}"
     exit 1
 fi
@@ -126,7 +126,7 @@ if ! ( "${CONTEXT}"/run-kind.sh "${KIND_CLUSTER_NAME}" \
                      "${KIND_KUBECONFIG}" "${TESTIMAGE}" ) ; then
     FAIL=true
 fi
-docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+docker compose -f "${DOCKER_COMPOSE_YAML}" down -v
 kind delete cluster --name "${KIND_CLUSTER_NAME}"
 docker network rm "${REGISTRY_NETWORK}"
 

@@ -150,11 +150,11 @@ volumes:
 EOF
     local FAIL=
     if ! ( cd "${CONTEXT}" && \
-               docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} testenv_opt && \
-               docker-compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
+               docker compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} testenv_opt && \
+               docker compose -f "${DOCKER_COMPOSE_YAML}" up --abort-on-container-exit ) ; then
         FAIL=true
     fi
-    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+    docker compose -f "${DOCKER_COMPOSE_YAML}" down -v
     if [ "${FAIL}" == "true" ] ; then
         exit 1
     fi
