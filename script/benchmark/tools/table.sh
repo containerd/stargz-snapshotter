@@ -47,7 +47,7 @@ done
 cat <<EOF
 # Benchmarking Result (${PERCENTILE} pctl.,samples=${MINSAMPLES})
 
-Runs on the ubuntu-22.04 runner on Github Actions.
+Runs on the ubuntu-24.04 runner on Github Actions.
 EOF
 
 for IMGNAME in "${IMAGES[@]}" ; do
