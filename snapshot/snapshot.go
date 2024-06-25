@@ -24,12 +24,12 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/moby/sys/mountinfo"
 	"github.com/sirupsen/logrus"

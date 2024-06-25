@@ -23,11 +23,11 @@ import (
 
 	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/labels"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/util/ioutils"

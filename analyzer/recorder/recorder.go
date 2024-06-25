@@ -28,10 +28,10 @@ import (
 
 	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/converter/uncompress"
 	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
