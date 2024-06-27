@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporary disable contaienrd main branch test and migrate to containerd v2 after it's released.
+        # Temporary disable containerd main branch test and migrate to containerd v2 after it's released.
         # buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         buildargs: [""]
         builtin: ["true", "false"]

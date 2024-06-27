@@ -20,34 +20,35 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/containerd/containerd/cmd/ctr/commands"
-	"github.com/containerd/containerd/images/converter"
-	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands"
+	"github.com/containerd/containerd/v2/core/images/converter"
+	"github.com/containerd/log"
+	"github.com/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/ipfs"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // IPFSPushCommand pushes an image to IPFS
-var IPFSPushCommand = cli.Command{
+var IPFSPushCommand = &cli.Command{
 	Name:      "ipfs-push",
 	Usage:     "push an image to IPFS (experimental)",
 	ArgsUsage: "[flags] <image_ref>",
 	Flags: []cli.Flag{
 		// platform flags
-		cli.StringSliceFlag{
+		&cli.StringSliceFlag{
 			Name:  "platform",
 			Usage: "Add content for a specific platform",
 			Value: &cli.StringSlice{},
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "all-platforms",
 			Usage: "Add content for all platforms",
 		},
-		cli.BoolTFlag{
+		&cli.BoolFlag{
 			Name:  "estargz",
+			Value: true,
 			Usage: "Convert the image into eStargz",
 		},
 	},
@@ -90,7 +91,7 @@ var IPFSPushCommand = cli.Command{
 		if err != nil {
 			return err
 		}
-		logrus.WithField("CID", p).Infof("Pushed")
+		log.L.WithField("CID", p).Infof("Pushed")
 		fmt.Println(p)
 
 		return nil

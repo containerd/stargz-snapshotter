@@ -24,11 +24,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/remotes"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/platforms"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -119,7 +119,7 @@ func ManifestDesc(ctx context.Context, provider content.Provider, image ocispec.
 	return m[0], nil
 }
 
-// Forked from github.com/containerd/containerd/images/image.go
+// Forked from github.com/containerd/containerd/v2/core/images/image.go
 // commit: a776a27af54a803657d002e7574a4425b3949f56
 
 // unknownDocument represents a manifest, manifest list, or index that has not

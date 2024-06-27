@@ -40,12 +40,11 @@ import (
 	"github.com/containerd/stargz-snapshotter/store"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/pelletier/go-toml"
-	"github.com/sirupsen/logrus"
 	bolt "go.etcd.io/bbolt"
 )
 
 const (
-	defaultLogLevel   = logrus.InfoLevel
+	defaultLogLevel   = log.InfoLevel
 	defaultConfigPath = "/etc/stargz-store/config.toml"
 	defaultRootDir    = "/var/lib/stargz-store"
 )
@@ -80,14 +79,11 @@ func main() {
 	rand.Seed(time.Now().UnixNano()) //nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
 	flag.Parse()
 	mountPoint := flag.Arg(0)
-	lvl, err := logrus.ParseLevel(*logLevel)
+	err := log.SetLevel(*logLevel)
 	if err != nil {
 		log.L.WithError(err).Fatal("failed to prepare logger")
 	}
-	logrus.SetLevel(lvl)
-	logrus.SetFormatter(&logrus.JSONFormatter{
-		TimestampFormat: log.RFC3339NanoFixed,
-	})
+	log.SetFormat(log.JSONFormat)
 	var (
 		ctx    = log.WithLogger(context.Background(), log.L)
 		config Config
@@ -95,7 +91,7 @@ func main() {
 	// Streams log of standard lib (go-fuse uses this) into debug log
 	// Snapshotter should use "github.com/containerd/log" otherwise
 	// logs are always printed as "debug" mode.
-	golog.SetOutput(log.G(ctx).WriterLevel(logrus.DebugLevel))
+	golog.SetOutput(log.G(ctx).WriterLevel(log.DebugLevel))
 
 	if mountPoint == "" {
 		log.G(ctx).Fatalf("mount point must be specified")
