@@ -38,7 +38,7 @@ LOG_FILE=$(mktemp)
 MIRROR_TMP=$(mktemp -d)
 function cleanup {
     ORG_EXIT_CODE="${1}"
-    docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v || true
+    docker compose -f "${DOCKER_COMPOSE_YAML}" down -v || true
     rm -rf "${TMP_CONTEXT}" || true
     rm "${DOCKER_COMPOSE_YAML}" || true
     rm "${CRIO_CONFIG}" || true
@@ -109,7 +109,7 @@ volumes:
   critest-prepare-containerd-data:
   critest-prepare-containerd-stargz-grpc-data:
 EOF
-docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate
+docker compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate
 
 retry docker exec "${PREPARE_NODE_NAME}" curl -k --head "http://${REGISTRY_HOST}:5000/v2/"
 

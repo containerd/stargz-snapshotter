@@ -10,7 +10,7 @@ env:
 
 jobs:
   kind-image:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Kind image
     steps:
       - name: Checkout
