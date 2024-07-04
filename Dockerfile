@@ -108,7 +108,7 @@ ARG CTR_REMOTE_BUILD_FLAGS
 COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
 ARG CGO_ENABLED
 RUN cd $GOPATH/src/github.com/containerd/stargz-snapshotter && \
-    PREFIX=/out/ GOARCH=${TARGETARCH:-amd64} GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make stargz-store
+    PREFIX=/out/ GOARCH=${TARGETARCH:-amd64} GO_BUILD_FLAGS=${SNAPSHOTTER_BUILD_FLAGS} make stargz-store stargz-store-helper
 
 # Build podman
 FROM golang-base AS podman-dev
