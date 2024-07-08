@@ -70,8 +70,8 @@ cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${BENCHMARKING_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
-    apt-get install -y python2 jq wget && \
-    ln -s /usr/bin/python2 /usr/bin/python && \
+    apt-get install -y python3 jq wget && \
+    ln -s /usr/bin/python3 /usr/bin/python && \
     mkdir -p /tmp/crane && \
     wget -O - https://github.com/google/go-containerregistry/releases/download/v0.19.1/go-containerregistry_Linux_x86_64.tar.gz | tar -C /tmp/crane/ -zxf - && \
     mv /tmp/crane/crane /usr/local/bin/
@@ -133,9 +133,9 @@ echo "Logging to >>> ${LOG_FILE} (will finally be stored under ${OUTPUTDIR})"
 echo "Benchmarking..."
 FAIL=
 if ! ( cd "${CONTEXT}" && \
-           docker-compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} \
+           docker compose -f "${DOCKER_COMPOSE_YAML}" build ${DOCKER_BUILD_ARGS:-} \
                           "${BENCHMARKING_NODE}" && \
-           docker-compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
+           docker compose -f "${DOCKER_COMPOSE_YAML}" up -d --force-recreate && \
            docker exec \
 		  -e BENCHMARK_RUNTIME_MODE -e BENCHMARK_SAMPLES_NUM -e BENCHMARK_PROFILE \
                   -i "${BENCHMARKING_CONTAINER}" \
@@ -165,7 +165,7 @@ if [ "${FAIL}" != "true" ] ; then
 fi
 
 echo "Cleaning up environment..."
-docker-compose -f "${DOCKER_COMPOSE_YAML}" down -v
+docker compose -f "${DOCKER_COMPOSE_YAML}" down -v
 if [ "${FAIL}" == "true" ] ; then
     exit 1
 fi
