@@ -36,9 +36,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
-	dconfig "github.com/containerd/containerd/remotes/docker/config"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	dconfig "github.com/containerd/containerd/v2/core/remotes/docker/config"
+	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	rhttp "github.com/hashicorp/go-retryablehttp"

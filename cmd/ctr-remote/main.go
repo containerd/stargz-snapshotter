@@ -20,20 +20,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/containerd/containerd/cmd/ctr/app"
-	"github.com/containerd/containerd/pkg/seed" //nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
+	"github.com/containerd/containerd/v2/cmd/ctr/app"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/commands"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
-func init() {
-	// From https://github.com/containerd/containerd/blob/f7f2be732159a411eae46b78bfdb479b133a823b/cmd/ctr/main.go
-	//nolint:staticcheck // Global math/rand seed is deprecated, but still used by external dependencies
-	seed.WithTimeAndRand()
-}
-
 func main() {
-	customCommands := []cli.Command{
+	customCommands := []*cli.Command{
 		commands.RpullCommand,
 		commands.OptimizeCommand,
 		commands.ConvertCommand,
@@ -43,7 +36,7 @@ func main() {
 	app := app.New()
 	for i := range app.Commands {
 		if app.Commands[i].Name == "images" {
-			sc := map[string]cli.Command{}
+			sc := map[string]*cli.Command{}
 			for _, subcmd := range customCommands {
 				sc[subcmd.Name] = subcmd
 			}

@@ -24,11 +24,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/containerd/containerd/defaults"
-	"github.com/containerd/containerd/pkg/dialer"
-	"github.com/containerd/containerd/platforms"
-	ctdplugin "github.com/containerd/containerd/plugin"
+	"github.com/containerd/containerd/v2/defaults"
+	"github.com/containerd/containerd/v2/pkg/dialer"
+	ctdplugins "github.com/containerd/containerd/v2/plugins"
 	"github.com/containerd/log"
+	"github.com/containerd/platforms"
+	"github.com/containerd/plugin"
+	"github.com/containerd/plugin/registry"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
@@ -55,11 +57,11 @@ type Config struct {
 }
 
 func RegisterPlugin() {
-	ctdplugin.Register(&ctdplugin.Registration{
-		Type:   ctdplugin.SnapshotPlugin,
+	registry.Register(&plugin.Registration{
+		Type:   ctdplugins.SnapshotPlugin,
 		ID:     "stargz",
 		Config: &Config{},
-		InitFn: func(ic *ctdplugin.InitContext) (interface{}, error) {
+		InitFn: func(ic *plugin.InitContext) (interface{}, error) {
 			ic.Meta.Platforms = append(ic.Meta.Platforms, platforms.DefaultSpec())
 			ctx := ic.Context
 
@@ -68,7 +70,7 @@ func RegisterPlugin() {
 				return nil, errors.New("invalid stargz snapshotter configuration")
 			}
 
-			root := ic.Root
+			root := ic.Properties[ctdplugins.PropertyRootDir]
 			if config.RootPath != "" {
 				root = config.RootPath
 			}
@@ -85,7 +87,7 @@ func RegisterPlugin() {
 			}
 			if addr := config.CRIKeychainImageServicePath; config.Config.CRIKeychainConfig.EnableKeychain && addr != "" {
 				// connects to the backend CRI service (defaults to containerd socket)
-				criAddr := ic.Address
+				criAddr := ic.Properties[ctdplugins.PropertyGRPCAddress]
 				if cp := config.Config.CRIKeychainConfig.ImageServicePath; cp != "" {
 					criAddr = cp
 				}

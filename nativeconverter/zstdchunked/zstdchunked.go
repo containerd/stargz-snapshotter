@@ -21,20 +21,20 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/images/converter"
-	"github.com/containerd/containerd/images/converter/uncompress"
-	"github.com/containerd/containerd/labels"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/images/converter"
+	"github.com/containerd/containerd/v2/core/images/converter/uncompress"
+	"github.com/containerd/containerd/v2/pkg/archive/compression"
+	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/util/ioutils"
 	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
 )
 
 type zstdCompression struct {
@@ -111,10 +111,10 @@ func LayerConvertFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, op
 			}
 			defer func() {
 				if err := cs.Delete(ctx, uncompressedDesc.Digest); err != nil {
-					logrus.WithError(err).WithField("uncompressedDesc", uncompressedDesc).Warn("failed to remove tmp uncompressed layer")
+					log.G(ctx).WithError(err).WithField("uncompressedDesc", uncompressedDesc).Warn("failed to remove tmp uncompressed layer")
 				}
 			}()
-			logrus.Debugf("zstdchunked: uncompressed %s into %s", desc.Digest, uncompressedDesc.Digest)
+			log.G(ctx).Debugf("zstdchunked: uncompressed %s into %s", desc.Digest, uncompressedDesc.Digest)
 		}
 
 		info, err := cs.Info(ctx, desc.Digest)

@@ -32,7 +32,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -49,7 +49,6 @@ import (
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -145,10 +144,10 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	layerCache := cacheutil.NewTTLCache(resolveResultEntryTTL)
 	layerCache.OnEvicted = func(key string, value interface{}) {
 		if err := value.(*layer).close(); err != nil {
-			logrus.WithField("key", key).WithError(err).Warnf("failed to clean up layer")
+			log.L.WithField("key", key).WithError(err).Warnf("failed to clean up layer")
 			return
 		}
-		logrus.WithField("key", key).Debugf("cleaned up layer")
+		log.L.WithField("key", key).Debugf("cleaned up layer")
 	}
 
 	// blobCache caches resolved blobs for futural use. This is especially useful when a layer
@@ -156,10 +155,10 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	blobCache := cacheutil.NewTTLCache(resolveResultEntryTTL)
 	blobCache.OnEvicted = func(key string, value interface{}) {
 		if err := value.(remote.Blob).Close(); err != nil {
-			logrus.WithField("key", key).WithError(err).Warnf("failed to clean up blob")
+			log.L.WithField("key", key).WithError(err).Warnf("failed to clean up blob")
 			return
 		}
-		logrus.WithField("key", key).Debugf("cleaned up blob")
+		log.L.WithField("key", key).Debugf("cleaned up blob")
 	}
 
 	if err := os.MkdirAll(root, 0700); err != nil {
