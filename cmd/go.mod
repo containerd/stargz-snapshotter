@@ -5,7 +5,7 @@ go 1.22.0
 require (
 	github.com/containerd/containerd/api v1.8.0-rc.2
 	github.com/containerd/containerd/v2 v2.0.0-rc.3
-	github.com/containerd/go-cni v1.1.9
+	github.com/containerd/go-cni v1.1.10
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v0.2.1
 	github.com/containerd/stargz-snapshotter v0.15.2-0.20240622031358-6405f362966d
@@ -32,7 +32,6 @@ require (
 require (
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24 // indirect
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
-	github.com/Masterminds/semver/v3 v3.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Microsoft/hcsshim v0.12.4 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -47,7 +46,7 @@ require (
 	github.com/containerd/plugin v0.1.0 // indirect
 	github.com/containerd/ttrpc v1.2.4 // indirect
 	github.com/containerd/typeurl/v2 v2.1.1 // indirect
-	github.com/containernetworking/cni v1.2.0 // indirect
+	github.com/containernetworking/cni v1.2.2 // indirect
 	github.com/containernetworking/plugins v1.4.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
