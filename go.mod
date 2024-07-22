@@ -12,7 +12,7 @@ require (
 	github.com/containerd/plugin v0.1.0
 	github.com/containerd/stargz-snapshotter/estargz v0.15.1
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v26.1.4+incompatible
+	github.com/docker/cli v27.1.0+incompatible
 	github.com/docker/go-metrics v0.0.1
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/hanwen/go-fuse/v2 v2.5.1
@@ -51,7 +51,6 @@ require (
 	github.com/containernetworking/cni v1.2.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/docker/docker v24.0.9+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
