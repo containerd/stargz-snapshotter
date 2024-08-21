@@ -22,7 +22,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.5.0
 	github.com/urfave/cli/v2 v2.27.2
-	go.etcd.io/bbolt v1.3.10
+	go.etcd.io/bbolt v1.3.11
 	golang.org/x/sync v0.7.0
 	golang.org/x/sys v0.21.0
 	google.golang.org/grpc v1.63.2
