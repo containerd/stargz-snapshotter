@@ -148,5 +148,5 @@ func newCRIConn(criAddr string) (*grpc.ClientConn, error) {
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
 	}
-	return grpc.Dial(dialer.DialAddress(criAddr), gopts...)
+	return grpc.NewClient(dialer.DialAddress(criAddr), gopts...)
 }
