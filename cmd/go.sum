@@ -27,8 +27,8 @@ github.com/containerd/cgroups/v3 v3.0.3 h1:S5ByHZ/h9PMe5IOQoN7E+nMc2UcLEM/V48DGD
 github.com/containerd/cgroups/v3 v3.0.3/go.mod h1:8HBe7V3aWGLFPd/k03swSIsGjZhHI2WzJmticMgVuz0=
 github.com/containerd/console v1.0.4 h1:F2g4+oChYvBTsASRTz8NP6iIAi97J3TtSAsLbIFn4ro=
 github.com/containerd/console v1.0.4/go.mod h1:YynlIjWYF8myEu6sdkwKIvGQq+cOckRm6So2avqoYAk=
-github.com/containerd/containerd/api v1.8.0-rc.2 h1:EnWLDKWWbIRzuy71L20P3VF/DhxSaDEocsovKPdW5Oo=
-github.com/containerd/containerd/api v1.8.0-rc.2/go.mod h1:VgMSK19YOLolP4a1/b5vlVkTo8MzMoLPZnvD1PNWeGg=
+github.com/containerd/containerd/api v1.8.0-rc.3 h1:q9MyeXmuAGEyKmUGYvvFftNX1RQhfTLsAvYK+SQHQso=
+github.com/containerd/containerd/api v1.8.0-rc.3/go.mod h1:dFv4lt6S20wTu/hMcP4350RL87qPWLVa/OHOwmmdnYc=
 github.com/containerd/containerd/v2 v2.0.0-rc.3 h1:rRISeKYnunLx8Byw8FQ/a62mTMtcr6ESGptS4+MwLaQ=
 github.com/containerd/containerd/v2 v2.0.0-rc.3/go.mod h1:UBHR1DgWRQcEOINFkR94m0VC0MgKd3qg9LVPnudv9vs=
 github.com/containerd/continuity v0.4.3 h1:6HVkalIp+2u1ZLH1J/pYX2oBVXlJZvh1X1A7bEZ9Su8=
@@ -47,8 +47,8 @@ github.com/containerd/platforms v0.2.1 h1:zvwtM3rz2YHPQsF2CHYM8+KtB5dvhISiXh5ZpS
 github.com/containerd/platforms v0.2.1/go.mod h1:XHCb+2/hzowdiut9rkudds9bE5yJ7npe7dG/wG+uFPw=
 github.com/containerd/plugin v0.1.0 h1:CYMyZk9beRAIe1FEKItbMLLAz/z16aXrGc+B+nv0fU4=
 github.com/containerd/plugin v0.1.0/go.mod h1:j6HlpMtkiZMgT4UsfVNxPBUkwdw9KQGU6nCLfRxnq+w=
-github.com/containerd/ttrpc v1.2.4 h1:eQCQK4h9dxDmpOb9QOOMh2NHTfzroH1IkmHiKZi05Oo=
-github.com/containerd/ttrpc v1.2.4/go.mod h1:ojvb8SJBSch0XkqNO0L0YX/5NxR3UnVk2LzFKBK0upc=
+github.com/containerd/ttrpc v1.2.5 h1:IFckT1EFQoFBMG4c3sMdT8EP3/aKfumK1msY+Ze4oLU=
+github.com/containerd/ttrpc v1.2.5/go.mod h1:YCXHsb32f+Sq5/72xHubdiJRQY9inL4a4ZQrAbN1q9o=
 github.com/containerd/typeurl/v2 v2.1.1 h1:3Q4Pt7i8nYwy2KmQWIw2+1hTvwTE/6w9FqcttATPO/4=
 github.com/containerd/typeurl/v2 v2.1.1/go.mod h1:IDp2JFvbwZ31H8dQbEIY7sDl2L3o3HZj1hsSQlywkQ0=
 github.com/containernetworking/cni v1.2.2 h1:9IbP6KJQQxVKo4hhnm8r50YcVKrJbJu3Dqw+Rbt1vYk=

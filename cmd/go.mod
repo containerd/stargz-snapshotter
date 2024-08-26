@@ -3,7 +3,7 @@ module github.com/containerd/stargz-snapshotter/cmd
 go 1.22.0
 
 require (
-	github.com/containerd/containerd/api v1.8.0-rc.2
+	github.com/containerd/containerd/api v1.8.0-rc.3
 	github.com/containerd/containerd/v2 v2.0.0-rc.3
 	github.com/containerd/go-cni v1.1.10
 	github.com/containerd/log v0.1.0
@@ -44,7 +44,7 @@ require (
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/go-runc v1.1.0 // indirect
 	github.com/containerd/plugin v0.1.0 // indirect
-	github.com/containerd/ttrpc v1.2.4 // indirect
+	github.com/containerd/ttrpc v1.2.5 // indirect
 	github.com/containerd/typeurl/v2 v2.1.1 // indirect
 	github.com/containernetworking/cni v1.2.2 // indirect
 	github.com/containernetworking/plugins v1.4.1 // indirect
