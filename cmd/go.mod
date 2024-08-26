@@ -20,7 +20,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/pelletier/go-toml v1.9.5
-	github.com/rs/xid v1.5.0
+	github.com/rs/xid v1.6.0
 	github.com/urfave/cli/v2 v2.27.4
 	go.etcd.io/bbolt v1.3.11
 	golang.org/x/sync v0.8.0
