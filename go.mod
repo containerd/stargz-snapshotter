@@ -24,7 +24,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.0
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/prometheus/client_golang v1.19.1
-	github.com/rs/xid v1.5.0
+	github.com/rs/xid v1.6.0
 	golang.org/x/sync v0.8.0
 	golang.org/x/sys v0.24.0
 	google.golang.org/grpc v1.65.0
