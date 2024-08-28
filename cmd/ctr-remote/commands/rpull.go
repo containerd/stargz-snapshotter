@@ -39,12 +39,12 @@ const (
 	skipContentVerifyOpt  = "skip-content-verify"
 )
 
-// RpullCommand is a subcommand to pull an image from a registry levaraging stargz snapshotter
+// RpullCommand is a subcommand to pull an image from a registry leveraging stargz snapshotter
 var RpullCommand = &cli.Command{
 	Name:      "rpull",
-	Usage:     "pull an image from a registry levaraging stargz snapshotter",
+	Usage:     "pull an image from a registry leveraging stargz snapshotter",
 	ArgsUsage: "[flags] <ref>",
-	Description: `Fetch and prepare an image for use in containerd levaraging stargz snapshotter.
+	Description: `Fetch and prepare an image for use in containerd leveraging stargz snapshotter.
 
 After pulling an image, it should be ready to use the same reference in a run
 command. 
