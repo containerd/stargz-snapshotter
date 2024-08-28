@@ -131,7 +131,7 @@ type keychain struct {
 
 	// the following entries are used for syncing secrets with API server.
 	// these fields are lazily filled after kubeconfig file is provided.
-	queue    *workqueue.Type
+	queue    *workqueue.Typed[string]
 	informer cache.SharedIndexInformer
 }
 
@@ -180,7 +180,7 @@ func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Inte
 
 	// use workqueue because each task possibly takes long for parsing config,
 	// wating for lock, etc...
-	queue := workqueue.New()
+	queue := workqueue.NewTyped[string]()
 	defer queue.ShutDown()
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -231,14 +231,14 @@ func (kc *keychain) processNextItem() bool {
 	}
 	defer kc.queue.Done(key)
 
-	obj, exists, err := kc.informer.GetIndexer().GetByKey(key.(string))
+	obj, exists, err := kc.informer.GetIndexer().GetByKey(key)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("failed to get object; don't sync %q: %v", key, err))
 		return true
 	}
 	if !exists {
 		kc.configMu.Lock()
-		delete(kc.config, key.(string))
+		delete(kc.config, key)
 		kc.configMu.Unlock()
 		return true
 	}
@@ -255,7 +255,7 @@ func (kc *keychain) processNextItem() bool {
 		return true
 	}
 	kc.configMu.Lock()
-	kc.config[key.(string)] = configFile
+	kc.config[key] = configFile
 	kc.configMu.Unlock()
 
 	return true
