@@ -131,7 +131,7 @@ ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
 # Do not install git and its dependencies here which will cause failure of building the image
 RUN apt-get update && apt-get install -y --no-install-recommends make && \
-    curl -Ls https://dl.google.com/go/go1.22.3.linux-\${TARGETARCH:-amd64}.tar.gz | tar -C /usr/local -xz && \
+    curl -Ls https://dl.google.com/go/go1.23.0.linux-\${TARGETARCH:-amd64}.tar.gz | tar -C /usr/local -xz && \
     go install github.com/onsi/ginkgo/ginkgo@${GINKGO_VERSION} && \
     mkdir -p \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools /tmp/cri-tools && \
     curl -sL https://github.com/kubernetes-sigs/cri-tools/archive/refs/tags/v${CRI_TOOLS_VERSION}.tar.gz | tar -C /tmp/cri-tools -xz && \
