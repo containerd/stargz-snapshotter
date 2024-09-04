@@ -38,11 +38,11 @@ jobs:
         fetch-depth: '0'
     - uses: actions/setup-go@v5
       with:
-        go-version: '1.22.x'
+        go-version: '1.23.x'
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v6.1.0
       with:
-        version: v1.59.1
+        version: v1.61.0
         args: --verbose --timeout=10m
         working-directory: ${{ matrix.targetdir }}
 
@@ -203,7 +203,7 @@ jobs:
     steps:
     - uses: actions/setup-go@v5
       with:
-        go-version: '1.22.x'
+        go-version: '1.23.x'
     - name: Install k3d
       run: |
         wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.6.3/install.sh | bash
@@ -233,7 +233,7 @@ jobs:
     steps:
     - uses: actions/setup-go@v5
       with:
-        go-version: '1.22.x'
+        go-version: '1.23.x'
     - name: Install k3d
       run: |
         wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.6.3/install.sh | bash
@@ -278,7 +278,7 @@ jobs:
     steps:
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22.x'
+          go-version: '1.23.x'
       - uses: actions/checkout@v4
         with:
           path: src/github.com/containerd/stargz-snapshotter
