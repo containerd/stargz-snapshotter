@@ -47,6 +47,13 @@ function cleanup {
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
+cat <<EOF > "${TMP_CONTEXT}/crio.conf"
+[crio.runtime]
+default_runtime = "runc"
+[crio.runtime.runtimes.runc]
+runtime_path = "/usr/local/sbin/runc"
+EOF
+
 # Prepare the testing node
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
@@ -68,6 +75,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends make && \
     make && make install -e BINDIR=\${GOPATH}/bin
 
 RUN echo "metadata_store = \"${USE_METADATA_STORE}\"" >> /etc/stargz-store/config.toml
+
+COPY ./crio.conf /etc/crio/
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 EOF
