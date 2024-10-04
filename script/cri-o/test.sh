@@ -47,6 +47,13 @@ function cleanup {
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
+cat <<EOF > "${TMP_CONTEXT}/crio.conf"
+[crio.runtime]
+default_runtime = "runc"
+[crio.runtime.runtimes.runc]
+runtime_path = "/usr/local/sbin/runc"
+EOF
+
 # Prepare the testing node
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
@@ -59,7 +66,7 @@ ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
 # Do not install git and its dependencies here which will cause failure of building the image
 RUN apt-get update && apt-get install -y --no-install-recommends make && \
-    curl -Ls https://dl.google.com/go/go1.22.3.linux-\${TARGETARCH:-amd64}.tar.gz | tar -C /usr/local -xz && \
+    curl -Ls https://dl.google.com/go/go1.23.0.linux-\${TARGETARCH:-amd64}.tar.gz | tar -C /usr/local -xz && \
     go install github.com/onsi/ginkgo/ginkgo@${GINKGO_VERSION} && \
     mkdir -p \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools /tmp/cri-tools && \
     curl -sL https://github.com/kubernetes-sigs/cri-tools/archive/refs/tags/v${CRI_TOOLS_VERSION}.tar.gz | tar -C /tmp/cri-tools -xz && \
@@ -68,6 +75,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends make && \
     make && make install -e BINDIR=\${GOPATH}/bin
 
 RUN echo "metadata_store = \"${USE_METADATA_STORE}\"" >> /etc/stargz-store/config.toml
+
+COPY ./crio.conf /etc/crio/
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 EOF

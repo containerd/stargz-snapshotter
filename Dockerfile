@@ -12,8 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-ARG CONTAINERD_VERSION=v2.0.0-rc.3
-ARG RUNC_VERSION=v1.1.12
+ARG CONTAINERD_VERSION=v2.0.0-rc.4
+ARG RUNC_VERSION=v1.1.14
 ARG CNI_PLUGINS_VERSION=v1.4.1
 ARG NERDCTL_VERSION=1.7.6
 
@@ -34,7 +34,7 @@ ARG CRI_TOOLS_VERSION=v1.30.0
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
-FROM golang:1.22.4-bullseye AS golang-base
+FROM golang:1.23-bullseye AS golang-base
 
 # Build containerd
 FROM golang-base AS containerd-dev
@@ -79,7 +79,7 @@ RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
     make vendor && make && DESTDIR=/out/ PREFIX= make install
 
 # Build runc
-FROM golang:1.22-bullseye AS runc-dev
+FROM golang:1.23-bullseye AS runc-dev
 ARG RUNC_VERSION
 RUN apt-get update -y && apt-get install -y libseccomp-dev && \
     git clone -b ${RUNC_VERSION} --depth 1 \
@@ -121,7 +121,7 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
 
 # Build CRI-O
 # FROM golang-base AS cri-o-dev
-FROM golang:1.22-bullseye AS cri-o-dev
+FROM golang:1.23-bullseye AS cri-o-dev
 ARG CRIO_VERSION
 RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
     git clone https://github.com/cri-o/cri-o $GOPATH/src/github.com/cri-o/cri-o && \
