@@ -1,6 +1,7 @@
 module github.com/containerd/stargz-snapshotter/cmd
 
 go 1.22.0
+toolchain go1.23.2
 
 require (
 	github.com/containerd/containerd/api v1.8.0-rc.3
@@ -26,7 +27,7 @@ require (
 	golang.org/x/sync v0.8.0
 	golang.org/x/sys v0.26.0
 	google.golang.org/grpc v1.67.1
-	k8s.io/cri-api v0.32.0-alpha.0
+	k8s.io/cri-api v0.32.0-alpha.1
 )
 
 require (
