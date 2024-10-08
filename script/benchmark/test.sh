@@ -70,8 +70,8 @@ cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${BENCHMARKING_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
-    apt-get install -y python2 jq wget && \
-    ln -s /usr/bin/python2 /usr/bin/python && \
+    apt-get install -y python3 jq wget && \
+    ln -s /usr/bin/python3 /usr/bin/python && \
     mkdir -p /tmp/crane && \
     wget -O - https://github.com/google/go-containerregistry/releases/download/v0.19.1/go-containerregistry_Linux_x86_64.tar.gz | tar -C /tmp/crane/ -zxf - && \
     mv /tmp/crane/crane /usr/local/bin/

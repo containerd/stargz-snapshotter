@@ -6,6 +6,8 @@ Description=Stargz Store service for Podman
 # TODO: fix this and do not use pipe
 ExecStart=/bin/bash -c "podman unshare stargz-store --log-level=debug --root %h/.local/share/stargz-store/data --addr %h/.local/share/stargz-store/store.sock %h/.local/share/stargz-store/store 2>&1 | cat"
 ExecStopPost=podman unshare umount %h/.local/share/stargz-store/store
+Restart=always
+RestartSec=1
 
 [Install]
 WantedBy=default.target

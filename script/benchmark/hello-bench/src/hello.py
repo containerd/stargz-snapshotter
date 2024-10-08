@@ -36,7 +36,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import os, sys, subprocess, select, random, urllib2, time, json, tempfile, shutil, itertools
+import os, sys, subprocess, select, random, time, json, tempfile, shutil, itertools
 
 TMP_DIR = tempfile.mkdtemp()
 LEGACY_MODE = "legacy"
@@ -176,7 +176,7 @@ class BenchRunner:
         elif runtime == "podman":
             self.controller = PodmanController()
         else:
-            print 'Unknown runtime mode: '+runtime
+            print ('Unknown runtime mode: '+runtime)
             exit(1)
         self.repository = repository
         self.srcrepository = srcrepository
@@ -236,15 +236,15 @@ class BenchRunner:
                              stderr=subprocess.STDOUT,
                              stdout=subprocess.PIPE)
         while True:
-            l = p.stdout.readline()
+            l = p.stdout.readline().decode("utf-8")
             if l == '':
                 continue
-            print 'out: ' + l.strip()
+            print ('out: ' + l.strip())
             # are we done?
             if l.find(runargs.waitline) >= 0:
                 runtime = time.time() - startrun
                 # cleanup
-                print 'DONE'
+                print ('DONE')
                 cmd = self.controller.task_kill_cmd(cid)
                 rc = os.system(cmd)
                 assert(rc == 0)
@@ -262,10 +262,10 @@ class BenchRunner:
         cmd = self.controller.task_start_cmd(cid)
         startrun = time.time()
         p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        print runargs.stdin
-        out, _ = p.communicate(runargs.stdin)
+        print (runargs.stdin)
+        out, _ = p.communicate(runargs.stdin.encode())
         runtime = time.time() - startrun
-        print out
+        print (out)
         assert(p.returncode == 0)
         return createtime, runtime
 
@@ -273,7 +273,7 @@ class BenchRunner:
         name = bench.name
         image = self.fully_qualify(bench.name)
 
-        print "Pulling the image..."
+        print ("Pulling the image...")
         pullcmd = self.controller.pull_cmd(image)
         startpull = time.time()
         rc = os.system(pullcmd)
@@ -291,7 +291,7 @@ class BenchRunner:
         elif name in BenchRunner.CMD_STDIN:
             createtime, runtime = self.run_cmd_stdin(image=image, cid=cid, runargs=BenchRunner.CMD_STDIN[name])
         else:
-            print 'Unknown bench: '+name
+            print ('Unknown bench: '+name)
             exit(1)
 
         return pulltime, createtime, runtime
@@ -300,7 +300,7 @@ class BenchRunner:
         period=10
         cmd = ('%s %s -cni -period %s -entrypoint \'["/bin/sh", "-c"]\' -args \'["echo hello"]\' %s %s' %
                (self.optimizer, option, period, src, dest))
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
 
@@ -312,7 +312,7 @@ class BenchRunner:
             entry = '-entrypoint \'["/bin/sh", "-c"]\''
         cmd = ('%s %s -cni -period %s %s %s %s %s' %
                (self.optimizer, option, period, entry, genargs_for_optimization(runargs.arg), src, dest))
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
 
@@ -323,10 +323,10 @@ class BenchRunner:
             a = tmp_copy(a)
             mounts += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
         period = 90
-        env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
+        env = ' '.join(['-env %s=%s' % (k,v) for k,v in runargs.env.items()])
         cmd = ('%s %s -cni -period %s %s %s %s %s %s' %
                (self.optimizer, option, period, mounts, env, genargs_for_optimization(runargs.arg), src, dest))
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
 
@@ -339,36 +339,36 @@ class BenchRunner:
         period = 60
         cmd = ('%s %s -i -cni -period %s %s -entrypoint \'["/bin/sh", "-c"]\' %s %s %s' %
                (self.optimizer, option, period, mounts, genargs_for_optimization(runargs.stdin_sh), src, dest))
-        print cmd
+        print (cmd)
         p = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        print runargs.stdin
-        out,_ = p.communicate(runargs.stdin)
-        print out
+        print (runargs.stdin)
+        out,_ = p.communicate(runargs.stdin.encode())
+        print (out)
         p.wait()
         assert(p.returncode == 0)
 
     def push_img(self, dest):
         cmd = '%s %s' % (self.pusher, dest)
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
 
     def pull_img(self, src):
         cmd = '%s %s' % (self.puller, src)
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
 
     def copy_img(self, src, dest):
         cmd = 'crane copy %s %s' % (src, dest)
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
 
     def convert_and_push_img(self, src, dest):
         self.pull_img(src)
         cmd = '%s --no-optimize %s %s' % (self.optimizer, src, dest)
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
         self.push_img(dest)
@@ -384,7 +384,7 @@ class BenchRunner:
         elif name in BenchRunner.CMD_STDIN:
             self.convert_cmd_stdin(src=src, dest=dest, runargs=BenchRunner.CMD_STDIN[name], option=option)
         else:
-            print 'Unknown bench: '+name
+            print ('Unknown bench: '+name)
             exit(1)
         self.push_img(dest)
 
@@ -403,7 +403,7 @@ class BenchRunner:
             self.prepare(bench)
             return 0, 0, 0
         else:
-            print 'Unknown operation: '+op
+            print ('Unknown operation: '+op)
             exit(1)
 
 class ContainerdController:
@@ -415,7 +415,7 @@ class ContainerdController:
         if self.is_lazypull:
             base_cmd = "ctr-remote i rpull"
         cmd = '%s %s' % (base_cmd, image)
-        print cmd
+        print (cmd)
         return cmd
 
     def create_echo_hello_cmd(self, image, cid):
@@ -423,7 +423,7 @@ class ContainerdController:
         if self.is_lazypull:
             snapshotter_opt = "--snapshotter=stargz"
         cmd = '%s c create --net-host %s -- %s %s echo hello' % (CTR, snapshotter_opt, image, cid)
-        print cmd
+        print (cmd)
         return cmd
 
     def create_cmd_arg_cmd(self, image, cid, runargs):
@@ -433,21 +433,21 @@ class ContainerdController:
         cmd = '%s c create --net-host %s ' % (CTR, snapshotter_opt)
         cmd += '-- %s %s ' % (image, cid)
         cmd += runargs.arg
-        print cmd
+        print (cmd)
         return cmd
 
     def create_cmd_arg_wait_cmd(self, image, cid, runargs):
         snapshotter_opt = ""
         if self.is_lazypull:
             snapshotter_opt = "--snapshotter=stargz"
-        env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
+        env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.items()])
         cmd = '%s c create --net-host %s %s '% (CTR, snapshotter_opt, env)
         for a,b in runargs.mount:
             a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
             a = tmp_copy(a)
             cmd += '--mount type=bind,src=%s,dst=%s,options=rbind ' % (a,b)
         cmd += '-- %s %s %s' % (image, cid, runargs.arg)
-        print cmd
+        print (cmd)
         return cmd
 
     def create_cmd_stdin_cmd(self, image, cid, runargs):
@@ -463,30 +463,30 @@ class ContainerdController:
         if runargs.stdin_sh:
             cmd += runargs.stdin_sh # e.g., sh -c
 
-        print cmd
+        print (cmd)
         return cmd
 
     def task_start_cmd(self, cid):
         cmd = '%s t start %s' % (CTR, cid)
-        print cmd
+        print (cmd)
         return cmd
 
     def task_kill_cmd(self, cid):
         cmd = '%s t kill -s 9 %s' % (CTR, cid)
-        print cmd
+        print (cmd)
         return cmd
 
     def cleanup(self, name, image):
-        print "Cleaning up environment..."
+        print ("Cleaning up environment...")
         cmd = '%s t kill -s 9 %s' % (CTR, name)
-        print cmd
+        print (cmd)
         rc = os.system(cmd) # sometimes containers already exit. we ignore the failure.
         cmd = '%s c rm %s' % (CTR, name)
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
         cmd = '%s image rm %s' % (CTR, image)
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
 
@@ -500,29 +500,29 @@ class ContainerdController:
 class PodmanController:
     def pull_cmd(self, image):
         cmd = '%s pull docker://%s' % (PODMAN, image)
-        print cmd
+        print (cmd)
         return cmd
 
     def create_echo_hello_cmd(self, image, cid):
         cmd = '%s create --name %s docker://%s echo hello' % (PODMAN, cid, image)
-        print cmd
+        print (cmd)
         return cmd
 
     def create_cmd_arg_cmd(self, image, cid, runargs):
         cmd = '%s create --name %s docker://%s ' % (PODMAN, cid, image)
         cmd += runargs.arg
-        print cmd
+        print (cmd)
         return cmd
 
     def create_cmd_arg_wait_cmd(self, image, cid, runargs):
-        env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.iteritems()])
+        env = ' '.join(['--env %s=%s' % (k,v) for k,v in runargs.env.items()])
         cmd = '%s create %s --name %s '% (PODMAN, env, cid)
         for a,b in runargs.mount:
             a = os.path.join(os.path.dirname(os.path.abspath(__file__)), a)
             a = tmp_copy(a)
             cmd += '--mount type=bind,src=%s,dst=%s ' % (a,b)
         cmd += ' docker://%s %s ' % (image, runargs.arg)
-        print cmd
+        print (cmd)
         return cmd
 
     def create_cmd_stdin_cmd(self, image, cid, runargs):
@@ -535,51 +535,51 @@ class PodmanController:
         if runargs.stdin_sh:
             cmd += runargs.stdin_sh # e.g., sh -c
 
-        print cmd
+        print (cmd)
         return cmd
 
     def task_start_cmd(self, cid):
         cmd = '%s start -a %s' % (PODMAN, cid)
-        print cmd
+        print (cmd)
         return cmd
 
     def task_kill_cmd(self, cid):
         cmd = '%s kill -s 9 %s' % (PODMAN, cid)
-        print cmd
+        print (cmd)
         return cmd
 
     def cleanup(self, name, image):
-        print "Cleaning up environment..."
+        print ("Cleaning up environment...")
         cmd = '%s kill -s 9 %s' % (PODMAN, name)
-        print cmd
+        print (cmd)
         rc = os.system(cmd) # sometimes containers already exit. we ignore the failure.
         cmd = '%s rm %s' % (PODMAN, name)
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
         cmd = '%s image rm %s' % (PODMAN, image)
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
         cmd = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../reboot_store.sh')
-        print cmd
+        print (cmd)
         rc = os.system(cmd)
         assert(rc == 0)
 
 def main():
     if len(sys.argv) == 1:
-        print 'Usage: bench.py [OPTIONS] [BENCHMARKS]'
-        print 'OPTIONS:'
-        print '--repository=<repository>'
-        print '--srcrepository=<repository>'
-        print '--all'
-        print '--list'
-        print '--list-json'
-        print '--experiments'
-        print '--profile=<seconds>'
-        print '--runtime'
-        print '--op=(prepare|run)'
-        print '--mode=(%s|%s|%s)' % (LEGACY_MODE, ESTARGZ_NOOPT_MODE, ESTARGZ_MODE, ZSTDCHUNKED_MODE)
+        print ('Usage: bench.py [OPTIONS] [BENCHMARKS]')
+        print ('OPTIONS:')
+        print ('--repository=<repository>')
+        print ('--srcrepository=<repository>')
+        print ('--all')
+        print ('--list')
+        print ('--list-json')
+        print ('--experiments')
+        print ('--profile=<seconds>')
+        print ('--runtime')
+        print ('--op=(prepare|run)')
+        print ('--mode=(%s|%s|%s)' % (LEGACY_MODE, ESTARGZ_NOOPT_MODE, ESTARGZ_MODE, ZSTDCHUNKED_MODE))
         exit(1)
 
     benches = []
@@ -594,11 +594,11 @@ def main():
                 benches.extend(BenchRunner.ALL.values())
             elif parts[0] == 'list':
                 template = '%-16s\t%-20s'
-                print template % ('CATEGORY', 'NAME')
+                print (template % ('CATEGORY', 'NAME'))
                 for b in sorted(BenchRunner.ALL.values(), key=lambda b:(b.category, b.name)):
-                    print template % (b.category, b.name)
+                    print (template % (b.category, b.name))
             elif parts[0] == 'list-json':
-                print json.dumps([b.__dict__ for b in BenchRunner.ALL.values()])
+                print (json.dumps([b.__dict__ for b in BenchRunner.ALL.values()]))
         else:
             benches.append(BenchRunner.ALL[arg])
 
@@ -633,18 +633,18 @@ def main():
             pull_times.append(pulltime)
             create_times.append(createtime)
             run_times.append(runtime)
-            print 'ITERATION %s:' % i
-            print 'elapsed %s' % elapsed
-            print 'pull    %s' % pulltime
-            print 'create  %s' % createtime
-            print 'run     %s' % runtime
+            print ('ITERATION %s:' % i)
+            print ('elapsed %s' % elapsed)
+            print ('pull    %s' % pulltime)
+            print ('create  %s' % createtime)
+            print ('run     %s' % runtime)
 
             if profile > 0 and time.time() - for_start > profile:
                 break
 
         row = {'mode':'%s' % runner.mode, 'repo':bench.name, 'bench':bench.name, 'elapsed':sum(elapsed_times) / len(elapsed_times), 'elapsed_pull':sum(pull_times) / len(pull_times), 'elapsed_create':sum(create_times) / len(create_times), 'elapsed_run':sum(run_times) / len(run_times)}
         js = json.dumps(row)
-        print '%s%s,' % (BENCHMARKOUT_MARK, js)
+        print ('%s%s,' % (BENCHMARKOUT_MARK, js))
         sys.stdout.flush()
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ env:
 
 jobs:
   hello-bench:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: HelloBench
     env:
       BENCHMARK_LOG_DIR: ${{ github.workspace }}/log/
@@ -29,8 +29,8 @@ jobs:
     steps:
     - name: Install tools
       run: |
-          sudo apt-get update && sudo apt-get --no-install-recommends install -y gnuplot
-          pip install numpy
+          sudo apt-get update && \
+          sudo apt-get install -y gnuplot python3-numpy
     - uses: actions/checkout@v4
     - name: Prepare directories
       run: mkdir "${BENCHMARK_RESULT_DIR}" "${BENCHMARK_LOG_DIR}"

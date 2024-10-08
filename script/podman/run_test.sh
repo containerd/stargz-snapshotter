@@ -18,6 +18,29 @@ set -euo pipefail
 
 STARGZ_STORE_SERVICE=podman-rootless-stargz-store
 
+RETRYNUM=100
+RETRYINTERVAL=1
+TIMEOUTSEC=180
+function retry {
+    local SUCCESS=false
+    for i in $(seq ${RETRYNUM}) ; do
+        if eval "timeout ${TIMEOUTSEC} ${@}" ; then
+            SUCCESS=true
+            break
+        fi
+        echo "Fail(${i}). Retrying..."
+        sleep ${RETRYINTERVAL}
+    done
+    if [ "${SUCCESS}" == "true" ] ; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+echo "podman unshare mount | grep stargzstore" > /tmp/test1.sh
+retry bash -euo pipefail /tmp/test1.sh
+
 # Lazy pulling and run
 podman pull ghcr.io/stargz-containers/alpine:3.10.2-esgz
 podman run --rm ghcr.io/stargz-containers/alpine:3.10.2-esgz echo hello
