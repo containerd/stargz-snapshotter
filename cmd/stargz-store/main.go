@@ -17,30 +17,37 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	golog "log"
 	"math/rand"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/containerd/log"
 	dbmetadata "github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/db"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/metadata"
 	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
-	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
 	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	"github.com/containerd/stargz-snapshotter/store"
+	"github.com/containerd/stargz-snapshotter/store/pb"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/pelletier/go-toml"
 	bolt "go.etcd.io/bbolt"
+	grpc "google.golang.org/grpc"
 )
 
 const (
@@ -53,6 +60,7 @@ var (
 	configPath = flag.String("config", defaultConfigPath, "path to the configuration file")
 	logLevel   = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
 	rootDir    = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
+	listenaddr = flag.String("addr", filepath.Join(defaultRootDir, "store.sock"), "path to the socket listened by this snapshotter")
 )
 
 type Config struct {
@@ -108,8 +116,12 @@ func main() {
 		}
 	}
 
+	sk := new(storeKeychain)
+
+	errCh := serveController(*listenaddr, sk)
+
 	// Prepare kubeconfig-based keychain if required
-	credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
+	credsFuncs := []resolver.Credential{sk.credentials}
 	if config.KubeconfigKeychainConfig.EnableKeychain {
 		var opts []kubeconfig.Option
 		if kcp := config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
@@ -158,14 +170,22 @@ func main() {
 		}
 	}()
 
-	waitForSIGINT()
-	log.G(ctx).Info("Got SIGINT")
+	if err := waitForSignal(ctx, errCh); err != nil {
+		log.G(ctx).Errorf("error: %v", err)
+		os.Exit(1)
+	}
 }
 
-func waitForSIGINT() {
+func waitForSignal(ctx context.Context, errCh <-chan error) error {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
-	<-c
+	select {
+	case s := <-c:
+		log.G(ctx).Infof("Got %v", s)
+	case err := <-errCh:
+		return err
+	}
+	return nil
 }
 
 const (
@@ -194,4 +214,81 @@ func getMetadataStore(rootDir string, config Config) (metadata.Store, error) {
 		return nil, fmt.Errorf("unknown metadata store type: %v; must be %v or %v",
 			config.MetadataStore, memoryMetadataType, dbMetadataType)
 	}
+}
+
+func newController(addCredentialFunc func(data []byte) error) *controller {
+	return &controller{
+		addCredentialFunc: addCredentialFunc,
+	}
+}
+
+type controller struct {
+	addCredentialFunc func(data []byte) error
+}
+
+func (c *controller) AddCredential(ctx context.Context, req *pb.AddCredentialRequest) (resp *pb.AddCredentialResponse, _ error) {
+	return &pb.AddCredentialResponse{}, c.addCredentialFunc(req.Data)
+}
+
+type authConfig struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	IdentityToken string `json:"identityToken,omitempty"`
+}
+
+type storeKeychain struct {
+	config   map[string]authConfig
+	configMu sync.Mutex
+}
+
+func (sk *storeKeychain) add(data []byte) error {
+	conf := make(map[string]authConfig)
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&conf); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	sk.configMu.Lock()
+	if sk.config == nil {
+		sk.config = make(map[string]authConfig)
+	}
+	for k, c := range conf {
+		sk.config[k] = c
+	}
+	sk.configMu.Unlock()
+	return nil
+}
+
+func (sk *storeKeychain) credentials(host string, refspec reference.Spec) (string, string, error) {
+	if host != refspec.Hostname() {
+		return "", "", nil // Do not use creds for mirrors
+	}
+	sk.configMu.Lock()
+	defer sk.configMu.Unlock()
+	if acfg, ok := sk.config[refspec.String()]; ok {
+		if acfg.IdentityToken != "" {
+			return "", acfg.IdentityToken, nil
+		} else if !(acfg.Username == "" && acfg.Password == "") {
+			return acfg.Username, acfg.Password, nil
+		}
+	}
+	return "", "", nil
+}
+
+func serveController(addr string, sk *storeKeychain) <-chan error {
+	// Try to remove the socket file to avoid EADDRINUSE
+	os.Remove(addr)
+	rpc := grpc.NewServer()
+	c := newController(sk.add)
+	pb.RegisterControllerServer(rpc, c)
+	errCh := make(chan error, 1)
+	go func() {
+		l, err := net.Listen("unix", addr)
+		if err != nil {
+			errCh <- fmt.Errorf("error on listen socket %q: %w", addr, err)
+			return
+		}
+		if err := rpc.Serve(l); err != nil {
+			errCh <- fmt.Errorf("error on serving via socket %q: %w", addr, err)
+		}
+	}()
+	return errCh
 }
