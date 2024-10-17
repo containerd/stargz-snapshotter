@@ -17,7 +17,7 @@
 set -eux -o pipefail
 if [[ "$(id -u)" = "0" ]]; then
 	# Switch to the rootless user via SSH; This is the same approach as done in nerdctl CI
-	systemctl start sshd
+	systemctl start ssh
 	exec ssh -o StrictHostKeyChecking=no rootless@localhost "$0" "$@"
 else
 	systemctl --user start podman-rootless-stargz-store

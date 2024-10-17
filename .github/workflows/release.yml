@@ -9,7 +9,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Build
     strategy:
       matrix:
@@ -42,7 +42,7 @@ jobs:
         path: ${{ env.OUTPUT_DIR }}/*
 
   release:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Release
     needs: [build]
     env:
