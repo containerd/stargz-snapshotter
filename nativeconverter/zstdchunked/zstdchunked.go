@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
@@ -35,6 +36,15 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+)
+
+type unMap struct {
+	mu sync.Mutex
+}
+
+var (
+	mu            sync.Mutex
+	uncompressMap = map[digest.Digest]*unMap{}
 )
 
 type zstdCompression struct {
@@ -101,6 +111,14 @@ func LayerConvertFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, op
 		uncompressedDesc := &desc
 		// We need to uncompress the archive first
 		if !uncompress.IsUncompressedType(desc.MediaType) {
+			mu.Lock()
+			if _, ok := uncompressMap[desc.Digest]; !ok {
+				uncompressMap[desc.Digest] = &unMap{}
+			}
+			uncompressMap[desc.Digest].mu.Lock()
+			mu.Unlock()
+			defer uncompressMap[desc.Digest].mu.Unlock()
+
 			var err error
 			uncompressedDesc, err = uncompress.LayerConvertFunc(ctx, cs, desc)
 			if err != nil {
