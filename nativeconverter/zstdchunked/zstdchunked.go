@@ -109,11 +109,6 @@ func LayerConvertFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, op
 			if uncompressedDesc == nil {
 				return nil, fmt.Errorf("unexpectedly got the same blob after compression (%s, %q)", desc.Digest, desc.MediaType)
 			}
-			defer func() {
-				if err := cs.Delete(ctx, uncompressedDesc.Digest); err != nil {
-					log.G(ctx).WithError(err).WithField("uncompressedDesc", uncompressedDesc).Warn("failed to remove tmp uncompressed layer")
-				}
-			}()
 			log.G(ctx).Debugf("zstdchunked: uncompressed %s into %s", desc.Digest, uncompressedDesc.Digest)
 		}
 
