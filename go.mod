@@ -12,7 +12,7 @@ require (
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v1.0.0-rc.0
 	github.com/containerd/plugin v1.0.0
-	github.com/containerd/stargz-snapshotter/estargz v0.15.1
+	github.com/containerd/stargz-snapshotter/estargz v0.16.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v27.3.1+incompatible
 	github.com/docker/go-metrics v0.0.1
