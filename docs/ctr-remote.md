@@ -268,3 +268,38 @@ ctr-remote image optimize --oci \
 By default, when the source image is a multi-platform image, `ctr-remote` converts the image corresponding to the platform where `ctr-remote` runs.
 
 Note that though the images specified by `--all-platform` and `--platform` are converted to eStargz, images that don't correspond to the current platform aren't *optimized*. That is, these images are lazily pulled but without prefetch.
+
+### Dump log of accessed files during optimization (`--record-out`)
+
+You can dump the information of which files are accesssed during optimization, using `--record-out` flag.
+
+For example, the following dumps logs of files accessed during running `ls` in `ubuntu:24.04`.
+
+```
+ctr-remote image pull docker.io/library/ubuntu:24.04
+ctr-remote image optimize --record-out=/tmp/log.json \
+  --entrypoint='[ "/bin/bash", "-c" ]' --args='[ "ls" ]' \
+  docker.io/library/ubuntu:24.04 registry2:5000/ubuntu:24.04
+```
+
+The following is the contents of the log (`/tmp/log.json`):
+
+```
+{"path":"usr/bin/bash","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/bin/bash","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"etc/ld.so.cache","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/lib/x86_64-linux-gnu/libtinfo.so.6.4","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/lib/x86_64-linux-gnu/libc.so.6","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"etc/nsswitch.conf","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"etc/nsswitch.conf","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"etc/passwd","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/bin/ls","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"etc/ld.so.cache","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/lib/x86_64-linux-gnu/libselinux.so.1","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/lib/x86_64-linux-gnu/libc.so.6","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+{"path":"usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.11.2","manifestDigest":"sha256:5d070ad5f7fe63623cbb99b4fc0fd997f5591303d4b03ccce50f403957d0ddc4","layerIndex":0}
+```
+
+For creating an optimized eStargz using this log, you can input this log into [`--estargz-record-in` or `--zstdchunked-record-in` of `nerdctl image convert`](https://github.com/containerd/nerdctl/blob/8b814ca7fe29cb505a02a3d85ba22860e63d15bf/docs/command-reference.md#nerd_face-nerdctl-image-convert) or the same flags for `ctr-remote image convert` .
