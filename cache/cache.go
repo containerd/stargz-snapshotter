@@ -82,6 +82,7 @@ type BlobCache interface {
 type Reader interface {
 	io.ReaderAt
 	Close() error
+	GetReaderAt() io.ReaderAt
 }
 
 // Writer enables the client to cache byte data. Commit() must be
@@ -413,6 +414,10 @@ type reader struct {
 }
 
 func (r *reader) Close() error { return r.closeFunc() }
+
+func (r *reader) GetReaderAt() io.ReaderAt {
+	return r.ReaderAt
+}
 
 type writer struct {
 	io.WriteCloser

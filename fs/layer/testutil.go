@@ -218,6 +218,7 @@ func testPrefetch(t *testing.T, factory metadata.Store) {
 					ocispec.Descriptor{Digest: testStateLayerDigest},
 					&blobRef{blob, func() {}},
 					vr,
+					false,
 				)
 				if err := l.Verify(dgst); err != nil {
 					t.Errorf("failed to verify reader: %v", err)
@@ -742,7 +743,7 @@ func getRootNode(t *testing.T, r metadata.Reader, opaque OverlayOpaqueType, tocD
 	if err != nil {
 		t.Fatalf("failed to verify reader: %v", err)
 	}
-	rootNode, err := newNode(testStateLayerDigest, rr, &testBlobState{10, 5}, 100, opaque)
+	rootNode, err := newNode(testStateLayerDigest, rr, &testBlobState{10, 5}, 100, opaque, false)
 	if err != nil {
 		t.Fatalf("failed to get root node: %v", err)
 	}
