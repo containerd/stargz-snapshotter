@@ -356,10 +356,11 @@ func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fu
 		if getter, ok := ra.(reader.PassthroughFdGetter); ok {
 			fd, err := getter.GetPassthroughFd()
 			if err != nil {
-				n.fs.s.report(fmt.Errorf("node.Open: %v", err))
-				return nil, 0, syscall.EIO
+				n.fs.s.report(fmt.Errorf("passThrough model failed due to node.Open: %v", err))
+				n.fs.passThrough = false
+			} else {
+				f.InitFd(int(fd))
 			}
-			f.InitFd(int(fd))
 		}
 	}
 

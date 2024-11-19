@@ -82,6 +82,8 @@ type BlobCache interface {
 type Reader interface {
 	io.ReaderAt
 	Close() error
+
+	// If a blob is backed by a file, it should return *os.File so that it can be used for FUSE passthrough
 	GetReaderAt() io.ReaderAt
 }
 

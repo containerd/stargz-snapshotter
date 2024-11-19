@@ -496,9 +496,9 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 
 func (sf *file) GetPassthroughFd() (uintptr, error) {
 	var (
-		offset           int64 = 0
+		offset           int64
 		firstChunkOffset int64 = -1
-		totalSize        int64 = 0
+		totalSize        int64
 	)
 
 	for {
@@ -525,22 +525,23 @@ func (sf *file) GetPassthroughFd() (uintptr, error) {
 		}
 
 		readerAt := r.GetReaderAt()
-		if file, ok := readerAt.(*os.File); ok {
-			fd := file.Fd()
-			r.Close()
-			return fd, nil
-		} else {
+		file, ok := readerAt.(*os.File)
+		if !ok {
 			r.Close()
 			return 0, fmt.Errorf("The cached ReaderAt is not of type *os.File, fd obtain failed")
 		}
+
+		fd := file.Fd()
+		r.Close()
+		return fd, nil
 	}
 }
 
 func (sf *file) prefetchEntireFile() error {
 	var (
-		offset           int64 = 0
+		offset           int64
 		firstChunkOffset int64 = -1
-		totalSize        int64 = 0
+		totalSize        int64
 	)
 	combinedBuffer := sf.gr.bufPool.Get().(*bytes.Buffer)
 	combinedBuffer.Reset()
@@ -554,10 +555,28 @@ func (sf *file) prefetchEntireFile() error {
 		if firstChunkOffset == -1 {
 			firstChunkOffset = chunkOffset
 		}
+
+		id := genID(sf.id, chunkOffset, chunkSize)
 		b := sf.gr.bufPool.Get().(*bytes.Buffer)
 		b.Reset()
 		b.Grow(int(chunkSize))
 		ip := b.Bytes()[:chunkSize]
+
+		// Check if the content exists in the cache
+		if r, err := sf.gr.cache.Get(id); err == nil {
+			n, err := r.ReadAt(ip, 0)
+			if (err == nil || err == io.EOF) && int64(n) == chunkSize {
+				combinedBuffer.Write(ip[:n])
+				totalSize += int64(n)
+				offset = chunkOffset + int64(n)
+				r.Close()
+				sf.gr.putBuffer(b)
+				continue
+			}
+			r.Close()
+		}
+
+		// cache miss, prefetch the whole chunk
 		if _, err := sf.fr.ReadAt(ip, chunkOffset); err != nil && err != io.EOF {
 			sf.gr.putBuffer(b)
 			return fmt.Errorf("failed to read data: %w", err)
@@ -571,9 +590,9 @@ func (sf *file) prefetchEntireFile() error {
 		offset = chunkOffset + chunkSize
 		sf.gr.putBuffer(b)
 	}
-	combinedIp := combinedBuffer.Bytes()
-	id := genID(sf.id, firstChunkOffset, totalSize)
-	sf.gr.cacheData(combinedIp, id)
+	combinedIP := combinedBuffer.Bytes()
+	combinedID := genID(sf.id, firstChunkOffset, totalSize)
+	sf.gr.cacheData(combinedIP, combinedID)
 	return nil
 }
 

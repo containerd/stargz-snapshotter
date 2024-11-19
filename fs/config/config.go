@@ -150,5 +150,5 @@ type FuseConfig struct {
 	EntryTimeout int64 `toml:"entry_timeout"`
 
 	// PassThrough indicates whether to enable FUSE passthrough mode to improve local file read performance. Default is false.
-	PassThrough bool `toml:"passthrough"`
+	PassThrough bool `toml:"passthrough" default:"false"`
 }
