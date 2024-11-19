@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -26,8 +27,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
@@ -132,6 +135,11 @@ func main() {
 	// Create a gRPC server
 	rpc := grpc.NewServer()
 
+	// Configure FUSE passthrough
+	if config.Config.Config.FuseConfig.PassThrough, err = isFusePthEnable(); err != nil {
+		log.G(ctx).Warnf("failed to check FUSE passthrough support")
+	}
+
 	// Configure keychain
 	credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
 	if config.Config.KubeconfigKeychainConfig.EnableKeychain {
@@ -183,6 +191,18 @@ func main() {
 		rs.Close()
 	}
 	log.G(ctx).Info("Exiting")
+}
+
+// isFusePthEnable prevents users from enabling passthrough mode on unsupported kernel versions
+func isFusePthEnable() (bool, error) {
+	cmd := exec.Command("sh", "-c", "grep 'CONFIG_FUSE_PASSTHROUGH=y' /boot/config-$(uname -r)")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		return false, err
+	}
+	return strings.Contains(out.String(), "CONFIG_FUSE_PASSTHROUGH=y"), nil
 }
 
 func serve(ctx context.Context, rpc *grpc.Server, addr string, rs snapshots.Snapshotter, config snapshotterConfig) (bool, error) {
