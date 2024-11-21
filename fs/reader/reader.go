@@ -53,6 +53,10 @@ type Reader interface {
 	LastOnDemandReadTime() time.Time
 }
 
+type PassthroughFdGetter interface {
+	GetPassthroughFd() (uintptr, error)
+}
+
 // VerifiableReader produces a Reader with a given verifier.
 type VerifiableReader struct {
 	r *reader
@@ -490,18 +494,120 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 	return nr, nil
 }
 
-func (gr *reader) verifyAndCache(entryID uint32, ip []byte, chunkDigestStr string, cacheID string) error {
-	// We can end up doing on demand registry fetch when aligning the chunk
-	commonmetrics.IncOperationCount(commonmetrics.OnDemandRemoteRegistryFetchCount, gr.layerSha) // increment the number of on demand file fetches from remote registry
-	commonmetrics.AddBytesCount(commonmetrics.OnDemandBytesFetched, gr.layerSha, int64(len(ip))) // record total bytes fetched
-	gr.setLastReadTime(time.Now())
+func (sf *file) GetPassthroughFd() (uintptr, error) {
+	var (
+		offset           int64
+		firstChunkOffset int64 = -1
+		totalSize        int64
+	)
 
-	// Verify this chunk
+	for {
+		chunkOffset, chunkSize, _, ok := sf.fr.ChunkEntryForOffset(offset)
+		if !ok {
+			break
+		}
+		if firstChunkOffset == -1 {
+			firstChunkOffset = chunkOffset
+		}
+		totalSize += chunkSize
+		offset = chunkOffset + chunkSize
+	}
+
+	id := genID(sf.id, firstChunkOffset, totalSize)
+
+	for {
+		r, err := sf.gr.cache.Get(id)
+		if err != nil {
+			if err := sf.prefetchEntireFile(); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		readerAt := r.GetReaderAt()
+		file, ok := readerAt.(*os.File)
+		if !ok {
+			r.Close()
+			return 0, fmt.Errorf("The cached ReaderAt is not of type *os.File, fd obtain failed")
+		}
+
+		fd := file.Fd()
+		r.Close()
+		return fd, nil
+	}
+}
+
+func (sf *file) prefetchEntireFile() error {
+	var (
+		offset           int64
+		firstChunkOffset int64 = -1
+		totalSize        int64
+	)
+	combinedBuffer := sf.gr.bufPool.Get().(*bytes.Buffer)
+	combinedBuffer.Reset()
+	defer sf.gr.putBuffer(combinedBuffer)
+
+	for {
+		chunkOffset, chunkSize, chunkDigestStr, ok := sf.fr.ChunkEntryForOffset(offset)
+		if !ok {
+			break
+		}
+		if firstChunkOffset == -1 {
+			firstChunkOffset = chunkOffset
+		}
+
+		id := genID(sf.id, chunkOffset, chunkSize)
+		b := sf.gr.bufPool.Get().(*bytes.Buffer)
+		b.Reset()
+		b.Grow(int(chunkSize))
+		ip := b.Bytes()[:chunkSize]
+
+		// Check if the content exists in the cache
+		if r, err := sf.gr.cache.Get(id); err == nil {
+			n, err := r.ReadAt(ip, 0)
+			if (err == nil || err == io.EOF) && int64(n) == chunkSize {
+				combinedBuffer.Write(ip[:n])
+				totalSize += int64(n)
+				offset = chunkOffset + int64(n)
+				r.Close()
+				sf.gr.putBuffer(b)
+				continue
+			}
+			r.Close()
+		}
+
+		// cache miss, prefetch the whole chunk
+		if _, err := sf.fr.ReadAt(ip, chunkOffset); err != nil && err != io.EOF {
+			sf.gr.putBuffer(b)
+			return fmt.Errorf("failed to read data: %w", err)
+		}
+		if err := sf.gr.verifyOneChunk(sf.id, ip, chunkDigestStr); err != nil {
+			sf.gr.putBuffer(b)
+			return err
+		}
+		combinedBuffer.Write(ip)
+		totalSize += chunkSize
+		offset = chunkOffset + chunkSize
+		sf.gr.putBuffer(b)
+	}
+	combinedIP := combinedBuffer.Bytes()
+	combinedID := genID(sf.id, firstChunkOffset, totalSize)
+	sf.gr.cacheData(combinedIP, combinedID)
+	return nil
+}
+
+func (gr *reader) verifyOneChunk(entryID uint32, ip []byte, chunkDigestStr string) error {
+	// We can end up doing on demand registry fetch when aligning the chunk
+	commonmetrics.IncOperationCount(commonmetrics.OnDemandRemoteRegistryFetchCount, gr.layerSha)
+	commonmetrics.AddBytesCount(commonmetrics.OnDemandBytesFetched, gr.layerSha, int64(len(ip)))
+	gr.setLastReadTime(time.Now())
 	if err := gr.verifyChunk(entryID, ip, chunkDigestStr); err != nil {
 		return fmt.Errorf("invalid chunk: %w", err)
 	}
+	return nil
+}
 
-	// Cache this chunk
+func (gr *reader) cacheData(ip []byte, cacheID string) {
 	if w, err := gr.cache.Add(cacheID); err == nil {
 		if cn, err := w.Write(ip); err != nil || cn != len(ip) {
 			w.Abort()
@@ -510,7 +616,13 @@ func (gr *reader) verifyAndCache(entryID uint32, ip []byte, chunkDigestStr strin
 		}
 		w.Close()
 	}
+}
 
+func (gr *reader) verifyAndCache(entryID uint32, ip []byte, chunkDigestStr string, cacheID string) error {
+	if err := gr.verifyOneChunk(entryID, ip, chunkDigestStr); err != nil {
+		return err
+	}
+	gr.cacheData(ip, cacheID)
 	return nil
 }
 

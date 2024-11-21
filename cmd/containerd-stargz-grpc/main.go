@@ -132,6 +132,13 @@ func main() {
 	// Create a gRPC server
 	rpc := grpc.NewServer()
 
+	// Configure FUSE passthrough
+	// Always set Direct to true to ensure that
+	// *directoryCache.Get always return *os.File instead of buffer
+	if config.Config.Config.FuseConfig.PassThrough {
+		config.Config.Config.DirectoryCacheConfig.Direct = true
+	}
+
 	// Configure keychain
 	credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
 	if config.Config.KubeconfigKeychainConfig.EnableKeychain {

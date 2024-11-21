@@ -82,6 +82,9 @@ type BlobCache interface {
 type Reader interface {
 	io.ReaderAt
 	Close() error
+
+	// If a blob is backed by a file, it should return *os.File so that it can be used for FUSE passthrough
+	GetReaderAt() io.ReaderAt
 }
 
 // Writer enables the client to cache byte data. Commit() must be
@@ -413,6 +416,10 @@ type reader struct {
 }
 
 func (r *reader) Close() error { return r.closeFunc() }
+
+func (r *reader) GetReaderAt() io.ReaderAt {
+	return r.ReaderAt
+}
 
 type writer struct {
 	io.WriteCloser
