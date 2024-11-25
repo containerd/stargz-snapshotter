@@ -350,6 +350,7 @@ func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fu
 	f := &file{
 		n:  n,
 		ra: ra,
+		fd: -1,
 	}
 
 	if n.fs.passThrough {
@@ -473,6 +474,9 @@ func (f *file) Getattr(ctx context.Context, out *fuse.AttrOut) syscall.Errno {
 var _ = (fusefs.FilePassthroughFder)((*file)(nil))
 
 func (f *file) PassthroughFd() (int, bool) {
+	if f.fd <= 0 {
+		return -1, false
+	}
 	return f.fd, true
 }
 
