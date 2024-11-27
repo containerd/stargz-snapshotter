@@ -516,7 +516,8 @@ func (sf *file) GetPassthroughFd() (uintptr, error) {
 	id := genID(sf.id, firstChunkOffset, totalSize)
 
 	for {
-		r, err := sf.gr.cache.Get(id)
+		// cache.PassThrough() is necessary to take over files
+		r, err := sf.gr.cache.Get(id, cache.PassThrough())
 		if err != nil {
 			if err := sf.prefetchEntireFile(); err != nil {
 				return 0, err
@@ -563,6 +564,7 @@ func (sf *file) prefetchEntireFile() error {
 		ip := b.Bytes()[:chunkSize]
 
 		// Check if the content exists in the cache
+		// Just read it and merge to a new files, so cache.PassThrough() should not be used here
 		if r, err := sf.gr.cache.Get(id); err == nil {
 			n, err := r.ReadAt(ip, 0)
 			if (err == nil || err == io.EOF) && int64(n) == chunkSize {
