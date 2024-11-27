@@ -97,7 +97,8 @@ type Writer interface {
 }
 
 type cacheOpt struct {
-	direct bool
+	direct      bool
+	passThrough bool
 }
 
 type Option func(o *cacheOpt) *cacheOpt
@@ -109,6 +110,15 @@ type Option func(o *cacheOpt) *cacheOpt
 func Direct() Option {
 	return func(o *cacheOpt) *cacheOpt {
 		o.direct = true
+		return o
+	}
+}
+
+// PassThrough option indicates whether to enable FUSE passthrough mode
+// to improve local file read performance.
+func PassThrough() Option {
+	return func(o *cacheOpt) *cacheOpt {
+		o.passThrough = true
 		return o
 	}
 }
@@ -232,8 +242,16 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 	// that won't be accessed immediately.
 	if dc.direct || opt.direct {
 		return &reader{
-			ReaderAt:  file,
-			closeFunc: func() error { return file.Close() },
+			ReaderAt: file,
+			closeFunc: func() error {
+				// In passthough model, close will be toke over by go-fuse
+				// If "passThrough" option is specified, "direct" option also will
+				// be specified, so adding this branch here is enough
+				if opt.passThrough {
+					return nil
+				}
+				return file.Close()
+			},
 		}, nil
 	}
 
