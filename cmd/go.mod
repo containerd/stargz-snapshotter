@@ -9,7 +9,7 @@ require (
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v1.0.0-rc.0
 	github.com/containerd/stargz-snapshotter v0.15.2-0.20240622031358-6405f362966d
-	github.com/containerd/stargz-snapshotter/estargz v0.16.1
+	github.com/containerd/stargz-snapshotter/estargz v0.16.2
 	github.com/containerd/stargz-snapshotter/ipfs v0.15.2-0.20240622031358-6405f362966d
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/go-metrics v0.0.1
