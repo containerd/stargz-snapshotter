@@ -415,6 +415,11 @@ func (o *snapshotter) cleanup(ctx context.Context, cleanupCommitted bool) error 
 		return err
 	}
 
+	err = o.cleanupMetadataDB()
+	if err != nil {
+		return err
+	}
+
 	log.G(ctx).Debugf("cleanup: dirs=%v", cleanup)
 	for _, dir := range cleanup {
 		if err := o.cleanupSnapshotDirectory(ctx, dir); err != nil {
@@ -422,6 +427,15 @@ func (o *snapshotter) cleanup(ctx context.Context, cleanupCommitted bool) error 
 		}
 	}
 
+	return nil
+}
+
+func (o *snapshotter) cleanupMetadataDB() error {
+	metadataDBPath := filepath.Join(o.root, "metadata.db")
+	err := os.Remove(metadataDBPath)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
