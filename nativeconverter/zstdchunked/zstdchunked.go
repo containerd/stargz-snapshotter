@@ -141,7 +141,7 @@ func LayerConvertFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, op
 		}
 		defer blob.Close()
 		ref := fmt.Sprintf("convert-zstdchunked-from-%s", desc.Digest)
-		w, err := cs.Writer(ctx, content.WithRef(ref))
+		w, err := content.OpenWriter(ctx, cs, content.WithRef(ref))
 		if err != nil {
 			return nil, err
 		}
