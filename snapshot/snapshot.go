@@ -425,6 +425,15 @@ func (o *snapshotter) cleanup(ctx context.Context, cleanupCommitted bool) error 
 	return nil
 }
 
+func (o *snapshotter) cleanupMetadataDB() error {
+	metadataDBPath := filepath.Join(o.root, "metadata.db")
+	err := os.Remove(metadataDBPath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (o *snapshotter) cleanupDirectories(ctx context.Context, cleanupCommitted bool) ([]string, error) {
 	// Get a write transaction to ensure no other write transaction can be entered
 	// while the cleanup is scanning.
@@ -658,6 +667,11 @@ func (o *snapshotter) Close() error {
 	if err := o.cleanup(ctx, cleanupCommitted); err != nil {
 		log.G(ctx).WithError(err).Warn("failed to cleanup")
 	}
+
+	if err := o.cleanupMetadataDB(); err != nil {
+		log.G(ctx).WithError(err).Warn("failed to cleanup metadata.db")
+	}
+
 	return o.ms.Close()
 }
 
