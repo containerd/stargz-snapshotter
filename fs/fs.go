@@ -340,10 +340,12 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		EntryTimeout:    &fs.entryTimeout,
 		NullPermissions: true,
 	})
+
 	mountOpts := &fuse.MountOptions{
-		AllowOther: true,     // allow users other than root&mounter to access fs
-		FsName:     "stargz", // name this filesystem as "stargz"
-		Debug:      fs.debug,
+		AllowOther:    true,     // allow users other than root&mounter to access fs
+		FsName:        "stargz", // name this filesystem as "stargz"
+		Debug:         fs.debug,
+		MaxBackground: 256,
 	}
 	if isFusermountBinExist() {
 		log.G(ctx).Infof("fusermount detected")
