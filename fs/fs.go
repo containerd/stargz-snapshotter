@@ -39,7 +39,9 @@ package fs
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -63,12 +65,15 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
 
 const (
 	defaultFuseTimeout    = time.Second
 	defaultMaxConcurrency = 2
+	memoryMetadataType    = "memory"
+	dbMetadataType        = "db"
 )
 
 var fusermountBin = []string{"fusermount", "fusermount3"}
