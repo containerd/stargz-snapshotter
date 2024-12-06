@@ -26,7 +26,6 @@ require (
 	golang.org/x/sync v0.9.0
 	golang.org/x/sys v0.26.0
 	google.golang.org/grpc v1.68.0
-	k8s.io/cri-api v0.32.0-alpha.0
 )
 
 require (
@@ -141,6 +140,7 @@ require (
 	k8s.io/api v0.31.2 // indirect
 	k8s.io/apimachinery v0.31.2 // indirect
 	k8s.io/client-go v0.31.2 // indirect
+	k8s.io/cri-api v0.32.0-alpha.0 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340 // indirect
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8 // indirect
