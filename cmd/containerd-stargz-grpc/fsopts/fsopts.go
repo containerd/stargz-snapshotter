@@ -36,8 +36,13 @@ type Config struct {
 	MetadataStore string
 }
 
-func ConfigFsOpts(ctx context.Context, rootDir string, config *Config) ([]Option, error) {
-	fsOpts := []Option{fs.WithMetricsLogLevel(log.InfoLevel)}
+const (
+	memoryMetadataType    = "memory"
+	dbMetadataType        = "db"
+)
+
+func ConfigFsOpts(ctx context.Context, rootDir string, config *Config) ([]fs.Option, error) {
+	fsOpts := []fs.Option{fs.WithMetricsLogLevel(log.InfoLevel)}
 
 	if config.EnableIpfs {
 		fsOpts = append(fsOpts, fs.WithResolveHandler("ipfs", new(ipfs.ResolveHandler)))

@@ -39,9 +39,7 @@ package fs
 import (
 	"context"
 	"fmt"
-	"io"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -65,18 +63,21 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
 
 const (
 	defaultFuseTimeout    = time.Second
 	defaultMaxConcurrency = 2
-	memoryMetadataType    = "memory"
-	dbMetadataType        = "db"
 )
 
 var fusermountBin = []string{"fusermount", "fusermount3"}
+var (
+	nsLock = sync.Mutex{}
+
+	ns         *metrics.Namespace
+	metricsCtr *layermetrics.Controller
+)
 
 type Option func(*options)
 
@@ -165,18 +166,20 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		return nil, fmt.Errorf("failed to setup resolver: %w", err)
 	}
 
-	var ns *metrics.Namespace
-	if !cfg.NoPrometheus {
+	nsLock.Lock()
+	defer nsLock.Unlock()
+
+	if !cfg.NoPrometheus && ns == nil {
 		ns = metrics.NewNamespace("stargz", "fs", nil)
 		logLevel := log.DebugLevel
 		if fsOpts.metricsLogLevel != nil {
 			logLevel = *fsOpts.metricsLogLevel
 		}
 		commonmetrics.Register(logLevel) // Register common metrics. This will happen only once.
+		metrics.Register(ns)     // Register layer metrics.
 	}
-	c := layermetrics.NewLayerMetrics(ns)
-	if ns != nil {
-		metrics.Register(ns) // Register layer metrics.
+	if metricsCtr == nil {
+		metricsCtr = layermetrics.NewLayerMetrics(ns)
 	}
 
 	return &filesystem{
@@ -190,7 +193,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		backgroundTaskManager: tm,
 		allowNoVerification:   cfg.AllowNoVerification,
 		disableVerification:   cfg.DisableVerification,
-		metricsController:     c,
+		metricsController:     metricsCtr,
 		attrTimeout:           attrTimeout,
 		entryTimeout:          entryTimeout,
 	}, nil
