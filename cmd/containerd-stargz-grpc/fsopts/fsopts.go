@@ -37,8 +37,8 @@ type Config struct {
 }
 
 const (
-	memoryMetadataType    = "memory"
-	dbMetadataType        = "db"
+	memoryMetadataType = "memory"
+	dbMetadataType     = "db"
 )
 
 func ConfigFsOpts(ctx context.Context, rootDir string, config *Config) ([]fs.Option, error) {

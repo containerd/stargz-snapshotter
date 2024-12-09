@@ -47,9 +47,9 @@ const (
 )
 
 type Config struct {
-	Config *service.Config
-	IPFS bool
-	MetadataStore string
+	Config                     *service.Config
+	IPFS                       bool
+	MetadataStore              string
 	DefaultImageServiceAddress string
 }
 
@@ -87,12 +87,12 @@ func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Ser
 	}
 
 	fm := &Server{
-		status:   FuseManagerWaitInit,
-		lock:     sync.RWMutex{},
-		fsMap:    sync.Map{},
-		ms:       db,
-		listener: listener,
-		server:   server,
+		status:        FuseManagerWaitInit,
+		lock:          sync.RWMutex{},
+		fsMap:         sync.Map{},
+		ms:            db,
+		listener:      listener,
+		server:        server,
 		fuseStoreAddr: fuseStoreAddr,
 	}
 
@@ -136,7 +136,7 @@ func (fm *Server) Init(ctx context.Context, req *pb.InitRequest) (*pb.Response, 
 		ImageServicePath:           config.Config.CRIKeychainConfig.ImageServicePath,
 	}
 
-	credsFuncs, _, err := keychainconfig.ConfigKeychain(ctx, &keyChainConfig)
+	credsFuncs, err := keychainconfig.ConfigKeychain(ctx, fm.server, &keyChainConfig)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to configure keychain")
 	}

@@ -46,7 +46,6 @@ import (
 	"github.com/pelletier/go-toml"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 const (
@@ -55,10 +54,10 @@ const (
 	defaultLogLevel            = log.InfoLevel
 	defaultRootDir             = "/var/lib/containerd-stargz-grpc"
 	defaultImageServiceAddress = "/run/containerd/containerd.sock"
-	defaultFuseManagerAddress  = "/run/containerd-stargz-grpc/fuse-namanger.sock"
+	defaultFuseManagerAddress  = "/run/containerd-stargz-grpc/fuse-manager.sock"
 
 	fuseManagerBin     = "stargz-fuse-manager"
-	fuseManagerAddress = "fuse-mananger.sock"
+	fuseManagerAddress = "fuse-manager.sock"
 )
 
 var (
@@ -148,15 +147,6 @@ func main() {
 		ImageServicePath:           config.CRIKeychainConfig.ImageServicePath,
 	}
 
-	credsFuncs, criServer, err := keychainconfig.ConfigKeychain(ctx, &keyChainConfig)
-	if err != nil {
-		log.G(ctx).WithError(err).Fatalf("failed to configure keychain")
-	}
-
-	if config.Config.CRIKeychainConfig.EnableKeychain {
-		runtime.RegisterImageServiceServer(rpc, criServer)
-	}
-
 	var rs snapshots.Snapshotter
 	if *detachFuseManager {
 		fmPath := config.FuseManagerPath
@@ -197,6 +187,11 @@ func main() {
 		}
 		log.G(ctx).Infof("Start snapshotter with fusemanager mode")
 	} else {
+		credsFuncs, err := keychainconfig.ConfigKeychain(ctx, rpc, &keyChainConfig)
+		if err != nil {
+			log.G(ctx).WithError(err).Fatalf("failed to configure keychain")
+		}
+
 		fsConfig := fsopts.Config{
 			EnableIpfs:    config.IPFS,
 			MetadataStore: config.MetadataStore,

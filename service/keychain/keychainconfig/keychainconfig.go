@@ -40,9 +40,8 @@ type Config struct {
 	ImageServicePath           string
 }
 
-func ConfigKeychain(ctx context.Context, config *Config) ([]resolver.Credential, runtime.ImageServiceServer, error) {
+func ConfigKeychain(ctx context.Context, rpc *grpc.Server, config *Config) ([]resolver.Credential, error) {
 	credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
-	var criServer runtime.ImageServiceServer
 	if config.EnableKubeKeychain {
 		var opts []kubeconfig.Option
 		if kcp := config.KubeconfigPath; kcp != "" {
@@ -63,12 +62,12 @@ func ConfigKeychain(ctx context.Context, config *Config) ([]resolver.Credential,
 			}
 			return runtime.NewImageServiceClient(conn), nil
 		}
-		f, server := cri.NewCRIKeychain(ctx, connectCRI)
+		f, criServer := cri.NewCRIKeychain(ctx, connectCRI)
+		runtime.RegisterImageServiceServer(rpc, criServer)
 		credsFuncs = append(credsFuncs, f)
-		criServer = server
 	}
 
-	return credsFuncs, criServer, nil
+	return credsFuncs, nil
 }
 
 func newCRIConn(criAddr string) (*grpc.ClientConn, error) {

@@ -176,7 +176,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 			logLevel = *fsOpts.metricsLogLevel
 		}
 		commonmetrics.Register(logLevel) // Register common metrics. This will happen only once.
-		metrics.Register(ns)     // Register layer metrics.
+		metrics.Register(ns)             // Register layer metrics.
 	}
 	if metricsCtr == nil {
 		metricsCtr = layermetrics.NewLayerMetrics(ns)
