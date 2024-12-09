@@ -221,6 +221,7 @@ func runFuseManager(ctx context.Context) error {
 		sig := <-sigCh
 		log.G(ctx).Infof("Got %v", sig)
 		fm.server.Stop()
+		os.Remove(address)
 	}()
 
 	if err = server.Serve(l); err != nil {

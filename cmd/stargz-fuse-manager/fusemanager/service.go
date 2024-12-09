@@ -72,6 +72,8 @@ type Server struct {
 	// curFs is filesystem created by latest config
 	curFs snapshot.FileSystem
 	ms    *bolt.DB
+
+	fuseStoreAddr string
 }
 
 func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Server, fuseStoreAddr string) (*Server, error) {
@@ -91,6 +93,7 @@ func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Ser
 		ms:       db,
 		listener: listener,
 		server:   server,
+		fuseStoreAddr: fuseStoreAddr,
 	}
 
 	return fm, nil
@@ -275,6 +278,11 @@ func (fm *Server) Close(ctx context.Context) error {
 	err = fm.ms.Close()
 	if err != nil {
 		log.G(ctx).WithError(err).Errorf("failed to close fusestore")
+		return err
+	}
+
+	if err := os.Remove(fm.fuseStoreAddr); err != nil {
+		log.G(ctx).WithError(err).Errorf("failed to remove fusestore file %s", fm.fuseStoreAddr)
 		return err
 	}
 
