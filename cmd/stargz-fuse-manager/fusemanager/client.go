@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/containerd/log"
 	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/containerd/v2/pkg/dialer"
+	"github.com/containerd/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 
-	pb "github.com/containerd/stargz-snapshotter/fusemanager/api"
+	pb "github.com/containerd/stargz-snapshotter/cmd/stargz-fuse-manager/fusemanager/api"
 	"github.com/containerd/stargz-snapshotter/snapshot"
 )
 

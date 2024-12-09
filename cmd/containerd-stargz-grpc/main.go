@@ -36,9 +36,9 @@ import (
 	"github.com/containerd/containerd/v2/pkg/sys"
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/fsopts"
+	"github.com/containerd/stargz-snapshotter/cmd/stargz-fuse-manager/fusemanager"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
-	"github.com/containerd/stargz-snapshotter/fusemanager"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/version"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
@@ -181,9 +181,9 @@ func main() {
 		}
 
 		fuseManagerConfig := fusemanager.Config{
-			Config: &config.Config,
-			IPFS:config.IPFS,
-			MetadataStore: config.MetadataStore,
+			Config:                     &config.Config,
+			IPFS:                       config.IPFS,
+			MetadataStore:              config.MetadataStore,
 			DefaultImageServiceAddress: defaultImageServiceAddress,
 		}
 

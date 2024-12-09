@@ -33,8 +33,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 	"google.golang.org/grpc"
 
-	pb "github.com/containerd/stargz-snapshotter/fusemanager/api"
 	"github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/fsopts"
+	pb "github.com/containerd/stargz-snapshotter/cmd/stargz-fuse-manager/fusemanager/api"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
 	"github.com/containerd/stargz-snapshotter/snapshot"
@@ -45,6 +45,13 @@ const (
 	FuseManagerWaitInit
 	FuseManagerReady
 )
+
+type Config struct {
+	Config *service.Config
+	IPFS bool
+	MetadataStore string
+	DefaultImageServiceAddress string
+}
 
 type Server struct {
 	pb.UnimplementedStargzFuseManagerServiceServer

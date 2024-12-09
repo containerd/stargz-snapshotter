@@ -17,7 +17,7 @@
 package main
 
 import (
-	fusemanager "github.com/containerd/stargz-snapshotter/fusemanager"
+	fusemanager "github.com/containerd/stargz-snapshotter/cmd/stargz-fuse-manager/fusemanager"
 )
 
 func main() {

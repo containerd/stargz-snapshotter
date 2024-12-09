@@ -35,7 +35,7 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
-	pb "github.com/containerd/stargz-snapshotter/fusemanager/api"
+	pb "github.com/containerd/stargz-snapshotter/cmd/stargz-fuse-manager/fusemanager/api"
 	"github.com/containerd/stargz-snapshotter/version"
 )
 
