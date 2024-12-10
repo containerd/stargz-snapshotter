@@ -20,13 +20,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/containerd/v2/pkg/dialer"
 	"github.com/containerd/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/containerd/stargz-snapshotter/cmd/stargz-fuse-manager/fusemanager/api"
 	"github.com/containerd/stargz-snapshotter/snapshot"
@@ -37,9 +37,7 @@ type Client struct {
 }
 
 func NewManagerClient(ctx context.Context, root, socket string, config *Config) (snapshot.FileSystem, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	grpcCli, err := newClient(timeoutCtx, socket)
+	grpcCli, err := newClient(socket)
 	if err != nil {
 		return nil, err
 	}
@@ -56,21 +54,21 @@ func NewManagerClient(ctx context.Context, root, socket string, config *Config) 
 	return client, nil
 }
 
-func newClient(ctx context.Context, socket string) (pb.StargzFuseManagerServiceClient, error) {
+func newClient(socket string) (pb.StargzFuseManagerServiceClient, error) {
 	connParams := grpc.ConnectParams{
 		Backoff: backoff.DefaultConfig,
 	}
 	gopts := []grpc.DialOption{
-		grpc.WithBlock(),
-		grpc.WithInsecure(),
-		grpc.FailOnNonTempDialError(true),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithConnectParams(connParams),
 		grpc.WithContextDialer(dialer.ContextDialer),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize),
+			grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize),
+		),
 	}
 
-	conn, err := grpc.DialContext(ctx, fmt.Sprintf("unix://%s", socket), gopts...)
+	conn, err := grpc.NewClient(fmt.Sprintf("unix://%s", socket), gopts...)
 	if err != nil {
 		return nil, err
 	}

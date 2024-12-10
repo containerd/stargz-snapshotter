@@ -27,7 +27,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/containerd/log"
 	"github.com/pkg/errors"
@@ -135,7 +134,7 @@ func startNew(ctx context.Context, logPath, address, fusestore, logLevel string)
 	}
 	go cmd.Wait()
 
-	if ready, err := waitUntilReady(ctx, 10); err != nil || !ready {
+	if ready, err := waitUntilReady(ctx); err != nil || !ready {
 		if err != nil {
 			return errors.Wrapf(err, "failed to start new fusemanager")
 		}
@@ -147,11 +146,9 @@ func startNew(ctx context.Context, logPath, address, fusestore, logLevel string)
 	return nil
 }
 
-// waitUntilReady waits until fusemanager is ready to accept requests with timeout
-func waitUntilReady(ctx context.Context, timeout int) (bool, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	defer cancel()
-	grpcCli, err := newClient(timeoutCtx, address)
+// waitUntilReady waits until fusemanager is ready to accept requests
+func waitUntilReady(ctx context.Context) (bool, error) {
+	grpcCli, err := newClient(address)
 	if err != nil {
 		return false, err
 	}

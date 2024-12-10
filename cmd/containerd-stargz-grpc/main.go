@@ -213,6 +213,10 @@ func main() {
 		log.G(ctx).WithError(err).Fatalf("failed to serve snapshotter")
 	}
 
+	// TODO: In detach mode, rs is taken over by fusemanager,
+	// but client will send unmount request to fusemanager,
+	// and fusemanager need get mount info from local db to
+	//  determine its behavior
 	if cleanup {
 		log.G(ctx).Debug("Closing the snapshotter")
 		rs.Close()
