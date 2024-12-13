@@ -24,7 +24,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.5
 	go.etcd.io/bbolt v1.3.11
 	golang.org/x/sync v0.9.0
-	golang.org/x/sys v0.26.0
+	golang.org/x/sys v0.28.0
 	google.golang.org/grpc v1.68.0
 )
 
