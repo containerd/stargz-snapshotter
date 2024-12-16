@@ -13,7 +13,7 @@ require (
 	github.com/containerd/stargz-snapshotter/ipfs v0.15.2-0.20240622031358-6405f362966d
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/go-metrics v0.0.1
-	github.com/goccy/go-json v0.10.3
+	github.com/goccy/go-json v0.10.4
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/klauspost/compress v1.17.11
 	github.com/opencontainers/go-digest v1.0.0
