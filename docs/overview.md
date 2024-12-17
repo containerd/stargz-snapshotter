@@ -108,7 +108,12 @@ Remote snapshots are mounted using FUSE, and its filesystem processes are attach
 
 To avoid this, we use a fuse daemon called the fuse manager to handle filesystem processes. The fuse manager is responsible for mounting and unmounting remote snapshotters. Its process is detached from the stargz snapshotter main process to an independent one in a shim-like way during the snapshotter's startup. This design ensures that the restart of the snapshotter won't affect the filesystem processes it manages, keeping mountpoints and running containers available during the restart. However, it is important to note that the restart of the fuse manager itself triggers a remount, so it is recommended to keep the fuse manager running in a good state.
 
-You can enable the fuse manager by adding the flag `--detach-fuse-manager=true` to the stargz snapshotter.
+You can enable the fuse manager by adding the following configuration.
+
+```toml
+[fusem_anager]
+enable = true
+```
 
 ## Killing and restarting Stargz Snapshotter
 
