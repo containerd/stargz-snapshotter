@@ -55,18 +55,15 @@ const (
 	defaultRootDir             = "/var/lib/containerd-stargz-grpc"
 	defaultImageServiceAddress = "/run/containerd/containerd.sock"
 	defaultFuseManagerAddress  = "/run/containerd-stargz-grpc/fuse-manager.sock"
-
-	fuseManagerBin     = "stargz-fuse-manager"
-	fuseManagerAddress = "fuse-manager.sock"
+	fuseManagerBin             = "stargz-fuse-manager"
 )
 
 var (
-	address           = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
-	configPath        = flag.String("config", defaultConfigPath, "path to the configuration file")
-	logLevel          = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
-	rootDir           = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
-	detachFuseManager = flag.Bool("detach-fuse-manager", false, "whether detach fusemanager or not")
-	printVersion      = flag.Bool("version", false, "print the version")
+	address      = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
+	configPath   = flag.String("config", defaultConfigPath, "path to the configuration file")
+	logLevel     = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
+	rootDir      = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
+	printVersion = flag.Bool("version", false, "print the version")
 )
 
 type snapshotterConfig struct {
@@ -86,10 +83,19 @@ type snapshotterConfig struct {
 
 	// MetadataStore is the type of the metadata store to use.
 	MetadataStore string `toml:"metadata_store" default:"memory"`
-	// FuseManagerAddress is address for the fusemanager's GRPC server
+
+	// FuseManagerConfig is configuration for fusemanager
+	FuseManagerConfig `toml:"fusemanager"`
+}
+
+type FuseManagerConfig struct {
+	// EnableFuseManager is whether detach fusemanager or not
+	EnableFuseManager bool `toml:"enable_fusemanager" default:"false"`
+
+	// FuseManagerAddress is address for the fusemanager's GRPC server (default: "/run/containerd-stargz-grpc/fuse-manager.sock")
 	FuseManagerAddress string `toml:"fusemanager_address"`
 
-	// FuseManagerPath is path to the fusemanager's executable
+	// FuseManagerPath is path to the fusemanager's executable (default: looking for a binary "stargz-fuse-manager")
 	FuseManagerPath string `toml:"fusemanager_path"`
 }
 
@@ -148,8 +154,8 @@ func main() {
 	}
 
 	var rs snapshots.Snapshotter
-	if *detachFuseManager {
-		fmPath := config.FuseManagerPath
+	if config.FuseManagerConfig.EnableFuseManager {
+		fmPath := config.FuseManagerConfig.FuseManagerPath
 		if fmPath == "" {
 			var err error
 			fmPath, err = exec.LookPath(fuseManagerBin)
@@ -157,7 +163,7 @@ func main() {
 				log.G(ctx).WithError(err).Fatalf("failed to find fusemanager bin")
 			}
 		}
-		fmAddr := config.FuseManagerAddress
+		fmAddr := config.FuseManagerConfig.FuseManagerAddress
 		if fmAddr == "" {
 			fmAddr = defaultFuseManagerAddress
 		}
