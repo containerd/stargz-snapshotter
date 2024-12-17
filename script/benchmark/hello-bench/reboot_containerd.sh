@@ -55,7 +55,7 @@ function kill_all {
 
 function cleanup {
     rm -rf "${CONTAINERD_ROOT}"*
-    if [ -f "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
+    if [ -e "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
         rm "${REMOTE_SNAPSHOTTER_SOCKET}"
     fi
     if [ -d "${REMOTE_SNAPSHOTTER_ROOT}snapshotter/snapshots/" ] ; then 

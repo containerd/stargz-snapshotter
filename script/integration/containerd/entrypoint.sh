@@ -108,14 +108,18 @@ CONTAINERD_ROOT=/var/lib/containerd/
 CONTAINERD_STATUS=/run/containerd/
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
+REMOTE_SNAPSHOTTER_FUSE_MANAGER_SOCKET=/run/containerd-stargz-grpc/fuse-manager.sock
 function reboot_containerd {
     kill_all "containerd"
     kill_all "containerd-stargz-grpc"
     kill_all "stargz-fuse-manager" SIGTERM
     rm -rf "${CONTAINERD_STATUS}"*
     rm -rf "${CONTAINERD_ROOT}"*
-    if [ -f "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
+    if [ -e "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
         rm "${REMOTE_SNAPSHOTTER_SOCKET}"
+    fi
+    if [ -e "${REMOTE_SNAPSHOTTER_FUSE_MANAGER_SOCKET}" ] ; then
+        rm "${REMOTE_SNAPSHOTTER_FUSE_MANAGER_SOCKET}"
     fi
     if [ -d "${REMOTE_SNAPSHOTTER_ROOT}snapshotter/snapshots/" ] ; then 
         find "${REMOTE_SNAPSHOTTER_ROOT}snapshotter/snapshots/" \
