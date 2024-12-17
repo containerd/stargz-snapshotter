@@ -55,12 +55,17 @@ jobs:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
+        fuse-manager: ["true", "false"]
         exclude:
         - buildargs: ""
           builtin: "true"
         - metadata-store: "db"
           builtin: "true"
         - metadata-store: "db"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - fuse-manager: "true"
+          builtin: "true"
+        - fuse-manager: "true"
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - name: Install htpasswd for setting up private registry
@@ -71,6 +76,7 @@ jobs:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
+        FUSE_MANAGER: ${{ matrix.fuse-manager }}
       run: make integration
 
   test-optimize:
@@ -140,12 +146,17 @@ jobs:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
+        fuse-manager: ["true", "false"]
         exclude:
         - buildargs: ""
           builtin: "true"
         - metadata-store: "db"
           builtin: "true"
         - metadata-store: "db"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - fuse-manager: "true"
+          builtin: "true"
+        - fuse-manager: "true"
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - uses: actions/checkout@v4
@@ -154,6 +165,7 @@ jobs:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
+        FUSE_MANAGER: ${{ matrix.fuse-manager }}
       run: make test-cri-containerd
 
   test-cri-cri-o:
