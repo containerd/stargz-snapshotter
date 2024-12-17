@@ -4,7 +4,7 @@ go 1.22.7
 
 require (
 	github.com/containerd/console v1.0.4
-	github.com/containerd/containerd/v2 v2.0.0
+	github.com/containerd/containerd/v2 v2.0.1
 	github.com/containerd/continuity v0.4.4
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/log v0.1.0
@@ -48,9 +48,9 @@ require (
 	github.com/containerd/containerd/api v1.8.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
-	github.com/containerd/go-cni v1.1.10 // indirect
+	github.com/containerd/go-cni v1.1.11 // indirect
 	github.com/containerd/ttrpc v1.2.6 // indirect
-	github.com/containerd/typeurl/v2 v2.2.2 // indirect
+	github.com/containerd/typeurl/v2 v2.2.3 // indirect
 	github.com/containernetworking/cni v1.2.3 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
