@@ -56,6 +56,7 @@ jobs:
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         fuse-passthrough: ["true", "false"]
+        fuse-manager: ["true", "false"]
         transfer-service: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -70,6 +71,10 @@ jobs:
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - fuse-passthrough: "true"
           metadata-store: "db"
+        - fuse-manager: "true"
+          builtin: "true"
+        - fuse-manager: "true"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - transfer-service: "true"
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - transfer-service: "true"
@@ -88,6 +93,7 @@ jobs:
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
         FUSE_PASSTHROUGH: ${{ matrix.fuse-passthrough }}
+        FUSE_MANAGER: ${{ matrix.fuse-manager }}
         TRANSFER_SERVICE: ${{ matrix.transfer-service }}
       run: make integration
 
@@ -159,6 +165,7 @@ jobs:
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         fuse-passthrough: ["true", "false"]
+        fuse-manager: ["true", "false"]
         transfer-service: ["true", "false"]
         exclude:
         - buildargs: ""
@@ -173,6 +180,10 @@ jobs:
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - fuse-passthrough: "true"
           metadata-store: "db"
+        - fuse-manager: "true"
+          builtin: "true"
+        - fuse-manager: "true"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - transfer-service: "true"
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - transfer-service: "true"
@@ -189,6 +200,7 @@ jobs:
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
         FUSE_PASSTHROUGH: ${{ matrix.fuse-passthrough }}
+        FUSE_MANAGER: ${{ matrix.fuse-manager }}
         TRANSFER_SERVICE: ${{ matrix.transfer-service }}
       run: make test-cri-containerd
 

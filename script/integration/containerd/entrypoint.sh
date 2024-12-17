@@ -28,6 +28,8 @@ REGISTRY_ALT_HOST=registry-alt.test
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
+FUSE_MANAGER_LOG="Start snapshotter with fusemanager mode"
+
 USR_ORG=$(mktemp -d)
 USR_MIRROR=$(mktemp -d)
 USR_REFRESH=$(mktemp -d)
@@ -94,8 +96,12 @@ function retry {
 function kill_all {
     if [ "${1}" != "" ] ; then
         TARGET_SIGNAL="-s ${2:-SIGKILL}"
-        ps aux | grep "${1}" | grep -v grep | grep -v $(basename ${0}) | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill ${TARGET_SIGNAL} {} || true
+        ps aux | grep "${1} " | grep -v grep | grep -v $(basename ${0}) | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill ${TARGET_SIGNAL} {} || true
     fi
+}
+
+function wait_all {
+    while ps aux | grep -v grep | grep -v $(basename ${0}) | grep "${1} " ; do sleep 3 ; done
 }
 
 CONTAINERD_ROOT=/var/lib/containerd/
@@ -105,6 +111,7 @@ REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
 function reboot_containerd {
     kill_all "containerd"
     kill_all "containerd-stargz-grpc"
+    kill_all "stargz-fuse-manager" SIGTERM
     rm -rf "${CONTAINERD_STATUS}"*
     rm -rf "${CONTAINERD_ROOT}"*
     if [ -f "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
@@ -134,6 +141,19 @@ function reboot_containerd {
         fi
         retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
         containerd --log-level debug --config=/etc/containerd/config.toml &
+        if [ "${NO_FUSE_MANAGER_CHECK:-}" != "true" ] ; then
+            if cat "${LOG_FILE}" | grep "${FUSE_MANAGER_LOG}" ; then
+                if [ "${FUSE_MANAGER}" != "true" ] ; then
+                    echo "fuse manager should not be enabled"
+                    exit 1
+                fi
+            else
+                if [ "${FUSE_MANAGER}" == "true" ] ; then
+                    echo "fuse manager should be enabled"
+                    exit 1
+                fi
+            fi
+        fi
     fi
 
     # Makes sure containerd and containerd-stargz-grpc are up-and-running.
@@ -488,11 +508,18 @@ ctr-remote --namespace=dummy images ${RPULL_COMMAND} --user "${DUMMYUSER}:${DUMM
 ############
 # Test for starting when no configuration file.
 mv /etc/containerd-stargz-grpc/config.toml /etc/containerd-stargz-grpc/config.toml_rm
-reboot_containerd
+NO_FUSE_MANAGER_CHECK=true reboot_containerd
 mv /etc/containerd-stargz-grpc/config.toml_rm /etc/containerd-stargz-grpc/config.toml
 
 ############
 # Test graceful restart
+
+function check_cache_empty {
+    TARGET_DIRS=("${REMOTE_SNAPSHOTTER_ROOT}stargz/httpcache/" "${REMOTE_SNAPSHOTTER_ROOT}stargz/fscache/")
+    for D in "${TARGET_DIRS[@]}" ; do
+        test -z "$( ls -A $D )"
+    done
+}
 
 reboot_containerd
 if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
@@ -506,13 +533,22 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
         kill_all containerd-stargz-grpc "$S"
 
         # wait until stargz snapshotter is finished
-        while ps aux | grep -v grep | grep containerd-stargz-grpc ; do sleep 3 ; done
+        wait_all containerd-stargz-grpc
 
-        # Check if resource are cleaned up
-        TARGET_DIRS=("${REMOTE_SNAPSHOTTER_ROOT}stargz/httpcache/" "${REMOTE_SNAPSHOTTER_ROOT}stargz/fscache/")
-        for D in "${TARGET_DIRS[@]}" ; do
-            test -z "$( ls -A $D )"
-        done
+        if [ "$S" == "SIGINT" ] ; then
+            # On SIGINT, fuse manager mode also performs graceful shutdown so test this behaviour.
+            if [ "${FUSE_MANAGER}" == "true" ] ; then
+                kill_all stargz-fuse-manager "$S"
+                wait_all stargz-fuse-manager
+            fi
+            # Check if resource are cleaned up
+            check_cache_empty
+        else
+            if [ "${FUSE_MANAGER}" != "true" ] ; then
+                # If this is not FUSE manager mode, check if resource are cleaned up
+                check_cache_empty
+            fi
+        fi
 
         # Restart the snapshotter without additional operation
         containerd-stargz-grpc --log-level=debug --address="${REMOTE_SNAPSHOTTER_SOCKET}" 2>&1 | tee -a "${LOG_FILE}" & # Dump all log

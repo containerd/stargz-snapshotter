@@ -46,7 +46,8 @@ function retry {
 
 function kill_all {
     if [ "${1}" != "" ] ; then
-        ps aux | grep "${1}" | grep -v grep | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {} || true
+        S="${2:-SIGKILL}"
+        ps aux | grep "${1} " | grep -v grep | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -s $S {} || true
     fi
 }
 
@@ -71,6 +72,7 @@ mkdir -p "${CONTAINERD_CONFIG_DIR}" "${REMOTE_SNAPSHOTTER_CONFIG_DIR}" "${CNI_CO
 echo "cleaning up the environment..."
 kill_all "containerd"
 kill_all "containerd-stargz-grpc"
+kill_all "stargz-fuse-manager" SIGTERM
 cleanup
 
 echo "preparing commands..."
