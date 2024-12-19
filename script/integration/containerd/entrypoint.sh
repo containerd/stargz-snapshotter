@@ -28,6 +28,8 @@ REGISTRY_ALT_HOST=registry-alt.test
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
+FUSE_MANAGER_LOG="Start snapshotter with fusemanager mode"
+
 USR_ORG=$(mktemp -d)
 USR_MIRROR=$(mktemp -d)
 USR_REFRESH=$(mktemp -d)
@@ -101,13 +103,18 @@ CONTAINERD_ROOT=/var/lib/containerd/
 CONTAINERD_STATUS=/run/containerd/
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
 REMOTE_SNAPSHOTTER_ROOT=/var/lib/containerd-stargz-grpc/
+REMOTE_SNAPSHOTTER_FUSE_MANAGER_SOCKET=/run/containerd-stargz-grpc/fuse-manager.sock
 function reboot_containerd {
     kill_all "containerd"
     kill_all "containerd-stargz-grpc"
+    kill_all "stargz-fuse-manager"
     rm -rf "${CONTAINERD_STATUS}"*
     rm -rf "${CONTAINERD_ROOT}"*
-    if [ -f "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
+    if [ -e "${REMOTE_SNAPSHOTTER_SOCKET}" ] ; then
         rm "${REMOTE_SNAPSHOTTER_SOCKET}"
+    fi
+    if [ -e "${REMOTE_SNAPSHOTTER_FUSE_MANAGER_SOCKET}" ] ; then
+        rm "${REMOTE_SNAPSHOTTER_FUSE_MANAGER_SOCKET}"
     fi
     if [ -d "${REMOTE_SNAPSHOTTER_ROOT}snapshotter/snapshots/" ] ; then 
         find "${REMOTE_SNAPSHOTTER_ROOT}snapshotter/snapshots/" \
@@ -133,6 +140,19 @@ function reboot_containerd {
         fi
         retry ls "${REMOTE_SNAPSHOTTER_SOCKET}"
         containerd --log-level debug --config=/etc/containerd/config.toml &
+        if [ "${NO_FUSE_MANAGER_CHECK:-}" != "true" ] ; then
+            if cat "${LOG_FILE}" | grep "${FUSE_MANAGER_LOG}" ; then
+                if [ "${FUSE_MANAGER}" != "true" ] ; then
+                    echo "fuse manager should not be enabled"
+                    exit 1
+                fi
+            else
+                if [ "${FUSE_MANAGER}" == "true" ] ; then
+                    echo "fuse manager should be enabled"
+                    exit 1
+                fi
+            fi
+        fi
     fi
 
     # Makes sure containerd and containerd-stargz-grpc are up-and-running.
@@ -479,7 +499,7 @@ ctr-remote --namespace=dummy images rpull --user "${DUMMYUSER}:${DUMMYPASS}" \
 ############
 # Test for starting when no configuration file.
 mv /etc/containerd-stargz-grpc/config.toml /etc/containerd-stargz-grpc/config.toml_rm
-reboot_containerd
+NO_FUSE_MANAGER_CHECK=true reboot_containerd
 mv /etc/containerd-stargz-grpc/config.toml_rm /etc/containerd-stargz-grpc/config.toml
 
 exit 0

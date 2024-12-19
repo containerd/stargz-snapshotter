@@ -57,10 +57,13 @@ jobs:
         buildargs: [""]
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
+        fuse-manager: ["true", "false"]
         exclude:
         # - buildargs: ""
         #   builtin: "true"
         - metadata-store: "db"
+          builtin: "true"
+        - fuse-manager: "true"
           builtin: "true"
         # - metadata-store: "db"
         #   buildargs: "--build-arg=CONTAINERD_VERSION=main"
@@ -73,6 +76,7 @@ jobs:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
+        FUSE_MANAGER: ${{ matrix.fuse-manager }}
       run: make integration
 
   test-optimize:
@@ -150,10 +154,13 @@ jobs:
         buildargs: [""]
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
+        fuse-manager: ["true", "false"]
         exclude:
         # - buildargs: ""
         #   builtin: "true"
         - metadata-store: "db"
+          builtin: "true"
+        - fuse-manager: "true"
           builtin: "true"
         # - metadata-store: "db"
         #   buildargs: "--build-arg=CONTAINERD_VERSION=main"
@@ -164,6 +171,7 @@ jobs:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
+        FUSE_MANAGER: ${{ matrix.fuse-manager }}
       run: make test-cri-containerd
 
   test-cri-cri-o:
