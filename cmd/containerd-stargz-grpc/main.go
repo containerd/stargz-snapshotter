@@ -181,7 +181,7 @@ func main() {
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure fusemanager")
 		}
-		rs, err = snbase.NewSnapshotter(ctx, filepath.Join(*rootDir, "snapshotter"), fs, snbase.AsynchronousRemove)
+		rs, err = snbase.NewSnapshotter(ctx, filepath.Join(*rootDir, "snapshotter"), fs, snbase.AsynchronousRemove, snbase.SetDetachFlag)
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
 		}
@@ -213,10 +213,6 @@ func main() {
 		log.G(ctx).WithError(err).Fatalf("failed to serve snapshotter")
 	}
 
-	// TODO: In detach mode, rs is taken over by fusemanager,
-	// but client will send unmount request to fusemanager,
-	// and fusemanager need get mount info from local db to
-	//  determine its behavior
 	if cleanup {
 		log.G(ctx).Debug("Closing the snapshotter")
 		rs.Close()

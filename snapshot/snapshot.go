@@ -73,6 +73,7 @@ type SnapshotterConfig struct {
 	asyncRemove                 bool
 	noRestore                   bool
 	allowInvalidMountsOnRestart bool
+	detach                      bool
 }
 
 // Opt is an option to configure the remote snapshotter
@@ -97,6 +98,11 @@ func AllowInvalidMountsOnRestart(config *SnapshotterConfig) error {
 	return nil
 }
 
+func SetDetachFlag(config *SnapshotterConfig) error {
+	config.detach = true
+	return nil
+}
+
 type snapshotter struct {
 	root        string
 	ms          *storage.MetaStore
@@ -107,6 +113,7 @@ type snapshotter struct {
 	userxattr                   bool // whether to enable "userxattr" mount option
 	noRestore                   bool
 	allowInvalidMountsOnRestart bool
+	detach                      bool
 }
 
 // NewSnapshotter returns a Snapshotter which can use unpacked remote layers
@@ -157,6 +164,7 @@ func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts 
 		userxattr:                   userxattr,
 		noRestore:                   config.noRestore,
 		allowInvalidMountsOnRestart: config.allowInvalidMountsOnRestart,
+		detach:                      config.detach,
 	}
 
 	if err := o.restoreRemoteSnapshot(ctx); err != nil {
@@ -736,14 +744,18 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 }
 
 func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
-	mounts, err := mountinfo.GetMounts(nil)
-	if err != nil {
-		return err
-	}
-	for _, m := range mounts {
-		if strings.HasPrefix(m.Mountpoint, filepath.Join(o.root, "snapshots")) {
-			if err := syscall.Unmount(m.Mountpoint, syscall.MNT_FORCE); err != nil {
-				return fmt.Errorf("failed to unmount %s: %w", m.Mountpoint, err)
+	// In detach mode, rs is taken over by fusemanager,
+	// and there may be running containers, so we skip clean
+	if !o.detach {
+		mounts, err := mountinfo.GetMounts(nil)
+		if err != nil {
+			return err
+		}
+		for _, m := range mounts {
+			if strings.HasPrefix(m.Mountpoint, filepath.Join(o.root, "snapshots")) {
+				if err := syscall.Unmount(m.Mountpoint, syscall.MNT_FORCE); err != nil {
+					return fmt.Errorf("failed to unmount %s: %w", m.Mountpoint, err)
+				}
 			}
 		}
 	}
