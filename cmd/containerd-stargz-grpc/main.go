@@ -70,33 +70,33 @@ type snapshotterConfig struct {
 	service.Config
 
 	// MetricsAddress is address for the metrics API
-	MetricsAddress string `toml:"metrics_address"`
+	MetricsAddress string `toml:"metrics_address" json:"metrics_address"`
 
 	// NoPrometheus is a flag to disable the emission of the metrics
-	NoPrometheus bool `toml:"no_prometheus"`
+	NoPrometheus bool `toml:"no_prometheus" json:"no_prometheus"`
 
 	// DebugAddress is a Unix domain socket address where the snapshotter exposes /debug/ endpoints.
-	DebugAddress string `toml:"debug_address"`
+	DebugAddress string `toml:"debug_address" json:"debug_address"`
 
 	// IPFS is a flag to enbale lazy pulling from IPFS.
-	IPFS bool `toml:"ipfs"`
+	IPFS bool `toml:"ipfs" json:"ipfs"`
 
 	// MetadataStore is the type of the metadata store to use.
-	MetadataStore string `toml:"metadata_store" default:"memory"`
+	MetadataStore string `toml:"metadata_store" default:"memory" json:"metadata_store"`
 
 	// FuseManagerConfig is configuration for fusemanager
-	FuseManagerConfig `toml:"fusemanager"`
+	FuseManagerConfig `toml:"fusemanager" json:"fusemanager"`
 }
 
 type FuseManagerConfig struct {
 	// EnableFuseManager is whether detach fusemanager or not
-	EnableFuseManager bool `toml:"enable_fusemanager" default:"false"`
+	EnableFuseManager bool `toml:"enable_fusemanager" default:"false" json:"enable_fusemanager"`
 
 	// FuseManagerAddress is address for the fusemanager's GRPC server (default: "/run/containerd-stargz-grpc/fuse-manager.sock")
-	FuseManagerAddress string `toml:"fusemanager_address"`
+	FuseManagerAddress string `toml:"fusemanager_address" json:"fusemanager_address"`
 
 	// FuseManagerPath is path to the fusemanager's executable (default: looking for a binary "stargz-fuse-manager")
-	FuseManagerPath string `toml:"fusemanager_path"`
+	FuseManagerPath string `toml:"fusemanager_path" json:"fusemanager_path"`
 }
 
 func main() {
@@ -177,7 +177,7 @@ func main() {
 		}
 
 		fuseManagerConfig := fusemanager.Config{
-			Config:                     &config.Config,
+			Config:                     config.Config,
 			IPFS:                       config.IPFS,
 			MetadataStore:              config.MetadataStore,
 			DefaultImageServiceAddress: defaultImageServiceAddress,
@@ -193,9 +193,38 @@ func main() {
 		}
 		log.G(ctx).Infof("Start snapshotter with fusemanager mode")
 	} else {
-		credsFuncs, err := keychainconfig.ConfigKeychain(ctx, rpc, &keyChainConfig)
+		crirpc := rpc
+		// For CRI keychain, if listening path is different from stargz-snapshotter's socket, prepare for the dedicated grpc server and the socket.
+		serveCRISocket := config.Config.CRIKeychainConfig.EnableKeychain && config.Config.CRIKeychainConfig.ListenPath != "" && config.Config.CRIKeychainConfig.ListenPath != *address
+		if serveCRISocket {
+			crirpc = grpc.NewServer()
+		}
+		credsFuncs, err := keychainconfig.ConfigKeychain(ctx, crirpc, &keyChainConfig)
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure keychain")
+		}
+		if serveCRISocket {
+			addr := config.Config.CRIKeychainConfig.ListenPath
+			// Prepare the directory for the socket
+			if err := os.MkdirAll(filepath.Dir(addr), 0700); err != nil {
+				log.G(ctx).WithError(err).Fatalf("failed to create directory %q", filepath.Dir(addr))
+			}
+
+			// Try to remove the socket file to avoid EADDRINUSE
+			if err := os.RemoveAll(addr); err != nil {
+				log.G(ctx).WithError(err).Fatalf("failed to remove %q", addr)
+			}
+
+			// Listen and serve
+			l, err := net.Listen("unix", addr)
+			if err != nil {
+				log.G(ctx).WithError(err).Fatalf("error on listen socket %q", addr)
+			}
+			go func() {
+				if err := crirpc.Serve(l); err != nil {
+					log.G(ctx).WithError(err).Errorf("error on serving CRI via socket %q", addr)
+				}
+			}()
 		}
 
 		fsConfig := fsopts.Config{
