@@ -52,18 +52,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporary disable containerd main branch test and migrate to containerd v2 after it's released.
-        # buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         buildargs: [""]
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         exclude:
-        # - buildargs: ""
-        #   builtin: "true"
+        - buildargs: ""
+          builtin: "true"
         - metadata-store: "db"
           builtin: "true"
-        # - metadata-store: "db"
-        #   buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - metadata-store: "db"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -81,8 +80,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporary disable contaienrd main branch test and migrate to containerd v2 after it's released.
-        # buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         buildargs: [""]
     steps:
     - name: Install htpasswd for setting up private registry
@@ -99,13 +97,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporary disable contaienrd main branch test and migrate to containerd v2 after it's released.
-        # buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         buildargs: [""]
         builtin: ["true", "false"]
-        # exclude:
-        # - buildargs: ""
-        #   builtin: "true"
+        exclude:
+        - buildargs: ""
+          builtin: "true"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -122,13 +119,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporary disable contaienrd main branch test and migrate to containerd v2 after it's released.
-        # buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         buildargs: [""]
         builtin: ["true", "false"]
-        # exclude:
-        # - buildargs: ""
-        #   builtin: "true"
+        exclude:
+        - buildargs: ""
+          builtin: "true"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -145,18 +141,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Temporary disable contaienrd main branch test and migrate to containerd v2 after it's released.
-        # buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
+        buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         buildargs: [""]
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         exclude:
-        # - buildargs: ""
-        #   builtin: "true"
+        - buildargs: ""
+          builtin: "true"
         - metadata-store: "db"
           builtin: "true"
-        # - metadata-store: "db"
-        #   buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - metadata-store: "db"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - uses: actions/checkout@v4
     - name: Validate containerd through CRI

@@ -17,8 +17,7 @@ on:
 
 env:
   DOCKER_BUILDKIT: 1
-  # Temporary disable contaienrd main branch test and migrate to containerd v2 after it's released.
-  # DOCKER_BUILD_ARGS: --build-arg=CONTAINERD_VERSION=main # do tests with the latest containerd
+  DOCKER_BUILD_ARGS: --build-arg=CONTAINERD_VERSION=main # do tests with the latest containerd
 
 jobs:
   integration:
