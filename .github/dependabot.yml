@@ -3,30 +3,32 @@ updates:
 
   # Automatic upgrade for go modules.
   - package-ecosystem: "gomod"
-    directory: "/"
+    directories:
+      - "/estargz"
+      - "/ipfs"
+      - "/"
+      - "/cmd"
     schedule:
       interval: "daily"
     ignore:
       # We upgrade this manually on each release
       - dependency-name: "github.com/containerd/stargz-snapshotter/estargz"
-
-  # Automatic upgrade for go modules of estargz package.
-  - package-ecosystem: "gomod"
-    directory: "/estargz"
-    schedule:
-      interval: "daily"
-
-  # Automatic upgrade for go modules of ipfs package.
-  - package-ecosystem: "gomod"
-    directory: "/ipfs"
-    schedule:
-      interval: "daily"
-
-  # Automatic upgrade for go modules of cmd package.
-  - package-ecosystem: "gomod"
-    directory: "/cmd"
-    schedule:
-      interval: "daily"
+    groups:
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+      google-golang:
+        patterns:
+          - "google.golang.org/*"
+      containerd:
+        patterns:
+          - "github.com/containerd/*"
+      opencontainers:
+        patterns:
+          - "github.com/opencontainers/*"
+      k8s:
+        patterns:
+          - "k8s.io/*"
 
   # Automatic upgrade for base images used in the Dockerfile
   - package-ecosystem: "docker"
