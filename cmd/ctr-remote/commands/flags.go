@@ -21,6 +21,7 @@ import (
 	gocontext "context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,7 +37,6 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	gocni "github.com/containerd/go-cni"
 	"github.com/containerd/log"
-	"github.com/hashicorp/go-multierror"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/rs/xid"
@@ -129,13 +129,14 @@ var samplerFlags = []cli.Flag{
 func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs string) (opts []oci.SpecOpts, done func() error, rErr error) {
 	return func(image containerd.Image, rootfs string) (opts []oci.SpecOpts, done func() error, rErr error) {
 		var cleanups []func() error
-		done = func() (allErr error) {
+		done = func() error {
+			var errs []error
 			for i := len(cleanups) - 1; i >= 0; i-- {
 				if err := cleanups[i](); err != nil {
-					allErr = multierror.Append(allErr, err)
+					errs = append(errs, err)
 				}
 			}
-			return
+			return errors.Join(errs...)
 		}
 		defer func() {
 			if rErr != nil {
@@ -265,13 +266,14 @@ func withEntrypointArgs(clicontext *cli.Context, image containerd.Image) (oci.Sp
 
 func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, rErr error) {
 	var cleanups []func() error
-	done = func() (allErr error) {
+	done = func() error {
+		var errs []error
 		for i := len(cleanups) - 1; i >= 0; i-- {
 			if err := cleanups[i](); err != nil {
-				allErr = multierror.Append(allErr, err)
+				errs = append(errs, err)
 			}
 		}
-		return
+		return errors.Join(errs...)
 	}
 	defer func() {
 		if rErr != nil {

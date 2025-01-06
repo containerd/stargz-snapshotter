@@ -18,6 +18,7 @@ package testutil
 
 import (
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,7 +32,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/metadata"
 	tutil "github.com/containerd/stargz-snapshotter/util/testutil"
-	"github.com/hashicorp/go-multierror"
 	"github.com/klauspost/compress/zstd"
 	digest "github.com/opencontainers/go-digest"
 )
@@ -412,17 +412,17 @@ func newCalledTelemetry() (telemetry *metadata.Telemetry, check func() error) {
 			GetTocLatency:         func(time.Time) { getTocLatencyCalled = true },
 			DeserializeTocLatency: func(time.Time) { deserializeTocLatencyCalled = true },
 		}, func() error {
-			var allErr error
+			var errs []error
 			if !getFooterLatencyCalled {
-				allErr = multierror.Append(allErr, fmt.Errorf("metrics GetFooterLatency isn't called"))
+				errs = append(errs, fmt.Errorf("metrics GetFooterLatency isn't called"))
 			}
 			if !getTocLatencyCalled {
-				allErr = multierror.Append(allErr, fmt.Errorf("metrics GetTocLatency isn't called"))
+				errs = append(errs, fmt.Errorf("metrics GetTocLatency isn't called"))
 			}
 			if !deserializeTocLatencyCalled {
-				allErr = multierror.Append(allErr, fmt.Errorf("metrics DeserializeTocLatency isn't called"))
+				errs = append(errs, fmt.Errorf("metrics DeserializeTocLatency isn't called"))
 			}
-			return allErr
+			return errors.Join(errs...)
 		}
 }
 

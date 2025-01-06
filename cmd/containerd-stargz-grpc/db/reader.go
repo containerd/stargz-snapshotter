@@ -35,7 +35,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/metadata"
 	"github.com/goccy/go-json"
-	"github.com/hashicorp/go-multierror"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/rs/xid"
 	bolt "go.etcd.io/bbolt"
@@ -99,7 +98,7 @@ func NewReader(db *bolt.DB, sr *io.SectionReader, opts ...metadata.Option) (meta
 		rOpts.Telemetry.GetFooterLatency(start)
 	}
 
-	var allErr error
+	var errs []error
 	var tocR io.ReadCloser
 	var decompressor metadata.Decompressor
 	for _, d := range decompressors {
@@ -108,7 +107,7 @@ func NewReader(db *bolt.DB, sr *io.SectionReader, opts ...metadata.Option) (meta
 		maybeTocBytes := footer[:fOffset]
 		_, tocOffset, tocSize, err := d.ParseFooter(footer[fOffset:])
 		if err != nil {
-			allErr = multierror.Append(allErr, err)
+			errs = append(errs, err)
 			continue
 		}
 		if tocOffset >= 0 && tocSize <= 0 {
@@ -119,12 +118,14 @@ func NewReader(db *bolt.DB, sr *io.SectionReader, opts ...metadata.Option) (meta
 		}
 		tocR, err = decompressTOC(d, sr, tocOffset, tocSize, maybeTocBytes, rOpts)
 		if err != nil {
-			allErr = multierror.Append(allErr, err)
+			errs = append(errs, err)
 			continue
 		}
 		decompressor = d
 		break
 	}
+
+	allErr := errors.Join(errs...)
 	if tocR == nil {
 		if allErr == nil {
 			return nil, fmt.Errorf("failed to get the reader of TOC: unknown")
@@ -238,20 +239,22 @@ func (r *reader) init(decompressedR io.Reader, rOpts metadata.Options) (retErr e
 	if err != nil {
 		return err
 	}
-	closeFunc := func() (closeErr error) {
+	closeFunc := func() error {
 		name := f.Name()
+		var errs []error
 		if err := f.Close(); err != nil {
-			closeErr = multierror.Append(closeErr, err)
+			errs = append(errs, err)
 		}
 		if err := os.Remove(name); err != nil {
-			closeErr = multierror.Append(closeErr, err)
+			errs = append(errs, err)
 		}
-		return
+		return errors.Join(errs...)
 	}
 	defer func() {
 		if retErr != nil {
 			if err := closeFunc(); err != nil {
-				retErr = multierror.Append(retErr, err)
+				retErr = errors.Join(retErr, err)
+				return
 			}
 		}
 	}()

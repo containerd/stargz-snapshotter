@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,7 +27,6 @@ import (
 
 	"github.com/containerd/stargz-snapshotter/util/cacheutil"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
-	"github.com/hashicorp/go-multierror"
 )
 
 const (
@@ -294,12 +294,12 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 			// Commit the cache contents
 			c := dc.cachePath(key)
 			if err := os.MkdirAll(filepath.Dir(c), os.ModePerm); err != nil {
-				var allErr error
+				var errs []error
 				if err := os.Remove(wip.Name()); err != nil {
-					allErr = multierror.Append(allErr, err)
+					errs = append(errs, err)
 				}
-				return multierror.Append(allErr,
-					fmt.Errorf("failed to create cache directory %q: %w", c, err))
+				errs = append(errs, fmt.Errorf("failed to create cache directory %q: %w", c, err))
+				return errors.Join(errs...)
 			}
 			return os.Rename(wip.Name(), c)
 		},

@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	"github.com/containerd/stargz-snapshotter/snapshot"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
-	"github.com/hashicorp/go-multierror"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -136,14 +136,15 @@ func fsRoot(root string) string {
 
 func sources(ps ...source.GetSources) source.GetSources {
 	return func(labels map[string]string) (source []source.Source, allErr error) {
+		var errs []error
 		for _, p := range ps {
 			src, err := p(labels)
 			if err == nil {
 				return src, nil
 			}
-			allErr = multierror.Append(allErr, err)
+			errs = append(errs, err)
 		}
-		return
+		return nil, errors.Join(errs...)
 	}
 }
 
