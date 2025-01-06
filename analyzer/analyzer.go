@@ -225,6 +225,9 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 			successCount++
 		}
 	}()
+	if err := task.Start(ctx); err != nil {
+		return "", err
+	}
 	if aOpts.terminal {
 		if err := tasks.HandleConsoleResize(ctx, task, con); err != nil {
 			log.G(ctx).WithError(err).Error("failed to resize console")
@@ -232,9 +235,6 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 	} else {
 		sigc := commands.ForwardAllSignals(ctx, task)
 		defer commands.StopCatch(sigc)
-	}
-	if err := task.Start(ctx); err != nil {
-		return "", err
 	}
 
 	// Wait until the task exit
