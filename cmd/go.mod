@@ -14,7 +14,6 @@ require (
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/docker/go-metrics v0.0.1
 	github.com/goccy/go-json v0.10.4
-	github.com/hashicorp/go-multierror v1.1.1
 	github.com/klauspost/compress v1.17.11
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.0
@@ -72,7 +71,6 @@ require (
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hanwen/go-fuse/v2 v2.7.2 // indirect
-	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/imdario/mergo v0.3.13 // indirect

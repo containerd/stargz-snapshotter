@@ -17,6 +17,7 @@
 package fanotify
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -24,7 +25,6 @@ import (
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/conn"
-	"github.com/hashicorp/go-multierror"
 )
 
 // Fanotifier monitors "/" mountpoint of a new mount namespace and notifies all
@@ -59,14 +59,15 @@ func SpawnFanotifier(fanotifierBin string) (*Fanotifier, error) {
 
 		// Connect to the spawned fanotifier over stdio
 		conn: conn.NewClient(notifyR, notifyW, cmd.Process.Pid, 5*time.Second),
-		closeFunc: func() (allErr error) {
+		closeFunc: func() error {
+			var errs []error
 			if err := notifyR.Close(); err != nil {
-				allErr = multierror.Append(allErr, err)
+				errs = append(errs, err)
 			}
 			if err := notifyW.Close(); err != nil {
-				allErr = multierror.Append(allErr, err)
+				errs = append(errs, err)
 			}
-			return
+			return errors.Join(errs...)
 		},
 	}, nil
 }

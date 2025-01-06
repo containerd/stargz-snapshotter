@@ -27,6 +27,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,7 +39,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	"github.com/containerd/stargz-snapshotter/metadata"
-	"github.com/hashicorp/go-multierror"
 	digest "github.com/opencontainers/go-digest"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -390,20 +390,21 @@ func (gr *reader) OpenFile(id uint32) (io.ReaderAt, error) {
 	}, nil
 }
 
-func (gr *reader) Close() (retErr error) {
+func (gr *reader) Close() error {
 	gr.closedMu.Lock()
 	defer gr.closedMu.Unlock()
 	if gr.closed {
 		return nil
 	}
 	gr.closed = true
+	var errs []error
 	if err := gr.cache.Close(); err != nil {
-		retErr = multierror.Append(retErr, err)
+		errs = append(errs, err)
 	}
 	if err := gr.r.Close(); err != nil {
-		retErr = multierror.Append(retErr, err)
+		errs = append(errs, err)
 	}
-	return
+	return errors.Join(errs...)
 }
 
 func (gr *reader) isClosed() bool {
