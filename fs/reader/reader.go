@@ -519,7 +519,7 @@ func (sf *file) GetPassthroughFd() (uintptr, error) {
 	// cache.PassThrough() is necessary to take over files
 	r, err := sf.gr.cache.Get(id, cache.PassThrough())
 	if err != nil {
-		if id, err = sf.prefetchEntireFile(); err != nil {
+		if err := sf.prefetchEntireFile(id); err != nil {
 			return 0, err
 		}
 
@@ -542,15 +542,18 @@ func (sf *file) GetPassthroughFd() (uintptr, error) {
 	return fd, nil
 }
 
-func (sf *file) prefetchEntireFile() (string, error) {
+func (sf *file) prefetchEntireFile(entireCacheID string) error {
 	var (
 		offset           int64
 		firstChunkOffset int64 = -1
 		totalSize        int64
 	)
-	combinedBuffer := sf.gr.bufPool.Get().(*bytes.Buffer)
-	combinedBuffer.Reset()
-	defer sf.gr.putBuffer(combinedBuffer)
+
+	w, err := sf.gr.cache.Add(entireCacheID)
+	if err != nil {
+		return fmt.Errorf("failed to create cache writer: %w", err)
+	}
+	defer w.Close()
 
 	for {
 		chunkOffset, chunkSize, chunkDigestStr, ok := sf.fr.ChunkEntryForOffset(offset)
@@ -572,7 +575,12 @@ func (sf *file) prefetchEntireFile() (string, error) {
 		if r, err := sf.gr.cache.Get(id); err == nil {
 			n, err := r.ReadAt(ip, 0)
 			if (err == nil || err == io.EOF) && int64(n) == chunkSize {
-				combinedBuffer.Write(ip[:n])
+				if _, err := w.Write(ip[:n]); err != nil {
+					r.Close()
+					sf.gr.putBuffer(b)
+					w.Abort()
+					return fmt.Errorf("failed to write cached data: %w", err)
+				}
 				totalSize += int64(n)
 				offset = chunkOffset + int64(n)
 				r.Close()
@@ -585,21 +593,25 @@ func (sf *file) prefetchEntireFile() (string, error) {
 		// cache miss, prefetch the whole chunk
 		if _, err := sf.fr.ReadAt(ip, chunkOffset); err != nil && err != io.EOF {
 			sf.gr.putBuffer(b)
-			return "", fmt.Errorf("failed to read data: %w", err)
+			w.Abort()
+			return fmt.Errorf("failed to read data: %w", err)
 		}
 		if err := sf.gr.verifyOneChunk(sf.id, ip, chunkDigestStr); err != nil {
 			sf.gr.putBuffer(b)
-			return "", err
+			w.Abort()
+			return err
 		}
-		combinedBuffer.Write(ip)
+		if _, err := w.Write(ip); err != nil {
+			sf.gr.putBuffer(b)
+			w.Abort()
+			return fmt.Errorf("failed to write fetched data: %w", err)
+		}
 		totalSize += chunkSize
 		offset = chunkOffset + chunkSize
 		sf.gr.putBuffer(b)
 	}
-	combinedIP := combinedBuffer.Bytes()
-	combinedID := genID(sf.id, firstChunkOffset, totalSize)
-	sf.gr.cacheData(combinedIP, combinedID)
-	return combinedID, nil
+
+	return w.Commit()
 }
 
 func (gr *reader) verifyOneChunk(entryID uint32, ip []byte, chunkDigestStr string) error {
