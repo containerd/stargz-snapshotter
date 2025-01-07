@@ -118,6 +118,18 @@ When upgrading the fuse manager, it's recommended to follow these steps:
 
 This ensures a clean upgrade without impacting running containers.
 
+### Important Considerations
+
+Before restarting the `containerd-stargz-grpc` process, it is essential to consider the state of any running containers.
+
+1. **When to Use SIGKILL** :
+
+If there are running containers, it is crucial to terminate the `containerd-stargz-grpc` process using `SIGKILL`. This approach prevents the normal shutdown sequence from attempting to clean up the mount points of the running containers, which could disrupt their availability. By using `SIGKILL`, you ensure that the process is forcefully terminated without affecting the ongoing operations of the containers.
+
+2. **When to Use SIGTERM** :
+
+If there are no running containers, you should use `SIGTERM` to terminate the `containerd-stargz-grpc` process. This allows the process to follow its normal shutdown sequence, ensuring that it properly cleans up resources and mount points.
+
 ## Registry-related configuration
 
 You can configure stargz snapshotter for accessing registries with custom configurations.
