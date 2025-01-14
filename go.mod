@@ -4,7 +4,7 @@ go 1.22.7
 
 require (
 	github.com/containerd/console v1.0.4
-	github.com/containerd/containerd/v2 v2.0.1
+	github.com/containerd/containerd/v2 v2.0.2
 	github.com/containerd/continuity v0.4.5
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/log v0.1.0
@@ -48,11 +48,11 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/go-cni v1.1.12 // indirect
-	github.com/containerd/ttrpc v1.2.6 // indirect
+	github.com/containerd/ttrpc v1.2.7 // indirect
 	github.com/containerd/typeurl/v2 v2.2.3 // indirect
 	github.com/containernetworking/cni v1.2.3 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -87,14 +87,14 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/petermattis/goid v0.0.0-20240813172612-4fcff4a6cae7 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sasha-s/go-deadlock v0.3.5 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/urfave/cli/v2 v2.27.5 // indirect
 	github.com/vbatts/tar-split v0.11.6 // indirect
@@ -129,3 +129,18 @@ require (
 
 // Import local package for estargz.
 replace github.com/containerd/stargz-snapshotter/estargz => ./estargz
+
+exclude (
+	// These dependencies were updated to "master" in some modules we depend on,
+	// but have no code-changes since their last release. Unfortunately, this also
+	// causes a ripple effect, forcing all users of the containerd module to also
+	// update these dependencies to an unrelease / un-tagged version.
+	//
+	// Both these dependencies will unlikely do a new release in the near future,
+	// so exclude these versions so that we can downgrade to the current release.
+	//
+	// For additional details, see this PR and links mentioned in that PR:
+	// https://github.com/kubernetes-sigs/kustomize/pull/5830#issuecomment-2569960859
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
+)
