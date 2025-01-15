@@ -182,7 +182,11 @@ echo "===== VERSION INFORMATION ====="
 docker exec "${TEST_NODE_NAME}" runc --version
 docker exec "${TEST_NODE_NAME}" containerd --version
 echo "==============================="
-docker exec "${TEST_NODE_NAME}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${SNAPSHOTTER_SOCK}
+docker exec "${TEST_NODE_NAME}" /go/bin/critest \
+       --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${SNAPSHOTTER_SOCK} \
+       # FIXME: remove this skip flag once kind adds support for the user namespace
+       # See also https://github.com/kubernetes-sigs/kind/issues/3436
+       --ginkgo.skip='runtime should support NamespaceMode_POD'
 
 echo "Check if stargz snapshotter is working"
 docker exec "${TEST_NODE_NAME}" \
