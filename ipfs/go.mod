@@ -1,6 +1,6 @@
 module github.com/containerd/stargz-snapshotter/ipfs
 
-go 1.22.7
+go 1.22.0
 
 require (
 	github.com/containerd/containerd/v2 v2.0.2

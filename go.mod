@@ -1,6 +1,6 @@
 module github.com/containerd/stargz-snapshotter
 
-go 1.22.7
+go 1.22.0
 
 require (
 	github.com/containerd/console v1.0.4
