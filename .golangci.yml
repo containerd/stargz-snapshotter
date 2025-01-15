@@ -34,6 +34,9 @@ issues:
     - linters:
         - revive
       text: "unused-parameter"
+    - linters:
+        - revive
+      text: "redefines-builtin-id"
   exclude-dirs:
     - docs
     - images
