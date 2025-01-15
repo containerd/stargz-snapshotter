@@ -29,6 +29,17 @@ updates:
       k8s:
         patterns:
           - "k8s.io/*"
+      gomod:
+        # this pattern covers all go dependencies that are not in
+        # the above groups. dependabot doesn't seem to update sub-modules if
+        # a dependency doesn't belong to a group, so we define this group
+        # explicitly.
+        exclude-patterns:
+          - "golang.org/x/*"
+          - "google.golang.org/*"
+          - "github.com/containerd/*"
+          - "github.com/opencontainers/*"
+          - "k8s.io/*"
 
   # Automatic upgrade for base images used in the Dockerfile
   - package-ecosystem: "docker"
