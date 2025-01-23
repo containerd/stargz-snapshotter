@@ -238,7 +238,7 @@ func (vr *VerifiableReader) readAndCache(id uint32, fr io.Reader, chunkOffset, c
 
 	// Check if it already exists in the cache
 	cacheID := genID(id, chunkOffset, chunkSize)
-	if r, err := gr.cache.Get(cacheID); err == nil {
+	if r, err := gr.cache.Get(cacheID, cache.ChunkDigest(chunkDigest)); err == nil {
 		r.Close()
 		return nil
 	}
@@ -248,6 +248,7 @@ func (vr *VerifiableReader) readAndCache(id uint32, fr io.Reader, chunkOffset, c
 	if _, err := br.Peek(int(chunkSize)); err != nil {
 		return fmt.Errorf("cacheWithReader.peek: %v", err)
 	}
+	opts = append(opts, cache.ChunkDigest(chunkDigest))
 	w, err := gr.cache.Add(cacheID, opts...)
 	if err != nil {
 		return err
@@ -443,7 +444,7 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 		)
 
 		// Check if the content exists in the cache
-		if r, err := sf.gr.cache.Get(id); err == nil {
+		if r, err := sf.gr.cache.Get(id, cache.ChunkDigest(chunkDigestStr)); err == nil {
 			n, err := r.ReadAt(p[nr:int64(nr)+expectedSize], lowerDiscard)
 			if (err == nil || err == io.EOF) && int64(n) == expectedSize {
 				nr += n
@@ -634,13 +635,11 @@ type batchWorkerArgs struct {
 }
 
 func (sf *file) prefetchEntireFile(entireCacheID string, chunks []chunkData, totalSize int64, bufferSize int64, workerCount int) error {
-
 	w, err := sf.gr.cache.Add(entireCacheID)
 	if err != nil {
 		return fmt.Errorf("failed to create cache writer: %w", err)
 	}
 	defer w.Close()
-
 	batchCount := (totalSize + bufferSize - 1) / bufferSize
 
 	for batchIdx := int64(0); batchIdx < batchCount; batchIdx++ {
@@ -760,7 +759,7 @@ func (sf *file) processBatchChunks(args *batchWorkerArgs) error {
 		bufStart := args.buffer[chunk.bufferPos : chunk.bufferPos+chunk.size]
 
 		id := genID(sf.id, chunk.offset, chunk.size)
-		if r, err := sf.gr.cache.Get(id); err == nil {
+		if r, err := sf.gr.cache.Get(id, cache.ChunkDigest(chunk.digestStr)); err == nil {
 			n, err := r.ReadAt(bufStart, 0)
 			r.Close()
 			if err == nil || err == io.EOF {
@@ -804,8 +803,8 @@ func (gr *reader) verifyOneChunk(entryID uint32, ip []byte, chunkDigestStr strin
 	return nil
 }
 
-func (gr *reader) cacheData(ip []byte, cacheID string) {
-	if w, err := gr.cache.Add(cacheID); err == nil {
+func (gr *reader) cacheData(ip []byte, cacheID string, chunkDigestStr string) {
+	if w, err := gr.cache.Add(cacheID, cache.ChunkDigest(chunkDigestStr)); err == nil {
 		if cn, err := w.Write(ip); err != nil || cn != len(ip) {
 			w.Abort()
 		} else {
@@ -819,7 +818,7 @@ func (gr *reader) verifyAndCache(entryID uint32, ip []byte, chunkDigestStr strin
 	if err := gr.verifyOneChunk(entryID, ip, chunkDigestStr); err != nil {
 		return err
 	}
-	gr.cacheData(ip, cacheID)
+	gr.cacheData(ip, cacheID, chunkDigestStr)
 	return nil
 }
 
