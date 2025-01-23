@@ -56,6 +56,7 @@ type blob struct {
 	fetcher   fetcher
 	fetcherMu sync.Mutex
 
+	blobDigest        string
 	size              int64
 	chunkSize         int64
 	prefetchChunkSize int64
@@ -78,7 +79,7 @@ type blob struct {
 
 func makeBlob(fetcher fetcher, size int64, chunkSize int64, prefetchChunkSize int64,
 	blobCache cache.BlobCache, lastCheck time.Time, checkInterval time.Duration,
-	r *Resolver, fetchTimeout time.Duration) *blob {
+	r *Resolver, fetchTimeout time.Duration, blobDigest string) *blob {
 	return &blob{
 		fetcher:           fetcher,
 		size:              size,
@@ -89,6 +90,7 @@ func makeBlob(fetcher fetcher, size int64, chunkSize int64, prefetchChunkSize in
 		checkInterval:     checkInterval,
 		resolver:          r,
 		fetchTimeout:      fetchTimeout,
+		blobDigest:        blobDigest,
 	}
 }
 
