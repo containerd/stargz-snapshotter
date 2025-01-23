@@ -67,6 +67,7 @@ type Reader interface {
 	TOCDigest() digest.Digest
 
 	GetOffset(id uint32) (offset int64, err error)
+	GetDigest(id uint32, isChunk bool) (digest string, err error)
 	GetAttr(id uint32) (attr Attr, err error)
 	GetChild(pid uint32, base string) (id uint32, attr Attr, err error)
 	ForeachChild(id uint32, f func(name string, id uint32, mode os.FileMode) bool) error
@@ -78,7 +79,7 @@ type Reader interface {
 }
 
 type File interface {
-	ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, ok bool)
+	ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, fileDigest string, ok bool)
 	ReadAt(p []byte, off int64) (n int, err error)
 }
 

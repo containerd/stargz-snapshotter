@@ -360,6 +360,7 @@ func (r *reader) initNodes(tr io.Reader) error {
 		var lastEntSize int64
 		var attr metadata.Attr
 		var ent estargz.TOCEntry
+		var fileDigest string
 		for dec.More() {
 			resetEnt(&ent)
 			if err := dec.Decode(&ent); err != nil {
@@ -450,6 +451,9 @@ func (r *reader) initNodes(tr io.Reader) error {
 					wantNextOffsetID = append(wantNextOffsetID, id)
 				}
 
+				if ent.Type == "reg" {
+					fileDigest = ent.Digest
+				}
 				lastEntSize = ent.Size
 				lastEntBucketID = id
 			}
@@ -457,7 +461,7 @@ func (r *reader) initNodes(tr io.Reader) error {
 				if md[lastEntBucketID] == nil {
 					md[lastEntBucketID] = &metadataEntry{}
 				}
-				ce := chunkEntry{ent.Offset, ent.ChunkOffset, ent.ChunkSize, ent.ChunkDigest, ent.InnerOffset}
+				ce := chunkEntry{ent.Offset, ent.ChunkOffset, ent.ChunkSize, ent.ChunkDigest, fileDigest, ent.InnerOffset}
 				md[lastEntBucketID].chunks = append(md[lastEntBucketID].chunks, ce)
 				if _, ok := st[ent.Offset]; !ok {
 					st[ent.Offset] = make(map[int64]uint32)
@@ -881,16 +885,16 @@ type file struct {
 	ents []chunkEntry
 }
 
-func (fr *file) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, ok bool) {
+func (fr *file) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, fileDigest string, ok bool) {
 	i := sort.Search(len(fr.ents), func(i int) bool {
 		e := fr.ents[i]
 		return e.chunkOffset >= offset || (offset > e.chunkOffset && offset < e.chunkOffset+e.chunkSize)
 	})
 	if i == len(fr.ents) {
-		return 0, 0, "", false
+		return 0, 0, "", "", false
 	}
 	ci := fr.ents[i]
-	return ci.chunkOffset, ci.chunkSize, ci.chunkDigest, true
+	return ci.chunkOffset, ci.chunkSize, ci.chunkDigest, ci.fileDigest, true
 }
 
 type fileReader struct {
@@ -1154,5 +1158,41 @@ type countReader struct {
 func (cr *countReader) Read(p []byte) (n int, err error) {
 	n, err = cr.r.Read(p)
 	cr.n += int64(n)
+	return
+}
+
+// GetDigest returns a digest of specified node.
+func (r *reader) GetDigest(id uint32, isChunk bool) (digest string, _ error) {
+	if err := r.view(func(tx *bolt.Tx) error {
+		metadataEntries, err := getMetadata(tx, r.fsID)
+		if err != nil {
+			return fmt.Errorf("metadata bucket of %q not found for getting digest %d: %w", r.fsID, id, err)
+		}
+		nodes, err := getNodes(tx, r.fsID)
+		if err != nil {
+			return err
+		}
+		b, err := getNodeBucketByID(nodes, id)
+		if err != nil {
+			return err
+		}
+		size, _ := binary.Varint(b.Get(bucketKeySize))
+		if md, err := getMetadataBucketByID(metadataEntries, id); err == nil {
+			chunks, err := readChunks(md, size)
+			if err != nil {
+				return err
+			}
+			if len(chunks) > 0 {
+				if isChunk {
+					digest = chunks[0].chunkDigest
+				} else {
+					digest = chunks[0].fileDigest
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		return "", err
+	}
 	return
 }
