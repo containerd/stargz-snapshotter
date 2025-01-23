@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/util/cacheutil"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
 )
@@ -61,6 +62,9 @@ type DirectoryCacheConfig struct {
 	// Direct forcefully enables direct mode for all operation in cache.
 	// Thus operation won't use on-memory caches.
 	Direct bool
+
+	// EnableHardlink enables hardlinking of cache files to reduce memory usage
+	EnableHardlink bool
 }
 
 // TODO: contents validation.
@@ -166,15 +170,24 @@ func NewDirectoryCache(directory string, config DirectoryCacheConfig) (BlobCache
 		return nil, err
 	}
 	dc := &directoryCache{
-		cache:        dataCache,
-		fileCache:    fdCache,
-		wipLock:      new(namedmutex.NamedMutex),
-		directory:    directory,
-		wipDirectory: wipdir,
-		bufPool:      bufPool,
-		direct:       config.Direct,
+		cache:          dataCache,
+		fileCache:      fdCache,
+		wipLock:        new(namedmutex.NamedMutex),
+		directory:      directory,
+		wipDirectory:   wipdir,
+		bufPool:        bufPool,
+		direct:         config.Direct,
+		enableHardlink: config.EnableHardlink,
 	}
 	dc.syncAdd = config.SyncAdd
+
+	// Log hardlink configuration
+	if config.EnableHardlink {
+		log.L.Infof("Hardlink feature is enabled for cache directory: %q", directory)
+	} else {
+		log.L.Infof("Hardlink feature is disabled for cache directory: %q", directory)
+	}
+
 	return dc, nil
 }
 
@@ -193,6 +206,9 @@ type directoryCache struct {
 
 	closed   bool
 	closedMu sync.Mutex
+
+	enableHardlink bool
+	hlManager      *HardlinkManager
 }
 
 func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
@@ -462,4 +478,12 @@ func (w *writeCloser) Close() error { return w.closeFunc() }
 
 func nopWriteCloser(w io.Writer) io.WriteCloser {
 	return &writeCloser{w, func() error { return nil }}
+}
+
+// HardlinkCapability represents a cache that supports hardlinking
+type HardlinkCapability interface {
+	// CreateHardlink creates a hardlink for the cached file
+	CreateHardlink(key string) error
+	// HasHardlink checks if a hardlink exists for the given key
+	HasHardlink(key string) bool
 }
