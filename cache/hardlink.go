@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -52,6 +53,13 @@ type HardlinkManager struct {
 	mu              sync.RWMutex
 	links           map[string]*linkInfo
 	cleanupInterval time.Duration
+	// For batched persistence
+	dirty         bool
+	lastPersist   time.Time
+	persistTicker *time.Ticker
+	persistDone   chan struct{}
+	cleanupDone   chan struct{} // Channel to signal cleanup goroutine to stop
+	cleanupTicker *time.Ticker  // Ticker for cleanup
 }
 
 // NewHardlinkManager creates a new hardlink manager
@@ -67,6 +75,10 @@ func NewHardlinkManager(root string) (*HardlinkManager, error) {
 		hlDir:           hlDir,
 		links:           make(map[string]*linkInfo),
 		cleanupInterval: 24 * time.Hour,
+		persistTicker:   time.NewTicker(5 * time.Second), // Batch writes every 5 seconds
+		persistDone:     make(chan struct{}),
+		cleanupDone:     make(chan struct{}),
+		cleanupTicker:   time.NewTicker(24 * time.Hour),
 	}
 
 	// Restore persisted hardlink information
@@ -74,8 +86,9 @@ func NewHardlinkManager(root string) (*HardlinkManager, error) {
 		return nil, err
 	}
 
-	// Start periodic cleanup
+	// Start periodic cleanup and persistence
 	go hm.periodicCleanup()
+	go hm.persistWorker()
 
 	return hm, nil
 }
@@ -168,9 +181,9 @@ func (hm *HardlinkManager) CreateLink(key string, sourcePath string) error {
 		CreatedAt:  time.Now(),
 		LastUsed:   time.Now(),
 	}
-
-	// Persist link info
-	return hm.persist()
+	// Mark as dirty for async persistence
+	hm.dirty = true
+	return nil
 }
 
 // GetLink gets the hardlink path if it exists
@@ -194,8 +207,21 @@ func (hm *HardlinkManager) GetLink(key string) (string, bool) {
 
 // cleanup cleans up expired hardlinks
 func (hm *HardlinkManager) cleanup() error {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
+	// Use a timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// Try to acquire lock with timeout
+	lockChan := make(chan struct{})
+	go func() {
+		hm.mu.Lock()
+		close(lockChan)
+	}()
+	select {
+	case <-lockChan:
+		defer hm.mu.Unlock()
+	case <-ctx.Done():
+		return fmt.Errorf("timeout waiting for lock")
+	}
 
 	now := time.Now()
 	expiredKeys := make([]string, 0)
@@ -218,47 +244,37 @@ func (hm *HardlinkManager) cleanup() error {
 	}
 
 	if len(expiredKeys) > 0 {
-		return hm.persist()
+		return hm.persistLocked() // Use persistLocked since we already have the lock
 	}
 	return nil
 }
 
-// persist persists link information to root directory
-func (hm *HardlinkManager) persist() error {
+// persistLocked persists link information while holding the lock
+func (hm *HardlinkManager) persistLocked() error {
 	if len(hm.links) == 0 {
 		log.L.Debugf("No links to persist")
 		return nil
 	}
 
 	linksFile := filepath.Join(hm.root, linksFileName)
-
-	// Create temporary file for atomic write
 	tmpFile := linksFile + ".tmp"
+
 	f, err := os.OpenFile(tmpFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create temporary links file: %w", err)
 	}
 
-	// Use a closure to handle file close and cleanup
-	if err := func() error {
-		defer f.Close()
+	defer f.Close()
 
-		// Pretty print JSON for better readability
-		encoder := json.NewEncoder(f)
-		encoder.SetIndent("", "    ")
-		if err := encoder.Encode(hm.links); err != nil {
-			return fmt.Errorf("failed to encode links data: %w", err)
-		}
-
-		// Ensure data is written to disk
-		if err := f.Sync(); err != nil {
-			return fmt.Errorf("failed to sync links file: %w", err)
-		}
-
-		return nil
-	}(); err != nil {
+	// Use more compact JSON encoding
+	if err := json.NewEncoder(f).Encode(hm.links); err != nil {
 		os.Remove(tmpFile)
-		return err
+		return fmt.Errorf("failed to encode links data: %w", err)
+	}
+
+	if err := f.Sync(); err != nil {
+		os.Remove(tmpFile)
+		return fmt.Errorf("failed to sync links file: %w", err)
 	}
 
 	// Atomic rename
@@ -267,8 +283,15 @@ func (hm *HardlinkManager) persist() error {
 		return fmt.Errorf("failed to rename links file: %w", err)
 	}
 
-	log.L.Debugf("Successfully persisted %d links to %s", len(hm.links), linksFile)
+	log.L.Debugf("Persisted %d links", len(hm.links))
 	return nil
+}
+
+// persist acquires lock and persists link information
+func (hm *HardlinkManager) persist() error {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+	return hm.persistLocked()
 }
 
 // restore restores link information from root directory
@@ -315,12 +338,44 @@ func (hm *HardlinkManager) restore() error {
 
 // periodicCleanup performs periodic cleanup
 func (hm *HardlinkManager) periodicCleanup() {
-	ticker := time.NewTicker(hm.cleanupInterval)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if err := hm.cleanup(); err != nil {
-			log.L.Warnf("Failed to cleanup hardlinks: %v", err)
+	for {
+		select {
+		case <-hm.cleanupTicker.C:
+			if err := hm.cleanup(); err != nil {
+				log.L.Warnf("Failed to cleanup hardlinks: %v", err)
+			}
+		case <-hm.cleanupDone:
+			return
 		}
 	}
+}
+
+// persistWorker handles periodic persistence of link information
+func (hm *HardlinkManager) persistWorker() {
+	for {
+		select {
+		case <-hm.persistTicker.C:
+			hm.mu.Lock()
+			if hm.dirty && time.Since(hm.lastPersist) > 5*time.Second {
+				if err := hm.persistLocked(); err != nil {
+					log.L.Warnf("Failed to persist hardlink info: %v", err)
+				}
+				hm.dirty = false
+				hm.lastPersist = time.Now()
+			}
+			hm.mu.Unlock()
+		case <-hm.persistDone:
+			return
+		}
+	}
+}
+
+func (hm *HardlinkManager) Close() error {
+	// Stop all background goroutines
+	hm.persistTicker.Stop()
+	hm.cleanupTicker.Stop()
+	close(hm.persistDone)
+	close(hm.cleanupDone)
+	// Final persist of any remaining changes
+	return hm.persist()
 }
