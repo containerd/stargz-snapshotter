@@ -235,11 +235,12 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 	return cache.NewDirectoryCache(
 		cachePath,
 		cache.DirectoryCacheConfig{
-			SyncAdd:   dcc.SyncAdd,
-			DataCache: dCache,
-			FdCache:   fCache,
-			BufPool:   bufPool,
-			Direct:    dcc.Direct,
+			EnableHardlink: dcc.EnableHardlink,
+			SyncAdd:        dcc.SyncAdd,
+			DataCache:      dCache,
+			FdCache:        fCache,
+			BufPool:        bufPool,
+			Direct:         dcc.Direct,
 		},
 	)
 }
@@ -521,6 +522,9 @@ func (l *layer) prefetch(ctx context.Context, prefetchSize int64) error {
 	} else if prefetchSize > l.blob.Size() {
 		// adjust prefetch size not to exceed the whole layer size
 		prefetchSize = l.blob.Size()
+		if err != nil {
+			return fmt.Errorf("failed to get digest of prefetch landmark: %w", err)
+		}
 	}
 
 	// Fetch the target range

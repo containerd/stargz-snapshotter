@@ -152,7 +152,6 @@ func TestReadAt(t *testing.T) {
 
 								// data we get through a remote blob.
 								blob := []byte(sampleData1)[:blobsize]
-
 								// Check with allowing multi range requests
 								var cacheChunks []region
 								var except []region
@@ -258,7 +257,6 @@ func checkAllCached(t *testing.T, r *blob, offset, size int64) {
 
 // Tests ReadAt method for failure cases.
 func TestFailReadAt(t *testing.T) {
-
 	// test failed http respose.
 	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, failRoundTripper())
 	respData := make([]byte, len(sampleData1))
