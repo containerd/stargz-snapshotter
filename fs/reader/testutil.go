@@ -171,7 +171,7 @@ func testFileReadAt(t *testing.T, factory metadata.Store) {
 								cn := 0
 								nr := 0
 								for int64(nr) < wantN {
-									chunkOffset, chunkSize, _, ok := f.fr.ChunkEntryForOffset(offset + int64(nr))
+									chunkOffset, chunkSize, _, _, ok := f.fr.ChunkEntryForOffset(offset + int64(nr))
 									if !ok {
 										break
 									}
@@ -221,7 +221,7 @@ func (er *exceptFile) ReadAt(p []byte, offset int64) (int, error) {
 	return er.fr.ReadAt(p, offset)
 }
 
-func (er *exceptFile) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, ok bool) {
+func (er *exceptFile) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, fileDigest string, ok bool) {
 	return er.fr.ChunkEntryForOffset(offset)
 }
 
@@ -862,8 +862,8 @@ func (c *mockCache) Close() error {
 
 type mockFile struct{}
 
-func (f *mockFile) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, ok bool) {
-	return 0, 0, "", true
+func (f *mockFile) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, fileDigest string, ok bool) {
+	return 0, 0, "", "", true
 }
 
 func (f *mockFile) ReadAt(p []byte, offset int64) (int, error) {
