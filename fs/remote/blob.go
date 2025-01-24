@@ -299,18 +299,18 @@ func (b *blob) prepareChunksForRead(allRegion region, offset int64, p []byte, fr
 // readFromCache attempts to read chunk data from cache
 func (b *blob) readFromCache(chunk region, dest []byte, offset int64, fr fetcher, opts *options) error {
 	r, err := b.cache.Get(fr.genID(chunk), opts.cacheOpts...)
-	if err == nil {
-		defer r.Close()
-		var n int
-		n, err = r.ReadAt(dest, offset)
-		if err == nil && int64(n) != int64(len(dest)) {
-			return fmt.Errorf("incomplete read from cache: read %d bytes, expected %d bytes", n, len(dest))
-		}
-		if (err == nil || err == io.EOF) && int64(n) == int64(len(dest)) {
-			return nil
-		}
+	if err != nil {
+		return err
 	}
-	return err
+	defer r.Close()
+	n, err := r.ReadAt(dest, offset)
+	if err != nil && err != io.EOF {
+		return err
+	}
+	if n != len(dest) {
+		return fmt.Errorf("incomplete read from cache: read %d bytes, expected %d bytes", n, len(dest))
+	}
+	return nil
 }
 
 // fetchRegions fetches all specified chunks from remote blob and puts it in the local cache.
