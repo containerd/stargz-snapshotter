@@ -130,14 +130,13 @@ func (hm *HardlinkManager) CreateLink(key string, sourcePath string) error {
 	}
 
 	// Create hardlink in hardlinks directory
-	linkPath := filepath.Join(hm.hlDir, key[:2], key)
+	linkPath := BuildCachePath(hm.hlDir, key)
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0700); err != nil {
 		return fmt.Errorf("failed to create link dir: %w", err)
 	}
 
 	// Create temporary link path
-	tmpLinkPath := linkPath + ".tmp"
-
+	tmpLinkPath := BuildCachePath(hm.hlDir, key+".wip")
 	// Remove temporary link if it exists
 	os.Remove(tmpLinkPath)
 
