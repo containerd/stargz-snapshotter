@@ -22,8 +22,8 @@ require (
 	github.com/rs/xid v1.6.0
 	github.com/urfave/cli/v2 v2.27.5
 	go.etcd.io/bbolt v1.3.11
-	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.29.0
+	golang.org/x/sync v0.11.0
+	golang.org/x/sys v0.30.0
 	google.golang.org/grpc v1.70.0
 )
 

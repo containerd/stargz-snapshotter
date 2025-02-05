@@ -27,8 +27,8 @@ require (
 	github.com/rs/xid v1.6.0
 	github.com/sirupsen/logrus v1.9.3
 	go.etcd.io/bbolt v1.3.11
-	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.29.0
+	golang.org/x/sync v0.11.0
+	golang.org/x/sys v0.30.0
 	google.golang.org/grpc v1.70.0
 	k8s.io/api v0.31.2
 	k8s.io/apimachinery v0.31.2
