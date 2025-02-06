@@ -42,6 +42,10 @@ func newReader(er *estargz.Reader, rootID uint32, idMap map[uint32]*estargz.TOCE
 	return &reader{r: er, rootID: rootID, idMap: idMap, idOfEntry: idOfEntry, estargzOpts: estargzOpts}
 }
 
+func (r *reader) GetName(id uint32) string {
+	return r.idMap[id].Name
+}
+
 func NewReader(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
 	var rOpts metadata.Options
 	for _, o := range opts {

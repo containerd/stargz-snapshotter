@@ -229,7 +229,7 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 }
 
 // Resolve resolves a layer based on the passed layer blob information.
-func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, esgzOpts ...metadata.Option) (_ Layer, retErr error) {
+func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor, labels map[string]string, esgzOpts ...metadata.Option) (_ Layer, retErr error) {
 	name := refspec.String() + "/" + desc.Digest.String()
 
 	// Wait if resolving this layer is already running. The result
@@ -315,7 +315,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	}
 
 	// Combine layer information together and cache it.
-	l := newLayer(r, desc, blobR, vr, r.config.FuseConfig.PassThrough)
+	l := newLayer(r, desc, blobR, vr, r.config.FuseConfig.PassThrough, labels)
 	r.layerCacheMu.Lock()
 	cachedL, done2, added := r.layerCache.Add(name, l)
 	r.layerCacheMu.Unlock()
@@ -376,14 +376,22 @@ func newLayer(
 	blob *blobRef,
 	vr *reader.VerifiableReader,
 	pth bool,
+	labels map[string]string,
 ) *layer {
+
+	recorder, err := NewB10Recorder(labels, desc.Digest.String())
+	if err != nil {
+		log.L.WithError(err).Warn("failed to create B10 recorder")
+	}
 	return &layer{
 		resolver:         resolver,
+		recorder:         recorder,
 		desc:             desc,
 		blob:             blob,
 		verifiableReader: vr,
 		prefetchWaiter:   newWaiter(),
 		passThrough:      pth,
+		labels:           labels,
 	}
 }
 
@@ -393,11 +401,11 @@ type layer struct {
 	blob             *blobRef
 	verifiableReader *reader.VerifiableReader
 	prefetchWaiter   *waiter
-
-	prefetchSize   int64
-	prefetchSizeMu sync.Mutex
-
-	r reader.Reader
+	labels           map[string]string
+	prefetchSize     int64
+	prefetchSizeMu   sync.Mutex
+	recorder         *B10Recorder
+	r                reader.Reader
 
 	closed   bool
 	closedMu sync.Mutex
@@ -586,7 +594,7 @@ func (l *layer) RootNode(baseInode uint32) (fusefs.InodeEmbedder, error) {
 	if l.r == nil {
 		return nil, fmt.Errorf("layer hasn't been verified yet")
 	}
-	return newNode(l.desc.Digest, l.r, l.blob, baseInode, l.resolver.overlayOpaqueType, l.passThrough)
+	return newNode(l.desc.Digest, l.r, l.blob, baseInode, l.resolver.overlayOpaqueType, l.passThrough, l.recorder)
 }
 
 func (l *layer) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {

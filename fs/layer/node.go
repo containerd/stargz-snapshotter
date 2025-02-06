@@ -76,7 +76,7 @@ var opaqueXattrs = map[OverlayOpaqueType][]string{
 	OverlayOpaqueUser:    {"user.overlay.opaque"},
 }
 
-func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType, pth bool) (fusefs.InodeEmbedder, error) {
+func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType, pth bool, recorder *B10Recorder) (fusefs.InodeEmbedder, error) {
 	rootID := r.Metadata().RootID()
 	rootAttr, err := r.Metadata().GetAttr(rootID)
 	if err != nil {
@@ -96,9 +96,10 @@ func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseIno
 	}
 	ffs.s = ffs.newState(layerDgst, blob)
 	return &node{
-		id:   rootID,
-		attr: rootAttr,
-		fs:   ffs,
+		id:       rootID,
+		attr:     rootAttr,
+		fs:       ffs,
+		recorder: recorder,
 	}, nil
 }
 
@@ -139,6 +140,7 @@ type node struct {
 	ents       []fuse.DirEntry
 	entsCached bool
 	entsMu     sync.Mutex
+	recorder   *B10Recorder
 }
 
 func (n *node) isRootNode() bool {
@@ -332,9 +334,10 @@ func (n *node) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fu
 		return nil, syscall.EIO
 	}
 	return n.NewInode(ctx, &node{
-		id:   id,
-		fs:   n.fs,
-		attr: ce,
+		id:       id,
+		fs:       n.fs,
+		attr:     ce,
+		recorder: n.recorder,
 	}, entryToAttr(ino, ce, &out.Attr)), 0
 }
 
@@ -342,6 +345,7 @@ var _ = (fusefs.NodeOpener)((*node)(nil))
 
 func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fuseFlags uint32, errno syscall.Errno) {
 	ra, err := n.fs.r.OpenFile(n.id)
+
 	if err != nil {
 		n.fs.s.report(fmt.Errorf("node.Open: %v", err))
 		return nil, 0, syscall.EIO
@@ -352,6 +356,7 @@ func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fu
 		ra: ra,
 		fd: -1,
 	}
+	n.recorder.Append(n.fs.r.Metadata().GetName(n.id))
 
 	if n.fs.passThrough {
 		if getter, ok := ra.(reader.PassthroughFdGetter); ok {
