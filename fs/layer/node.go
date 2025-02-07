@@ -356,7 +356,10 @@ func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fu
 		ra: ra,
 		fd: -1,
 	}
-	n.recorder.Append(n.fs.r.Metadata().GetName(n.id))
+	if n.recorder != nil {
+		n.recorder.Append(n.fs.r.Metadata().GetName(n.id))
+
+	}
 
 	if n.fs.passThrough {
 		if getter, ok := ra.(reader.PassthroughFdGetter); ok {

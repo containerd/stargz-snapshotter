@@ -260,7 +260,7 @@ func (r *LayerManager) resolveLayer(ctx context.Context, refspec reference.Spec,
 			}
 		}
 	}
-	l, err := r.resolver.Resolve(ctx, r.hosts, refspec, target, esgzOpts...)
+	l, err := r.resolver.Resolve(ctx, r.hosts, refspec, target, map[string]string{}, esgzOpts...)
 	if err != nil {
 		return err
 	}

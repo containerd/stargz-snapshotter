@@ -378,11 +378,12 @@ func newLayer(
 	pth bool,
 	labels map[string]string,
 ) *layer {
-
+	fmt.Println("b10: new layer")
 	recorder, err := NewB10Recorder(labels, desc.Digest.String())
 	if err != nil {
-		log.L.WithError(err).Warn("failed to create B10 recorder")
+		log.L.WithError(err).Warn("b10: failed to create B10 recorder")
 	}
+	fmt.Println("b10: new recorder")
 	return &layer{
 		resolver:         resolver,
 		recorder:         recorder,
