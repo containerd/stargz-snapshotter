@@ -140,6 +140,39 @@ user	0m0.556s
 sys	0m0.280s
 ```
 
+### Pulling Container Images via Image Reference
+
+Stargz Snapshotter currently supports pulling container images using an image reference.
+
+For example, the following command uses lazy pulling to download the specified image reference:
+```
+ctr-remote i rpull --snapshotter=stargz --ipfs ghcr.io/stargz-containers/python:3.9-org
+fetching sha256:3b3f42e1... application/vnd.oci.image.index.v1+json
+fetching sha256:4afd7ffe... application/vnd.oci.image.manifest.v1+json
+fetching sha256:099a9289... application/vnd.oci.image.config.v1+json
+```
+
+Alternatively, you can use the following command to download the specified image reference without lazy pulling:
+```
+ctr-remote i rpull --snapshotter=overlayfs --ipfs ghcr.io/stargz-containers/python:3.9-org
+fetching sha256:33ad01f9... application/vnd.oci.image.index.v1+json
+fetching sha256:49d6d96d... application/vnd.oci.image.manifest.v1+json
+fetching sha256:6f1289b1... application/vnd.oci.image.config.v1+json
+fetching sha256:4c25b309... application/vnd.oci.image.layer.v1.tar+gzip
+fetching sha256:9476e460... application/vnd.oci.image.layer.v1.tar+gzip
+fetching sha256:64c0f10e... application/vnd.oci.image.layer.v1.tar+gzip
+fetching sha256:1acf5650... application/vnd.oci.image.layer.v1.tar+gzip
+fetching sha256:3fff52a3... application/vnd.oci.image.layer.v1.tar+gzip
+fetching sha256:b95c0dd0... application/vnd.oci.image.layer.v1.tar+gzip
+fetching sha256:5cf06daf... application/vnd.oci.image.layer.v1.tar+gzip
+fetching sha256:419e258e... application/vnd.oci.image.layer.v1.tar+gzip
+fetching sha256:942374d5... application/vnd.oci.image.layer.v1.tar+gzip
+```
+
+This functionality is also compatible with downloading container images using CID, allowing you to choose your preferred method.
+
+> **Note**: IPNS records (published via `ipfs name publish`) have a default TTL (Time To Live) of 24 hours. After this period, the record will expire. To maintain the availability of your image references, you'll need to periodically re-push to republish the image. This limitation is by design in the IPFS protocol to ensure record freshness and enable content updates.
+
 ## Appendix 1: Creating IPFS private network
 
 You can create a private IPFS network as described in the official docs.
