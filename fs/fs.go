@@ -250,7 +250,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	go func() {
 		rErr := fmt.Errorf("failed to resolve target")
 		for _, s := range src {
-			l, err := fs.resolver.Resolve(ctx, s.Hosts, s.Name, s.Target)
+			l, err := fs.resolver.Resolve(ctx, s.Hosts, s.Name, s.Target, labels)
 			if err == nil {
 				resultChan <- l
 				fs.prefetch(ctx, l, defaultPrefetchSize, start)
@@ -268,7 +268,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		go func() {
 			// Avoids to get canceled by client.
 			ctx := log.WithLogger(context.Background(), log.G(ctx).WithField("mountpoint", mountpoint))
-			l, err := fs.resolver.Resolve(ctx, preResolve.Hosts, preResolve.Name, desc)
+			l, err := fs.resolver.Resolve(ctx, preResolve.Hosts, preResolve.Name, desc, labels)
 			if err != nil {
 				log.G(ctx).WithError(err).Debug("failed to pre-resolve")
 				return

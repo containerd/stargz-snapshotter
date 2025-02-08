@@ -65,8 +65,8 @@ type Store func(sr *io.SectionReader, opts ...Option) (Reader, error)
 type Reader interface {
 	RootID() uint32
 	TOCDigest() digest.Digest
-
 	GetOffset(id uint32) (offset int64, err error)
+	GetName(id uint32) string
 	GetAttr(id uint32) (attr Attr, err error)
 	GetChild(pid uint32, base string) (id uint32, attr Attr, err error)
 	ForeachChild(id uint32, f func(name string, id uint32, mode os.FileMode) bool) error

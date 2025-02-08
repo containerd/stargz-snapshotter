@@ -214,6 +214,9 @@ func (r *reader) Clone(sr *io.SectionReader) (metadata.Reader, error) {
 		decompressor: r.decompressor,
 	}, nil
 }
+func (r *reader) GetName(id uint32) string {
+	return "Not implemented"
+}
 
 func (r *reader) init(decompressedR io.Reader, rOpts metadata.Options) (retErr error) {
 	start := time.Now() // before parsing TOC JSON
