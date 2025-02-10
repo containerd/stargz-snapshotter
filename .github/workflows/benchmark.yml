@@ -30,7 +30,7 @@ jobs:
     - name: Install tools
       run: |
           sudo apt-get update && \
-          sudo apt-get install -y gnuplot python3-numpy
+          sudo apt-get install -y gnuplot python3-numpy python3-psutil
     - uses: actions/checkout@v4
     - name: Prepare directories
       run: mkdir "${BENCHMARK_RESULT_DIR}" "${BENCHMARK_LOG_DIR}"

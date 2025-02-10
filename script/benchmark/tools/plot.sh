@@ -98,3 +98,35 @@ for IMGNAME in "${IMAGES[@]}" ; do
 done
 
 gnuplot "${PLTFILE_ALL}"
+
+# Add new plot for memory usage
+cat <<EOF > "${PLTFILE_MEMORY}"
+set output '${GRAPHFILE_MEMORY}'
+set title "Memory Usage During Container Operations(${PERCENTILE} pctl., ${MINSAMPLES} samples)"
+set terminal png size 1000, 750
+set style data histogram
+set style histogram rowstack gap 1
+set style fill solid 1.0 border -1
+set key autotitle columnheader
+set xtics rotate by -45
+set ylabel 'memory usage(%)'
+set lmargin 10
+set rmargin 5
+plot \\
+EOF
+
+# Add new plot for disk usage
+cat <<EOF > "${PLTFILE_DISK}"
+set output '${GRAPHFILE_DISK}'
+set title "Disk Usage During Container Operations(${PERCENTILE} pctl., ${MINSAMPLES} samples)"
+set terminal png size 1000, 750
+set style data histogram
+set style histogram rowstack gap 1
+set style fill solid 1.0 border -1
+set key autotitle columnheader
+set xtics rotate by -45
+set ylabel 'disk usage(%)'
+set lmargin 10
+set rmargin 5
+plot \\
+EOF

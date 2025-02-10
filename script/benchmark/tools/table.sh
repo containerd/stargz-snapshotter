@@ -55,14 +55,16 @@ for IMGNAME in "${IMAGES[@]}" ; do
 
 ## ${IMGNAME}
 
-|mode|pull(sec)|create(sec)|run(sec)|
----|---|---|---
+|mode|pull(sec)|create(sec)|run(sec)|memory(%)|disk(%)|
+---|---|---|---|---|---
 EOF
     
     for MODE in "${MODES[@]}"; do
         PULLTIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_pull")
         CREATETIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_create")
         RUNTIME=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "elapsed_run")
-        echo "|${MODE}|${PULLTIME}|${CREATETIME}|${RUNTIME}|"
+        MEMORY=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "avg_memory")
+        DISK=$(percentile "${JSON}" "${MINSAMPLES}" "${IMGNAME}" "${MODE}" "avg_disk")
+        echo "|${MODE}|${PULLTIME}|${CREATETIME}|${RUNTIME}|${MEMORY}|${DISK}|"
     done
 done

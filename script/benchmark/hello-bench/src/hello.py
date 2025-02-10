@@ -36,7 +36,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import os, sys, subprocess, select, random, time, json, tempfile, shutil, itertools
+import os, sys, subprocess, select, random, time, json, tempfile, shutil, itertools, psutil
+import threading
 
 TMP_DIR = tempfile.mkdtemp()
 LEGACY_MODE = "legacy"
@@ -101,6 +102,30 @@ class Bench:
 
     def __str__(self):
         return json.dumps(self.__dict__)
+
+class ResourceMonitor:
+    def __init__(self):
+        self.memory_samples = []
+        self.disk_samples = []
+
+    def sample(self):
+        # Get memory usage percentage
+        memory_percent = psutil.virtual_memory().percent
+
+        # Get disk usage percentage for root partition
+        disk_percent = psutil.disk_usage('/').percent
+
+        self.memory_samples.append(memory_percent)
+        self.disk_samples.append(disk_percent)
+
+    def get_stats(self):
+        if not self.memory_samples:
+            return 0, 0
+
+        avg_memory = sum(self.memory_samples) / len(self.memory_samples)
+        avg_disk = sum(self.disk_samples) / len(self.disk_samples)
+
+        return avg_memory, avg_disk
 
 class BenchRunner:
     ECHO_HELLO = set(['alpine:3.15.3',
@@ -274,6 +299,18 @@ class BenchRunner:
         image = self.fully_qualify(bench.name)
 
         print ("Pulling the image...")
+        monitor = ResourceMonitor()
+
+        # Start monitoring before pull
+        def monitor_resources():
+            while True:
+                monitor.sample()
+                time.sleep(1)
+
+        monitor_thread = threading.Thread(target=monitor_resources)
+        monitor_thread.daemon = True
+        monitor_thread.start()
+
         pullcmd = self.controller.pull_cmd(image)
         startpull = time.time()
         rc = os.system(pullcmd)
@@ -294,7 +331,12 @@ class BenchRunner:
             print ('Unknown bench: '+name)
             exit(1)
 
-        return pulltime, createtime, runtime
+        # Stop monitoring
+        monitor_thread.join(timeout=0)
+
+        avg_memory, avg_disk = monitor.get_stats()
+
+        return pulltime, createtime, runtime, avg_memory, avg_disk
 
     def convert_echo_hello(self, src, dest, option):
         period=10
@@ -401,7 +443,7 @@ class BenchRunner:
             return self.run(bench, cid)
         elif op == 'prepare':
             self.prepare(bench)
-            return 0, 0, 0
+            return 0, 0, 0, 0, 0
         else:
             print ('Unknown operation: '+op)
             exit(1)
@@ -621,11 +663,13 @@ def main():
         pull_times = []
         create_times = []
         run_times = []
+        memory_usages = []
+        disk_usages = []
 
         for_start = time.time()
         for i in experiments:
             start = time.time()
-            pulltime, createtime, runtime = runner.operation(op, bench, cid)
+            pulltime, createtime, runtime, avg_memory, avg_disk = runner.operation(op, bench, cid)
             elapsed = time.time() - start
             if op == "run":
                 runner.cleanup(cid, bench)
@@ -633,16 +677,30 @@ def main():
             pull_times.append(pulltime)
             create_times.append(createtime)
             run_times.append(runtime)
+            memory_usages.append(avg_memory)
+            disk_usages.append(avg_disk)
             print ('ITERATION %s:' % i)
             print ('elapsed %s' % elapsed)
             print ('pull    %s' % pulltime)
             print ('create  %s' % createtime)
             print ('run     %s' % runtime)
+            print ('avg_memory %s' % avg_memory)
+            print ('avg_disk %s' % avg_disk)
 
             if profile > 0 and time.time() - for_start > profile:
                 break
 
-        row = {'mode':'%s' % runner.mode, 'repo':bench.name, 'bench':bench.name, 'elapsed':sum(elapsed_times) / len(elapsed_times), 'elapsed_pull':sum(pull_times) / len(pull_times), 'elapsed_create':sum(create_times) / len(create_times), 'elapsed_run':sum(run_times) / len(run_times)}
+        row = {
+            'mode': '%s' % runner.mode,
+            'repo': bench.name,
+            'bench': bench.name,
+            'elapsed': sum(elapsed_times) / len(elapsed_times),
+            'elapsed_pull': sum(pull_times) / len(pull_times),
+            'elapsed_create': sum(create_times) / len(create_times),
+            'elapsed_run': sum(run_times) / len(run_times),
+            'avg_memory': sum(memory_usages) / len(memory_usages),
+            'avg_disk': sum(disk_usages) / len(disk_usages)
+        }
         js = json.dumps(row)
         print ('%s%s,' % (BENCHMARKOUT_MARK, js))
         sys.stdout.flush()
