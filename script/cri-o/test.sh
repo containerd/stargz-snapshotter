@@ -65,7 +65,7 @@ ARG TARGETARCH
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPATH=/go
 # Do not install git and its dependencies here which will cause failure of building the image
-RUN apt-get update && apt-get install -y make sudo && \
+RUN apt-get update && apt-get install -y make sudo apparmor apparmor-utils && \
     curl -Ls https://dl.google.com/go/go1.23.0.linux-\${TARGETARCH:-amd64}.tar.gz | tar -C /usr/local -xz && \
     go install github.com/onsi/ginkgo/ginkgo@${GINKGO_VERSION} && \
     mkdir -p \${GOPATH}/src/github.com/kubernetes-sigs/cri-tools /tmp/cri-tools && \
