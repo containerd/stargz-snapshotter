@@ -68,6 +68,7 @@ if ! (
             docker exec "${TEST_NODE_ID}" runc --version && \
             docker exec "${TEST_NODE_ID}" crio --version && \
             echo "===============================" && \
+            docker exec "${TEST_NODE_ID}" mount -t securityfs securityfs /sys/kernel/security && \
             docker exec -i "${TEST_NODE_ID}" /go/bin/critest --runtime-endpoint=${CRIO_SOCK}
     ) ; then
     FAIL=true
