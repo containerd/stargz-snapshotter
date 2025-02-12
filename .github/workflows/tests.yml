@@ -42,7 +42,7 @@ jobs:
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v6.3.2
       with:
-        version: v1.63.4
+        version: v1.64.2
         args: --verbose --timeout=10m
         working-directory: ${{ matrix.targetdir }}
 
