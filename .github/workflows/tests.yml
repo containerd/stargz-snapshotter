@@ -10,7 +10,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
     name: Build
     steps:
     - uses: actions/checkout@v4
