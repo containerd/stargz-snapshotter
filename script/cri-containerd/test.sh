@@ -114,6 +114,13 @@ if [ "${METADATA_STORE:-}" != "" ] ; then
     USE_METADATA_STORE="${METADATA_STORE}"
 fi
 
+FUSE_MANAGER_CONFIG=""
+if [ "${FUSE_MANAGER:-}" == "true" ] ; then
+    FUSE_MANAGER_CONFIG='listen_path = "/run/containerd-stargz-grpc/cri.sock"
+[fusemanager]
+enable_fusemanager = true'
+fi
+
 SNAPSHOTTER_CONFIG_FILE=/etc/containerd-stargz-grpc/config.toml
 if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
     SNAPSHOTTER_CONFIG_FILE=/etc/containerd/config.toml
@@ -146,6 +153,11 @@ COPY ./test.conflist /etc/cni/net.d/test.conflist
 ${BUILTIN_HACK_INST}
 
 RUN sed -i 's/^metadata_store.*/metadata_store = "${USE_METADATA_STORE}"/g' "${SNAPSHOTTER_CONFIG_FILE}"
+RUN <<EEE
+cat <<EOT >> "${SNAPSHOTTER_CONFIG_FILE}"
+${FUSE_MANAGER_CONFIG}
+EOT
+EEE
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
 EOF
