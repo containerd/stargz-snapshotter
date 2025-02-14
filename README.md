@@ -62,6 +62,8 @@ version = 2
   [proxy_plugins.stargz]
     type = "snapshot"
     address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+  [proxy_plugins.stargz.exports]
+    root = "/var/lib/containerd-stargz-grpc/"
 
 # Use stargz snapshotter through CRI
 [plugins."io.containerd.grpc.v1.cri".containerd]
@@ -69,7 +71,8 @@ version = 2
   disable_snapshot_annotations = false
 ```
 
-**Note that `disable_snapshot_annotations = false` is required since containerd > v1.4.2**
+> NOTE1: `disable_snapshot_annotations = false` is required since containerd > v1.4.2
+> NOTE2: `root` field of `proxy_plugins` requires containerd >= v1.6.32 or v1.7.16 or v2.0.0
 
 You can try our [prebuilt](/Dockerfile) [KinD](https://github.com/kubernetes-sigs/kind) node image that contains the above configuration.
 
