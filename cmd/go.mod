@@ -1,6 +1,7 @@
 module github.com/containerd/stargz-snapshotter/cmd
 
 go 1.22.0
+toolchain go1.23.6
 
 require (
 	github.com/containerd/containerd/api v1.8.0
@@ -21,7 +22,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.6.0
 	github.com/urfave/cli/v2 v2.27.5
-	go.etcd.io/bbolt v1.3.11
+	go.etcd.io/bbolt v1.4.0
 	golang.org/x/sync v0.11.0
 	golang.org/x/sys v0.30.0
 	google.golang.org/grpc v1.70.0
@@ -114,7 +115,7 @@ require (
 	github.com/sasha-s/go-deadlock v0.3.5 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/vbatts/tar-split v0.12.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect

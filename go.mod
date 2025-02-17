@@ -1,6 +1,7 @@
 module github.com/containerd/stargz-snapshotter
 
 go 1.22.0
+toolchain go1.23.6
 
 require (
 	github.com/containerd/console v1.0.4
@@ -26,7 +27,7 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/rs/xid v1.6.0
 	github.com/sirupsen/logrus v1.9.3
-	go.etcd.io/bbolt v1.3.11
+	go.etcd.io/bbolt v1.4.0
 	golang.org/x/sync v0.11.0
 	golang.org/x/sys v0.30.0
 	google.golang.org/grpc v1.70.0
@@ -93,7 +94,7 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sasha-s/go-deadlock v0.3.5 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/urfave/cli/v2 v2.27.5 // indirect
