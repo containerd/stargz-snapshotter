@@ -55,6 +55,12 @@ if [ "${METADATA_STORE:-}" != "" ] ; then
     USE_METADATA_STORE="${METADATA_STORE}"
 fi
 
+FUSE_MANAGER_CONFIG=""
+if [ "${FUSE_MANAGER:-}" == "true" ] ; then
+    FUSE_MANAGER_CONFIG="[fusemanager]
+enable_fusemanager = true"
+fi
+
 SNAPSHOTTER_CONFIG_FILE=/etc/containerd-stargz-grpc/config.toml
 if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
     SNAPSHOTTER_CONFIG_FILE=/etc/containerd/config.toml
@@ -93,6 +99,11 @@ COPY ./containerd/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
 COPY ./containerd/entrypoint.sh ./utils.sh /
 
 RUN sed -i 's/^metadata_store.*/metadata_store = "${USE_METADATA_STORE}"/g' "${SNAPSHOTTER_CONFIG_FILE}"
+RUN <<EEE
+cat <<EOT >> "${SNAPSHOTTER_CONFIG_FILE}"
+${FUSE_MANAGER_CONFIG}
+EOT
+EEE
 
 ENV CONTAINERD_SNAPSHOTTER=""
 
@@ -118,6 +129,7 @@ services:
     - http_proxy=${http_proxy:-}
     - https_proxy=${https_proxy:-}
     - BUILTIN_SNAPSHOTTER=${BUILTIN_SNAPSHOTTER:-}
+    - FUSE_MANAGER=${FUSE_MANAGER:-}
     tmpfs:
     - /tmp:exec,mode=777
     volumes:

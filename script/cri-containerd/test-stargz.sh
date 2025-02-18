@@ -22,7 +22,10 @@ REPO="${CONTEXT}../../"
 REGISTRY_HOST="cri-registry"
 TEST_NODE_NAME="cri-testenv-container"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
-SNAPSHOTTER_SOCK=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock
+IMAGE_ENDPOINT_SOCK=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock
+if [ "${FUSE_MANAGER:-}" == "true" ] ; then
+    IMAGE_ENDPOINT_SOCK=unix:///run/containerd-stargz-grpc/cri.sock
+fi
 PREPARE_NODE_NAME="cri-prepare-node"
 
 source "${CONTEXT}/const.sh"
@@ -182,7 +185,7 @@ echo "===== VERSION INFORMATION ====="
 docker exec "${TEST_NODE_NAME}" runc --version
 docker exec "${TEST_NODE_NAME}" containerd --version
 echo "==============================="
-docker exec "${TEST_NODE_NAME}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${SNAPSHOTTER_SOCK}
+docker exec "${TEST_NODE_NAME}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${IMAGE_ENDPOINT_SOCK}
 
 echo "Check if stargz snapshotter is working"
 docker exec "${TEST_NODE_NAME}" \
