@@ -174,3 +174,7 @@ We assume that you are using CRI-O newer than https://github.com/cri-o/cri-o/pul
   systemctl restart containerd
   systemctl restart docker
   ```
+
+## Using stargz-snapshotter on Lima
+
+See [`./lima.md`](./lima.md)
