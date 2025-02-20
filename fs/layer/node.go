@@ -76,7 +76,7 @@ var opaqueXattrs = map[OverlayOpaqueType][]string{
 	OverlayOpaqueUser:    {"user.overlay.opaque"},
 }
 
-func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType, pth bool) (fusefs.InodeEmbedder, error) {
+func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType, pth passThroughConfig) (fusefs.InodeEmbedder, error) {
 	rootID := r.Metadata().RootID()
 	rootAttr, err := r.Metadata().GetAttr(rootID)
 	if err != nil {
@@ -110,7 +110,7 @@ type fs struct {
 	baseInode    uint32
 	rootID       uint32
 	opaqueXattrs []string
-	passThrough  bool
+	passThrough  passThroughConfig
 }
 
 func (fs *fs) inodeOfState() uint64 {
@@ -353,12 +353,12 @@ func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fu
 		fd: -1,
 	}
 
-	if n.fs.passThrough {
+	if n.fs.passThrough.enable {
 		if getter, ok := ra.(reader.PassthroughFdGetter); ok {
-			fd, err := getter.GetPassthroughFd()
+			fd, err := getter.GetPassthroughFd(n.fs.passThrough.mergeBufferSize, n.fs.passThrough.mergeWorkerCount)
 			if err != nil {
 				n.fs.s.report(fmt.Errorf("passThrough model failed due to node.Open: %v", err))
-				n.fs.passThrough = false
+				n.fs.passThrough.enable = false
 			} else {
 				f.InitFd(int(fd))
 			}

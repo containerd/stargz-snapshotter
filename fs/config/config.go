@@ -151,4 +151,10 @@ type FuseConfig struct {
 
 	// PassThrough indicates whether to enable FUSE passthrough mode to improve local file read performance. Default is false.
 	PassThrough bool `toml:"passthrough" default:"false"`
+
+	// MergeBufferSize is the size of the buffer to merge chunks (in bytes) for passthrough mode. Default is 400MB.
+	MergeBufferSize int64 `toml:"merge_buffer_size" default:"419430400"`
+
+	// MergeWorkerCount is the number of workers to merge chunks for passthrough mode. Default is 10.
+	MergeWorkerCount int `toml:"merge_worker_count" default:"10"`
 }
