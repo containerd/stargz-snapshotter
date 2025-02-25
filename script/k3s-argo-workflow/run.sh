@@ -22,6 +22,7 @@ REPO="${CONTEXT}../../"
 K3S_VERSION=master
 K3S_REPO=https://github.com/k3s-io/k3s
 K3S_CONTAINERD_REPO=https://github.com/k3s-io/containerd
+ARGO_VERSION=v3.6.4
 
 K3S_NODE_REPO=ghcr.io/stargz-containers
 K3S_NODE_IMAGE_NAME=k3s
@@ -86,7 +87,33 @@ function run {
         --k3s-arg='--snapshotter='"${SNAPSHOTTER}"'@server:*;agent:*'
     kubectl create ns argo
     kubectl apply -n argo -f "${CUSTOM_ARGOYAML}"
-
+    # workaround for argo failing to list namespaces
+    cat <<EOF | kubectl -n argo apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argo-namespace-access-cr
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argo-namespace-access-crb
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-namespace-access-cr
+subjects:
+- kind: ServiceAccount
+  name: argo
+  namespace: argo
+EOF
     # Wait for the cluster is ready
     local RETRYNUM=30
     local RETRYINTERVAL=1
@@ -122,7 +149,7 @@ if [ "${RESULT_FILE}" == "" ] ; then
 fi
 echo "result to ${RESULT_FILE}"
 
-wget -O "${ORG_ARGOYAML}" https://raw.githubusercontent.com/argoproj/argo-workflows/v3.4.3/manifests/quick-start-minimal.yaml
+wget -O "${ORG_ARGOYAML}" https://raw.githubusercontent.com/argoproj/argo-workflows/${ARGO_VERSION}/manifests/quick-start-minimal.yaml
 
 git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
 sed -i "s|github.com/k3s-io/stargz-snapshotter .*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
