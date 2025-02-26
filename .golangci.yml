@@ -27,7 +27,7 @@ linters-settings:
             desc: The containerd log package was migrated to a separate module. Use github.com/containerd/log instead.
 
 run:
-  deadline: 4m
+  timeout: 4m
 
 issues:
   exclude-rules:
