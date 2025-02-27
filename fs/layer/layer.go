@@ -59,6 +59,18 @@ const (
 	memoryCacheType                 = "memory"
 )
 
+// passThroughConfig contains configuration for FUSE passthrough mode
+type passThroughConfig struct {
+	// enable indicates whether to enable FUSE passthrough mode
+	enable bool
+
+	// mergeBufferSize is the size of the buffer to merge chunks (in bytes)
+	mergeBufferSize int64
+
+	// mergeWorkerCount is the number of workers to merge chunks
+	mergeWorkerCount int
+}
+
 // Layer represents a layer.
 type Layer interface {
 	// Info returns the information of this layer.
@@ -315,7 +327,11 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	}
 
 	// Combine layer information together and cache it.
-	l := newLayer(r, desc, blobR, vr, r.config.FuseConfig.PassThrough)
+	l := newLayer(r, desc, blobR, vr, passThroughConfig{
+		enable:           r.config.FuseConfig.PassThrough,
+		mergeBufferSize:  r.config.FuseConfig.MergeBufferSize,
+		mergeWorkerCount: r.config.FuseConfig.MergeWorkerCount,
+	})
 	r.layerCacheMu.Lock()
 	cachedL, done2, added := r.layerCache.Add(name, l)
 	r.layerCacheMu.Unlock()
@@ -375,7 +391,7 @@ func newLayer(
 	desc ocispec.Descriptor,
 	blob *blobRef,
 	vr *reader.VerifiableReader,
-	pth bool,
+	pth passThroughConfig,
 ) *layer {
 	return &layer{
 		resolver:         resolver,
@@ -404,7 +420,7 @@ type layer struct {
 
 	prefetchOnce        sync.Once
 	backgroundFetchOnce sync.Once
-	passThrough         bool
+	passThrough         passThroughConfig
 }
 
 func (l *layer) Info() Info {
