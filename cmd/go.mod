@@ -17,7 +17,7 @@ require (
 	github.com/klauspost/compress v1.17.11
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.0
-	github.com/opencontainers/runtime-spec v1.2.0
+	github.com/opencontainers/runtime-spec v1.2.1
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.6.0
 	github.com/urfave/cli/v2 v2.27.5
