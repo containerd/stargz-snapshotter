@@ -273,9 +273,29 @@ jobs:
         with:
           path: src/github.com/containerd/stargz-snapshotter
           fetch-depth: 25
-      - uses: containerd/project-checks@v1.1.0
+      - uses: containerd/project-checks@v1.2.2
         with:
           working-directory: src/github.com/containerd/stargz-snapshotter
+          # go-licenses-ignore is set because go-licenses cannot correctly detect the license of the following packages:
+          # * estargz packages: Apache-2.0 and BSD-3-Clause dual license
+          #   (https://github.com/containerd/stargz-snapshotter/blob/main/NOTICE.md)
+          #
+          # The list of the CNCF-approved licenses can be found here:
+          # https://github.com/cncf/foundation/blob/main/allowed-third-party-license-policy.md
+          #
+          # hashicorp packages: MPL-2.0
+          # (https://github.com/hashicorp/go-cleanhttp/blob/master/LICENSE,
+          #  https://github.com/hashicorp/go-retryablehttp/blob/master/LICENSE)
+          # Note: MPL-2.0 is not in the CNCF-approved licenses list, but these packages are allowed as exceptions.
+          # See CNCF licensing exceptions:
+          # https://github.com/cncf/foundation/blob/main/license-exceptions/CNCF-licensing-exceptions.csv
+          go-licenses-ignore: |
+            github.com/containerd/stargz-snapshotter/estargz
+            github.com/containerd/stargz-snapshotter/estargz/errorutil
+            github.com/containerd/stargz-snapshotter/estargz/externaltoc
+            github.com/containerd/stargz-snapshotter/estargz/zstdchunked
+            github.com/hashicorp/go-cleanhttp
+            github.com/hashicorp/go-retryablehttp
       - name: Check proto generated code
         run: make validate-generated
         working-directory: src/github.com/containerd/stargz-snapshotter
