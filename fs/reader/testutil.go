@@ -25,6 +25,7 @@ package reader
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -131,7 +132,14 @@ func testFileReadAt(t *testing.T, factory metadata.Store) {
 								defer closeFn()
 								f.fr = newExceptFile(t, f.fr, cacheExcept...)
 								for _, reg := range cacheExcept {
-									id := genID(f.id, reg.b, reg.e-reg.b+1)
+									// 获取 chunk digest
+									tmpData := make([]byte, reg.e-reg.b+1)
+									tmpn, err := want.ReadAt(tmpData, reg.b)
+									if err != nil && err != io.EOF {
+										t.Fatalf("want.ReadAt (offset=%d,size=%d): %v", reg.b, reg.e-reg.b+1, err)
+									}
+									digest := sha256.Sum256(tmpData[:tmpn])
+									id := genID(f.id, reg.b, reg.e-reg.b+1, fmt.Sprintf("%x", digest))
 									w, err := f.gr.cache.Add(id)
 									if err != nil {
 										w.Close()
@@ -154,7 +162,6 @@ func testFileReadAt(t *testing.T, factory metadata.Store) {
 									return
 								}
 								respData = respData[:n]
-
 								if !bytes.Equal(wantData, respData) {
 									t.Errorf("off=%d, filesize=%d; read data{size=%d,data=%q}; want (size=%d,data=%q)",
 										offset, filesize, len(respData), string(respData), wantN, string(wantData))
@@ -165,12 +172,12 @@ func testFileReadAt(t *testing.T, factory metadata.Store) {
 								cn := 0
 								nr := 0
 								for int64(nr) < wantN {
-									chunkOffset, chunkSize, _, ok := f.fr.ChunkEntryForOffset(offset + int64(nr))
+									chunkOffset, chunkSize, chunkDigestStr, _, ok := f.fr.ChunkEntryForOffset(offset + int64(nr))
 									if !ok {
 										break
 									}
 									data := make([]byte, chunkSize)
-									id := genID(f.id, chunkOffset, chunkSize)
+									id := genID(f.id, chunkOffset, chunkSize, chunkDigestStr)
 									r, err := f.gr.cache.Get(id)
 									if err != nil {
 										t.Errorf("missed cache of offset=%d, size=%d: %v(got size=%d)", chunkOffset, chunkSize, err, n)
@@ -215,7 +222,7 @@ func (er *exceptFile) ReadAt(p []byte, offset int64) (int, error) {
 	return er.fr.ReadAt(p, offset)
 }
 
-func (er *exceptFile) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, ok bool) {
+func (er *exceptFile) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, fDgst string, ok bool) {
 	return er.fr.ChunkEntryForOffset(offset)
 }
 
@@ -613,18 +620,17 @@ func testPreReader(t *testing.T, factory metadata.Store) {
 			// NOTE: we assume that the compressed "data64KB" is still larger than 8KB
 			// landmark+dir+foo1, foo2+foo22+dir+bar.txt+foo3, TOC, footer
 			want: []check{
+				hasFileContentsOffset("foo/foo1", 3, data64KB[3:], false),
 				hasFileContentsWithPreCached("foo22", 0, "ccc", chunkInfo{"foo2", "bb", 0, 2}, chunkInfo{"bar/bar.txt", "aaa", 0, 3}, chunkInfo{"foo3", data64KB, 0, 64000}),
 				hasFileContentsOffset("foo2", 0, "bb", true),
 				hasFileContentsOffset("bar/bar.txt", 0, "aaa", true),
 				hasFileContentsOffset("bar/bar.txt", 1, "aa", true),
 				hasFileContentsOffset("bar/bar.txt", 2, "a", true),
-				hasFileContentsOffset("foo3", 0, data64KB, true),
 				hasFileContentsOffset("foo22", 0, "ccc", true),
-				hasFileContentsOffset("foo/foo1", 0, data64KB, false),
 				hasFileContentsOffset("foo/foo1", 0, data64KB, true),
+				hasFileContentsOffset("foo3", 0, data64KB, true),
 				hasFileContentsOffset("foo/foo1", 1, data64KB[1:], true),
 				hasFileContentsOffset("foo/foo1", 2, data64KB[2:], true),
-				hasFileContentsOffset("foo/foo1", 3, data64KB[3:], true),
 			},
 		},
 		{
@@ -649,7 +655,7 @@ func testPreReader(t *testing.T, factory metadata.Store) {
 				hasFileContentsOffset("foo3", 2, data64KB[2:len(data64KB)/2], true),
 				hasFileContentsOffset("foo3", int64(len(data64KB)/2), data64KB[len(data64KB)/2:], false),
 				hasFileContentsOffset("foo3", int64(len(data64KB)-1), data64KB[len(data64KB)-1:], true),
-				hasFileContentsOffset("foo/foo1", 0, data64KB, false),
+				hasFileContentsOffset("foo/foo1", 0, data64KB, true),
 				hasFileContentsOffset("foo/foo1", 1, data64KB[1:], true),
 				hasFileContentsOffset("foo/foo1", 2, data64KB[2:], true),
 				hasFileContentsOffset("foo/foo1", int64(len(data64KB)/2), data64KB[len(data64KB)/2:], true),
@@ -668,7 +674,6 @@ func testPreReader(t *testing.T, factory metadata.Store) {
 					opts = append(opts, tutil.WithEStargzOptions(estargz.WithChunkSize(tt.chunkSize)))
 				}
 				if tt.minChunkSize > 0 {
-					t.Logf("minChunkSize = %d", tt.minChunkSize)
 					opts = append(opts, tutil.WithEStargzOptions(estargz.WithMinChunkSize(tt.minChunkSize)))
 				}
 				esgz, tocDgst, err := tutil.BuildEStargz(tt.in, opts...)
@@ -730,7 +735,6 @@ func hasFileContentsOffset(name string, off int64, contents string, fromCache bo
 		if string(buf) != contents {
 			t.Fatalf("unexpected content of %q: %q want %q", name, longBytesView(buf), longBytesView([]byte(contents)))
 		}
-		t.Logf("reader calls for %q: offsets: %+v", name, cr.called)
 		if fromCache {
 			if len(cr.called) != 0 {
 				t.Fatalf("unexpected read on %q: offsets: %v", name, cr.called)
@@ -769,18 +773,26 @@ func hasFileContentsWithPreCached(name string, off int64, contents string, extra
 			if err != nil {
 				t.Fatalf("failed to lookup %q", e.name)
 			}
-			cacheID := genID(eid, e.chunkOffset, e.chunkSize)
-			er, err := r.cache.Get(cacheID)
+			// Get chunk digest for this chunk
+			fr, err := r.r.OpenFile(eid)
 			if err != nil {
-				t.Fatalf("failed to get cache %q: %+v", cacheID, e)
+				t.Fatalf("failed to open file %q: %v", e.name, err)
+			}
+			chunkOffset, chunkSize, chunkDigestStr, _, ok := fr.ChunkEntryForOffset(e.chunkOffset)
+			if !ok {
+				t.Fatalf("failed to get chunk info for %q at offset %d", e.name, e.chunkOffset)
+			}
+			er, err := r.cache.Get(genID(r.r.RootID(), chunkOffset, chunkSize, chunkDigestStr))
+			if err != nil {
+				t.Fatalf("failed to get cache %q: %+v", chunkDigestStr, e)
 			}
 			data, err := io.ReadAll(io.NewSectionReader(er, 0, e.chunkSize))
 			er.Close()
 			if err != nil {
-				t.Fatalf("failed to read cache %q: %+v", cacheID, e)
+				t.Fatalf("failed to read cache %q: %+v", chunkDigestStr, e)
 			}
 			if string(data) != e.data {
-				t.Fatalf("unexpected contents of cache %q (%+v): %q; wanted %q", cacheID, e, longBytesView(data), longBytesView([]byte(e.data)))
+				t.Fatalf("unexpected contents of cache %q (%+v): %q; wanted %q", chunkDigestStr, e, longBytesView(data), longBytesView([]byte(e.data)))
 			}
 		}
 	}

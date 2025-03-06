@@ -245,10 +245,10 @@ type file struct {
 	sr *io.SectionReader
 }
 
-func (r *file) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, ok bool) {
+func (r *file) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst, fileDigest string, ok bool) {
 	e, ok := r.r.r.ChunkEntryForOffset(r.e.Name, offset)
 	if !ok {
-		return 0, 0, "", false
+		return 0, 0, "", "", false
 	}
 	dgst = e.Digest
 	if e.ChunkDigest != "" {
@@ -256,7 +256,7 @@ func (r *file) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst st
 		// chunked file)
 		dgst = e.ChunkDigest
 	}
-	return e.ChunkOffset, e.ChunkSize, dgst, true
+	return e.ChunkOffset, e.ChunkSize, dgst, e.Digest, true
 }
 
 func (r *file) ReadAt(p []byte, off int64) (n int, err error) {

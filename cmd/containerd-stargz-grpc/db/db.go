@@ -97,6 +97,7 @@ type chunkEntry struct {
 	chunkOffset int64
 	chunkSize   int64
 	chunkDigest string
+	fileDigest  string
 	innerOffset int64 // -1 indicates that no following chunks in the stream.
 }
 
