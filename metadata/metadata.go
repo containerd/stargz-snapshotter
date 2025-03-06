@@ -78,7 +78,7 @@ type Reader interface {
 }
 
 type File interface {
-	ChunkEntryForOffset(offset int64) (off int64, size int64, dgst string, ok bool)
+	ChunkEntryForOffset(offset int64) (off int64, size int64, dgst, fileDigest string, ok bool)
 	ReadAt(p []byte, off int64) (n int, err error)
 }
 

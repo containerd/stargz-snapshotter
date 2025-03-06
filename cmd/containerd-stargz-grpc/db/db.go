@@ -97,7 +97,8 @@ type chunkEntry struct {
 	chunkOffset int64
 	chunkSize   int64
 	chunkDigest string
-	innerOffset int64 // -1 indicates that no following chunks in the stream.
+	fileDigest  string // the whole file digest
+	innerOffset int64  // -1 indicates that no following chunks in the stream.
 }
 
 type metadataEntry struct {
