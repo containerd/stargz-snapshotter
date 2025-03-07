@@ -19,6 +19,7 @@ package memory
 import (
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
 	"time"
@@ -251,6 +252,7 @@ func (r *file) ChunkEntryForOffset(offset int64) (off int64, size int64, dgst, f
 		return 0, 0, "", "", false
 	}
 	dgst = e.Digest
+	log.Printf("ChunkEntryForOffset e.Digest, e.ChunkDigest = %s, %s", e.Digest, e.ChunkDigest)
 	if e.ChunkDigest != "" {
 		// NOTE* "reg" also can contain ChunkDigest (e.g. when "reg" is the first entry of
 		// chunked file)

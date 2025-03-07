@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -204,10 +205,11 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 	for _, o := range opts {
 		opt = o(opt)
 	}
-
+	log.Printf("dc.direct = %v, opt.direct = %v, key = %s", dc.direct, opt.direct, key)
 	if !dc.direct && !opt.direct {
 		// Get data from memory
 		if b, done, ok := dc.cache.Get(key); ok {
+			log.Printf("Get cache hit: %s", key)
 			return &reader{
 				ReaderAt: bytes.NewReader(b.(*bytes.Buffer).Bytes()),
 				closeFunc: func() error {
@@ -216,9 +218,10 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 				},
 			}, nil
 		}
-
+		log.Printf("Get cache miss: %s", key)
 		// Get data from disk. If the file is already opened, use it.
 		if f, done, ok := dc.fileCache.Get(key); ok {
+			log.Printf("Get cache hit from disk: %s", key)
 			return &reader{
 				ReaderAt: f.(*os.File),
 				closeFunc: func() error {
@@ -228,7 +231,7 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 			}, nil
 		}
 	}
-
+	log.Printf("Get cache miss from disk: %s", key)
 	// Open the cache file and read the target region
 	// TODO: If the target cache is write-in-progress, should we wait for the completion
 	//       or simply report the cache miss?
@@ -236,7 +239,7 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open blob file for %q: %w", key, err)
 	}
-
+	log.Printf("Get cache hit from disk: %s", key)
 	// If "direct" option is specified, do not cache the file on memory.
 	// This option is useful for preventing memory cache from being polluted by data
 	// that won't be accessed immediately.

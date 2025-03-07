@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"runtime"
 	"strings"
@@ -502,40 +503,44 @@ func (sf *file) GetPassthroughFd() (uintptr, error) {
 		totalSize        int64
 		fileDigest       string
 	)
-
+	log.Printf("GetPassthroughFd sf.id = %d", sf.id)
 	for {
-		chunkOffset, chunkSize, _, digest, ok := sf.fr.ChunkEntryForOffset(offset)
+		chunkOffset, chunkSize, chunkDigest, digest, ok := sf.fr.ChunkEntryForOffset(offset)
+		log.Printf("chunkOffset = %d, chunkSize = %d, chunkDigest = %s, digest = %s, ok = %v", chunkOffset, chunkSize, chunkDigest, digest, ok)
 		if !ok {
 			break
 		}
 		if firstChunkOffset == -1 {
 			firstChunkOffset = chunkOffset
-		}
-		if fileDigest == "" {
 			fileDigest = digest
+			log.Printf("firstChunkOffset = %d, fileDigest = %s", firstChunkOffset, fileDigest)
 		}
 		totalSize += chunkSize
 		offset = chunkOffset + chunkSize
 	}
-
+	log.Printf("firstChunkOffset = %d, totalSize = %d, fileDigest = %s", firstChunkOffset, totalSize, fileDigest)
 	id := genID(sf.id, firstChunkOffset, totalSize, fileDigest)
+	log.Printf("id = %s", id)
 
 	// cache.PassThrough() is necessary to take over files
 	r, err := sf.gr.cache.Get(id, cache.PassThrough())
 	if err != nil {
+		log.Printf("GetPassthroughFd Get cache miss: %s", id)
 		if err := sf.prefetchEntireFile(id); err != nil {
 			return 0, err
 		}
-
+		log.Printf("GetPassthroughFd prefetchEntireFile done: %s", id)
 		// just retry once to avoid exception stuck
 		r, err = sf.gr.cache.Get(id, cache.PassThrough())
 		if err != nil {
+			log.Printf("GetPassthroughFd Get cache miss: %s", id)
 			return 0, err
 		}
 	}
 
 	readerAt := r.GetReaderAt()
 	file, ok := readerAt.(*os.File)
+	log.Printf("GetPassthroughFd GetReaderAt ok: %v", ok)
 	if !ok {
 		r.Close()
 		return 0, fmt.Errorf("the cached ReaderAt is not of type *os.File, fd obtain failed")
@@ -569,6 +574,7 @@ func (sf *file) prefetchEntireFile(entireCacheID string) error {
 		}
 
 		id := genID(sf.id, chunkOffset, chunkSize, chunkDigestStr)
+		log.Printf("prefetchEntireFile id = %s", id)
 		b := sf.gr.bufPool.Get().(*bytes.Buffer)
 		b.Reset()
 		b.Grow(int(chunkSize))
@@ -593,24 +599,28 @@ func (sf *file) prefetchEntireFile(entireCacheID string) error {
 			}
 			r.Close()
 		}
-
+		log.Printf("prefetchEntireFile cache miss: %s", id)
 		// cache miss, prefetch the whole chunk
 		if _, err := sf.fr.ReadAt(ip, chunkOffset); err != nil && err != io.EOF {
 			sf.gr.putBuffer(b)
 			w.Abort()
 			return fmt.Errorf("failed to read data: %w", err)
 		}
+		log.Printf("prefetchEntireFile verifyOneChunk: %s", id)
 		if err := sf.gr.verifyOneChunk(sf.id, ip, chunkDigestStr); err != nil {
 			sf.gr.putBuffer(b)
 			w.Abort()
 			return err
 		}
+		log.Printf("prefetchEntireFile write: %s", id)
 		if _, err := w.Write(ip); err != nil {
 			sf.gr.putBuffer(b)
 			w.Abort()
 			return fmt.Errorf("failed to write fetched data: %w", err)
 		}
+
 		totalSize += chunkSize
+		log.Printf("prefetchEntireFile totalSize = %d", totalSize)
 		offset = chunkOffset + chunkSize
 		sf.gr.putBuffer(b)
 	}
