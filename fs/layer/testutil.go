@@ -153,7 +153,7 @@ func testPrefetch(t *testing.T, factory metadata.Store) {
 			},
 			// NOTE: we assume that the compressed "data64KB" is still larger than 8KB
 			// landmark+dir+foo1, foo2+foo22+dir+bar.txt+foo3, TOC, footer
-			wantNum:          5, // foo1 + foo2 + foo22 + bar.txt + foo3
+			wantNum:          4, // foo1 + foo2 + foo22 + bar.txt + foo3
 			wants:            []string{"foo/foo1", "foo2", "foo22", "bar/bar.txt", "foo3"},
 			prefetchSize:     landmarkPosition,
 			prioritizedFiles: []string{"foo/", "foo/foo1", "foo2", "foo22", "bar/", "bar/bar.txt", "foo3"},
@@ -671,7 +671,6 @@ func testNodesWithOpaque(t *testing.T, factory metadata.Store, opaque OverlayOpa
 				hasFileContentsOffset("bar/bar.txt", 2, "a", true),
 				hasFileContentsOffset("foo3", 0, data64KB, true),
 				hasFileContentsOffset("foo22", 0, "ccc", true),
-				hasFileContentsOffset("foo/foo1", 0, data64KB, false),
 				hasFileContentsOffset("foo/foo1", 0, data64KB, true),
 				hasFileContentsOffset("foo/foo1", 1, data64KB[1:], true),
 				hasFileContentsOffset("foo/foo1", 2, data64KB[2:], true),
@@ -700,7 +699,6 @@ func testNodesWithOpaque(t *testing.T, factory metadata.Store, opaque OverlayOpa
 				hasFileContentsOffset("foo3", 2, data64KB[2:len(data64KB)/2], true),
 				hasFileContentsOffset("foo3", int64(len(data64KB)/2), data64KB[len(data64KB)/2:], false),
 				hasFileContentsOffset("foo3", int64(len(data64KB)-1), data64KB[len(data64KB)-1:], true),
-				hasFileContentsOffset("foo/foo1", 0, data64KB, false),
 				hasFileContentsOffset("foo/foo1", 1, data64KB[1:], true),
 				hasFileContentsOffset("foo/foo1", 2, data64KB[2:], true),
 				hasFileContentsOffset("foo/foo1", int64(len(data64KB)/2), data64KB[len(data64KB)/2:], true),
