@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	github.com/containerd/containerd/api v1.8.0
-	github.com/containerd/containerd/v2 v2.0.2
+	github.com/containerd/containerd/v2 v2.0.3
 	github.com/containerd/go-cni v1.1.12
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v1.0.0-rc.1
@@ -149,7 +149,7 @@ require (
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
-	tags.cncf.io/container-device-interface v0.8.0 // indirect
+	tags.cncf.io/container-device-interface v0.8.1 // indirect
 	tags.cncf.io/container-device-interface/specs-go v0.8.0 // indirect
 )
 
