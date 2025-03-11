@@ -18,6 +18,8 @@ When a user-defined file implements the `FilePassthroughFder` interface, `go-fus
 
 # Configuration
 
+## Basic Configuration
+
 To enable FUSE passthrough mode, first verify that your host's kernel supports this feature. You can check this by running the following command:
 
 ```bash
@@ -37,6 +39,14 @@ After updating the configuration, specify the `config.toml` file when starting `
 ```bash
 $ containerd-stargz-grpc -config config.toml
 ```
+
+## Advanced Configuration
+
+In passthrough mode, the initial pull of an image requires merging chunks into a file. This process can be time-consuming, especially for large files.
+
+To optimize the time taken for the initial image pull, you can use the `merge_buffer_size` and `merge_worker_count` configuration options. The `merge_buffer_size` specifies the size of the buffer used for reading the image, with a default value of 400MB. The `merge_worker_count` determines the level of concurrency for reading the image, with a default value of 10.
+
+By concurrently reading chunks and caching them for batch writing, you can significantly enhance the performance of the initial image pull in passthrough mode.
 
 # Important Considerations
 
