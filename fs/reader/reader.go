@@ -32,6 +32,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"sort"
 	"sync"
 	"time"
 
@@ -560,6 +561,7 @@ type batchWorkerArgs struct {
 	chunks      []chunkData
 	buffer      []byte
 	workerCount int
+	readInfos   []chunkReadInfo
 }
 
 func (sf *file) prefetchEntireFile(entireCacheID string, chunks []chunkData, totalSize int64, bufferSize int64, workerCount int) error {
@@ -605,6 +607,7 @@ func (sf *file) prefetchEntireFile(entireCacheID string, chunks []chunkData, tot
 		buffer := make([]byte, batchSize)
 
 		eg := errgroup.Group{}
+		allReadInfos := make([][]chunkReadInfo, workerCount)
 
 		for i := 0; i < workerCount && i < len(batchChunks); i++ {
 			workerID := i
@@ -615,7 +618,11 @@ func (sf *file) prefetchEntireFile(entireCacheID string, chunks []chunkData, tot
 				workerCount: workerCount,
 			}
 			eg.Go(func() error {
-				return sf.processBatchChunks(args)
+				err := sf.processBatchChunks(args)
+				if err == nil && len(args.readInfos) > 0 {
+					allReadInfos[args.workerID] = args.readInfos
+				}
+				return err
 			})
 		}
 
@@ -624,16 +631,65 @@ func (sf *file) prefetchEntireFile(entireCacheID string, chunks []chunkData, tot
 			return err
 		}
 
-		if _, err := w.Write(buffer); err != nil {
+		var mergedReadInfos []chunkReadInfo
+		for _, infos := range allReadInfos {
+			mergedReadInfos = append(mergedReadInfos, infos...)
+		}
+
+		if err := sf.checkHoles(mergedReadInfos, batchSize); err != nil {
+			w.Abort()
+			return fmt.Errorf("hole check failed: %w", err)
+		}
+
+		n, err := w.Write(buffer)
+		if err != nil {
 			w.Abort()
 			return fmt.Errorf("failed to write batch data: %w", err)
+		}
+
+		if int64(n) != batchSize {
+			w.Abort()
+			return fmt.Errorf("incomplete write: expected %d bytes, wrote %d bytes", batchSize, n)
 		}
 	}
 
 	return w.Commit()
 }
 
+type chunkReadInfo struct {
+	offset int64
+	size   int64
+}
+
+func (sf *file) checkHoles(readInfos []chunkReadInfo, totalSize int64) error {
+	if len(readInfos) == 0 {
+		return nil
+	}
+
+	sort.Slice(readInfos, func(i, j int) bool {
+		return readInfos[i].offset < readInfos[j].offset
+	})
+
+	end := readInfos[0].offset
+	for _, info := range readInfos {
+		if info.offset < end {
+			return fmt.Errorf("overlapping read detected: previous end %d, current start %d", end, info.offset)
+		} else if info.offset > end {
+			return fmt.Errorf("hole detected in read: previous end %d, current start %d", end, info.offset)
+		}
+		end = info.offset + info.size
+	}
+
+	if end != totalSize {
+		return fmt.Errorf("incomplete read: expected total size %d, actual end %d", totalSize, end)
+	}
+
+	return nil
+}
+
 func (sf *file) processBatchChunks(args *batchWorkerArgs) error {
+	var readInfos []chunkReadInfo
+
 	for chunkIdx := args.workerID; chunkIdx < len(args.chunks); chunkIdx += args.workerCount {
 		chunk := args.chunks[chunkIdx]
 		bufStart := args.buffer[chunk.bufferPos : chunk.bufferPos+chunk.size]
@@ -644,20 +700,31 @@ func (sf *file) processBatchChunks(args *batchWorkerArgs) error {
 			r.Close()
 			if err == nil || err == io.EOF {
 				if int64(n) == chunk.size {
+					readInfos = append(readInfos, chunkReadInfo{
+						offset: chunk.bufferPos,
+						size:   int64(n),
+					})
 					continue
 				}
 			}
 		}
 
-		if _, err := sf.fr.ReadAt(bufStart, chunk.offset); err != nil && err != io.EOF {
+		n, err := sf.fr.ReadAt(bufStart, chunk.offset)
+		if err != nil && err != io.EOF {
 			return fmt.Errorf("failed to read data at offset %d: %w", chunk.offset, err)
 		}
+
+		readInfos = append(readInfos, chunkReadInfo{
+			offset: chunk.bufferPos,
+			size:   int64(n),
+		})
 
 		if err := sf.gr.verifyOneChunk(sf.id, bufStart, chunk.digestStr); err != nil {
 			return fmt.Errorf("chunk verification failed at offset %d: %w", chunk.offset, err)
 		}
 	}
 
+	args.readInfos = readInfos
 	return nil
 }
 
