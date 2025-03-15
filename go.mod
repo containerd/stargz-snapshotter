@@ -1,6 +1,6 @@
 module github.com/containerd/stargz-snapshotter
 
-go 1.22.0
+go 1.23.0
 
 require (
 	github.com/containerd/console v1.0.4
@@ -102,7 +102,7 @@ require (
 	go.opentelemetry.io/otel v1.34.0 // indirect
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
-	golang.org/x/net v0.35.0 // indirect
+	golang.org/x/net v0.36.0 // indirect
 	golang.org/x/oauth2 v0.25.0 // indirect
 	golang.org/x/term v0.29.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
