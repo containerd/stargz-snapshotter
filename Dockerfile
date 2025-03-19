@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-ARG CONTAINERD_VERSION=v2.0.3
+ARG CONTAINERD_VERSION=v2.0.4
 ARG RUNC_VERSION=v1.2.1
 ARG CNI_PLUGINS_VERSION=v1.6.0
 # TODO: support v2
