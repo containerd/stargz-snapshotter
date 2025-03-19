@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	github.com/containerd/containerd/api v1.8.0
-	github.com/containerd/containerd/v2 v2.0.3
+	github.com/containerd/containerd/v2 v2.0.4
 	github.com/containerd/go-cni v1.1.12
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v1.0.0-rc.1
