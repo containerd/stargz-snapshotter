@@ -823,8 +823,22 @@ func fileModeToSystemMode(m os.FileMode) uint32 {
 	return res
 }
 
-func defaultStatfs(stat *fuse.StatfsOut) {
+var (
+	nameMaxLength     uint32 = 1<<32 - 1
+	nameMaxLengthOnce sync.Once
+)
 
+func getNameMaxLength() uint32 {
+	nameMaxLengthOnce.Do(func() {
+		fs := syscall.Statfs_t{}
+		if err := syscall.Statfs("/var", &fs); err == nil {
+			nameMaxLength = uint32(fs.Namelen)
+		}
+	})
+	return nameMaxLength
+}
+
+func defaultStatfs(stat *fuse.StatfsOut) {
 	// http://man7.org/linux/man-pages/man2/statfs.2.html
 	stat.Blocks = 0 // dummy
 	stat.Bfree = 0
@@ -832,7 +846,7 @@ func defaultStatfs(stat *fuse.StatfsOut) {
 	stat.Files = 0 // dummy
 	stat.Ffree = 0
 	stat.Bsize = blockSize
-	stat.NameLen = 1<<32 - 1
+	stat.NameLen = getNameMaxLength()
 	stat.Frsize = blockSize
 	stat.Padding = 0
 	stat.Spare = [6]uint32{}
