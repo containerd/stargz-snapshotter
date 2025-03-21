@@ -832,7 +832,7 @@ func defaultStatfs(stat *fuse.StatfsOut) {
 	stat.Files = 0 // dummy
 	stat.Ffree = 0
 	stat.Bsize = blockSize
-	stat.NameLen = 1<<32 - 1
+	stat.NameLen = 255 // Standard max filename length for most filesystems (ext4, etc.) for compatibility
 	stat.Frsize = blockSize
 	stat.Padding = 0
 	stat.Spare = [6]uint32{}
