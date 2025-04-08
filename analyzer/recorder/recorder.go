@@ -151,7 +151,7 @@ func (r *ImageRecorder) Record(name string) error {
 		}
 		whDir := cleanEntryName(path.Join(path.Dir("/"+name), whiteoutOpaqueDir))
 		if _, ok := r.index[i][whDir]; ok {
-			return fmt.Errorf("Parent dir of %q is a deleted directory", name)
+			return fmt.Errorf("parent dir of %q is a deleted directory", name)
 		}
 	}
 	if index < 0 {

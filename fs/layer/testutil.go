@@ -832,8 +832,8 @@ func hasSize(name string, size int) check {
 		if errno := n.Operations().(fusefs.NodeGetattrer).Getattr(context.Background(), nil, &ao); errno != 0 {
 			t.Fatalf("failed to get attributes of node %q: %v", name, errno)
 		}
-		if ao.Attr.Size != uint64(size) {
-			t.Fatalf("got size = %d, want %d", ao.Attr.Size, size)
+		if ao.Size != uint64(size) {
+			t.Fatalf("got size = %d, want %d", ao.Size, size)
 		}
 	}
 }

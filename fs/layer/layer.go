@@ -328,9 +328,9 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 
 	// Combine layer information together and cache it.
 	l := newLayer(r, desc, blobR, vr, passThroughConfig{
-		enable:           r.config.FuseConfig.PassThrough,
-		mergeBufferSize:  r.config.FuseConfig.MergeBufferSize,
-		mergeWorkerCount: r.config.FuseConfig.MergeWorkerCount,
+		enable:           r.config.PassThrough,
+		mergeBufferSize:  r.config.MergeBufferSize,
+		mergeWorkerCount: r.config.MergeWorkerCount,
 	})
 	r.layerCacheMu.Lock()
 	cachedL, done2, added := r.layerCache.Add(name, l)

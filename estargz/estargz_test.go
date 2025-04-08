@@ -81,7 +81,7 @@ func TestChunkEntryForOffset(t *testing.T) {
 			if ok != te.wantOk {
 				t.Errorf("ok = %v; want (%v)", ok, te.wantOk)
 			} else if ok {
-				if !(ce.ChunkOffset == te.wantChunkOffset && ce.ChunkSize == te.wantChunkSize) {
+				if ce.ChunkOffset != te.wantChunkOffset || ce.ChunkSize != te.wantChunkSize {
 					t.Errorf("chunkOffset = %d, ChunkSize = %d; want (chunkOffset = %d, chunkSize = %d)",
 						ce.ChunkOffset, ce.ChunkSize, te.wantChunkOffset, te.wantChunkSize)
 				}

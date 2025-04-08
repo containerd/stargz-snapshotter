@@ -56,7 +56,7 @@ type gzipController struct {
 }
 
 func (gc *gzipController) String() string {
-	return fmt.Sprintf("externaltoc_gzip_compression_level=%v", gc.GzipCompressor.compressionLevel)
+	return fmt.Sprintf("externaltoc_gzip_compression_level=%v", gc.compressionLevel)
 }
 
 // TestStream tests the passed estargz blob contains the specified list of streams.

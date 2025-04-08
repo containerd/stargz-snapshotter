@@ -33,7 +33,6 @@ import (
 	esgzexternaltoc "github.com/containerd/stargz-snapshotter/nativeconverter/estargz/externaltoc"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	"github.com/containerd/stargz-snapshotter/snapshot"
-	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -75,12 +74,12 @@ func NewStargzSnapshotterService(ctx context.Context, root string, config *Confi
 
 	var snapshotter snapshots.Snapshotter
 
-	snOpts := []snbase.Opt{snbase.AsynchronousRemove}
-	if config.SnapshotterConfig.AllowInvalidMountsOnRestart {
-		snOpts = append(snOpts, snbase.AllowInvalidMountsOnRestart)
+	snOpts := []snapshot.Opt{snapshot.AsynchronousRemove}
+	if config.AllowInvalidMountsOnRestart {
+		snOpts = append(snOpts, snapshot.AllowInvalidMountsOnRestart)
 	}
 
-	snapshotter, err = snbase.NewSnapshotter(ctx, snapshotterRoot(root), fs, snOpts...)
+	snapshotter, err = snapshot.NewSnapshotter(ctx, snapshotterRoot(root), fs, snOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new snapshotter: %w", err)
 	}

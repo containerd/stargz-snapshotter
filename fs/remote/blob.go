@@ -120,7 +120,7 @@ func (b *blob) Refresh(ctx context.Context, hosts source.RegistryHosts, refspec 
 		return err
 	}
 	if newSize != b.size {
-		return fmt.Errorf("Invalid size of new blob %d; want %d", newSize, b.size)
+		return fmt.Errorf("invalid size of new blob %d; want %d", newSize, b.size)
 	}
 
 	// update the blob's fetcher with new one

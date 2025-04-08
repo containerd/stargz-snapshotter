@@ -122,12 +122,12 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (f fetcher, size int64, err error) {
 	blobConfig := &r.blobConfig
 	fc := &fetcherConfig{
-		hosts:       hosts,
-		refspec:     refspec,
-		desc:        desc,
-		maxRetries:  blobConfig.MaxRetries,
-		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
-		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
+		hosts:      hosts,
+		refspec:    refspec,
+		desc:       desc,
+		maxRetries: blobConfig.MaxRetries,
+		minWait:    time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
+		maxWait:    time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
 	}
 	var errs []error
 	for name, p := range r.handlers {
@@ -156,12 +156,12 @@ func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHost
 }
 
 type fetcherConfig struct {
-	hosts       source.RegistryHosts
-	refspec     reference.Spec
-	desc        ocispec.Descriptor
-	maxRetries  int
-	minWaitMSec time.Duration
-	maxWaitMSec time.Duration
+	hosts      source.RegistryHosts
+	refspec    reference.Spec
+	desc       ocispec.Descriptor
+	maxRetries int
+	minWait    time.Duration
+	maxWait    time.Duration
 }
 
 func jitter(duration time.Duration) time.Duration {
@@ -202,7 +202,7 @@ func newHTTPFetcher(ctx context.Context, fc *fetcherConfig) (*httpFetcher, int64
 	}
 	desc := fc.desc
 	if desc.Digest.String() == "" {
-		return nil, 0, fmt.Errorf("Digest is mandatory in layer descriptor")
+		return nil, 0, fmt.Errorf("digest is mandatory in layer descriptor")
 	}
 	digest := desc.Digest
 	pullScope, err := docker.RepositoryScope(fc.refspec, false)
@@ -225,8 +225,8 @@ func newHTTPFetcher(ctx context.Context, fc *fetcherConfig) (*httpFetcher, int64
 		timeout := host.Client.Timeout
 		if rt, ok := tr.(*rhttp.RoundTripper); ok {
 			rt.Client.RetryMax = fc.maxRetries
-			rt.Client.RetryWaitMin = fc.minWaitMSec
-			rt.Client.RetryWaitMax = fc.maxWaitMSec
+			rt.Client.RetryWaitMin = fc.minWait
+			rt.Client.RetryWaitMax = fc.maxWait
 			rt.Client.Backoff = backoffStrategy
 			rt.Client.CheckRetry = retryStrategy
 			timeout = rt.Client.HTTPClient.Timeout
@@ -408,9 +408,10 @@ func getSize(ctx context.Context, url string, tr http.RoundTripper, timeout time
 		res.Body.Close()
 	}()
 
-	if res.StatusCode == http.StatusOK {
+	switch res.StatusCode {
+	case http.StatusOK:
 		return strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
-	} else if res.StatusCode == http.StatusPartialContent {
+	case http.StatusPartialContent:
 		_, size, err := parseRange(res.Header.Get("Content-Range"))
 		return size, err
 	}
@@ -558,9 +559,10 @@ func (f *httpFetcher) check() error {
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
 	}()
-	if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusPartialContent {
+	switch res.StatusCode {
+	case http.StatusOK, http.StatusPartialContent:
 		return nil
-	} else if res.StatusCode == http.StatusForbidden {
+	case http.StatusForbidden:
 		// Try to re-redirect this blob
 		rCtx := context.Background()
 		if f.timeout > 0 {

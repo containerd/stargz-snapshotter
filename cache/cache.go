@@ -405,7 +405,7 @@ func (mc *MemoryCache) Get(key string, opts ...Option) (Reader, error) {
 	defer mc.mu.Unlock()
 	b, ok := mc.Membuf[key]
 	if !ok {
-		return nil, fmt.Errorf("Missed cache: %q", key)
+		return nil, fmt.Errorf("missed cache: %q", key)
 	}
 	return &reader{bytes.NewReader(b.Bytes()), func() error { return nil }}, nil
 }
