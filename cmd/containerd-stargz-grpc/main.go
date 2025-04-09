@@ -117,7 +117,7 @@ func main() {
 
 	// Get configuration from specified file
 	tree, err := toml.LoadFile(*configPath)
-	if err != nil && !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
+	if err != nil && (!os.IsNotExist(err) || *configPath != defaultConfigPath) {
 		log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
 	}
 	if err := tree.Unmarshal(&config); err != nil {
@@ -134,17 +134,17 @@ func main() {
 	// Configure FUSE passthrough
 	// Always set Direct to true to ensure that
 	// *directoryCache.Get always return *os.File instead of buffer
-	if config.Config.Config.FuseConfig.PassThrough {
-		config.Config.Config.DirectoryCacheConfig.Direct = true
+	if config.PassThrough {
+		config.Direct = true
 	}
 
 	// Configure keychain
 	keyChainConfig := keychainconfig.Config{
-		EnableKubeKeychain:         config.Config.KubeconfigKeychainConfig.EnableKeychain,
-		EnableCRIKeychain:          config.Config.CRIKeychainConfig.EnableKeychain,
-		KubeconfigPath:             config.Config.KubeconfigKeychainConfig.KubeconfigPath,
+		EnableKubeKeychain:         config.KubeconfigKeychainConfig.EnableKeychain,
+		EnableCRIKeychain:          config.CRIKeychainConfig.EnableKeychain,
+		KubeconfigPath:             config.KubeconfigPath,
 		DefaultImageServiceAddress: defaultImageServiceAddress,
-		ImageServicePath:           config.CRIKeychainConfig.ImageServicePath,
+		ImageServicePath:           config.ImageServicePath,
 	}
 
 	var rs snapshots.Snapshotter

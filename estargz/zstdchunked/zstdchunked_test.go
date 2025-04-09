@@ -50,7 +50,7 @@ type zstdController struct {
 }
 
 func (zc *zstdController) String() string {
-	return fmt.Sprintf("zstd_compression_level=%v", zc.Compressor.CompressionLevel)
+	return fmt.Sprintf("zstd_compression_level=%v", zc.CompressionLevel)
 }
 
 // TestStream tests the passed zstdchunked blob contains the specified list of streams.

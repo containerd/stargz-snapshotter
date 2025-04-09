@@ -120,7 +120,7 @@ func multiCredsFuncs(ref reference.Spec, credsFuncs ...Credential) func(string) 
 		for _, f := range credsFuncs {
 			if username, secret, err := f(host, ref); err != nil {
 				return "", "", err
-			} else if !(username == "" && secret == "") {
+			} else if username != "" || secret != "" {
 				return username, secret, nil
 			}
 		}

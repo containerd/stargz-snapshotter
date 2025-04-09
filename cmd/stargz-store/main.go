@@ -108,7 +108,7 @@ func main() {
 	// Get configuration from specified file
 	if *configPath != "" {
 		tree, err := toml.LoadFile(*configPath)
-		if err != nil && !(os.IsNotExist(err) && *configPath == defaultConfigPath) {
+		if err != nil && (!os.IsNotExist(err) || *configPath != defaultConfigPath) {
 			log.G(ctx).WithError(err).Fatalf("failed to load config file %q", *configPath)
 		}
 		if err := tree.Unmarshal(&config); err != nil {
@@ -122,9 +122,9 @@ func main() {
 
 	// Prepare kubeconfig-based keychain if required
 	credsFuncs := []resolver.Credential{sk.credentials}
-	if config.KubeconfigKeychainConfig.EnableKeychain {
+	if config.EnableKeychain {
 		var opts []kubeconfig.Option
-		if kcp := config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
+		if kcp := config.KubeconfigPath; kcp != "" {
 			opts = append(opts, kubeconfig.WithKubeconfigPath(kcp))
 		}
 		credsFuncs = append(credsFuncs, kubeconfig.NewKubeconfigKeychain(ctx, opts...))
@@ -140,7 +140,7 @@ func main() {
 				Fatalf("failed to prepare mountpoint %q", mountPoint)
 		}
 	}
-	if config.Config.DisableVerification {
+	if config.DisableVerification {
 		log.G(ctx).Fatalf("content verification can't be disabled")
 	}
 	mt, err := getMetadataStore(*rootDir, config)
@@ -151,7 +151,7 @@ func main() {
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to prepare pool")
 	}
-	if err := store.Mount(ctx, mountPoint, layerManager, config.Config.Debug); err != nil {
+	if err := store.Mount(ctx, mountPoint, layerManager, config.Debug); err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to mount fs at %q", mountPoint)
 	}
 	defer func() {
@@ -266,7 +266,7 @@ func (sk *storeKeychain) credentials(host string, refspec reference.Spec) (strin
 	if acfg, ok := sk.config[refspec.String()]; ok {
 		if acfg.IdentityToken != "" {
 			return "", acfg.IdentityToken, nil
-		} else if !(acfg.Username == "" && acfg.Password == "") {
+		} else if acfg.Username != "" || acfg.Password != "" {
 			return acfg.Username, acfg.Password, nil
 		}
 	}

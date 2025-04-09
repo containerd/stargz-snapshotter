@@ -56,7 +56,7 @@ const (
 )
 
 func Mount(ctx context.Context, mountpoint string, layerManager *LayerManager, debug bool) error {
-	timeSec := time.Second
+	t := time.Second
 	rawFS := fusefs.NewNodeFS(&rootnode{
 		fs: &fs{
 			layerManager: layerManager,
@@ -64,8 +64,8 @@ func Mount(ctx context.Context, mountpoint string, layerManager *LayerManager, d
 			layerMap:     new(idMap),
 		},
 	}, &fusefs.Options{
-		AttrTimeout:     &timeSec,
-		EntryTimeout:    &timeSec,
+		AttrTimeout:     &t,
+		EntryTimeout:    &t,
 		NullPermissions: true,
 	})
 	mountOpts := &fuse.MountOptions{
@@ -135,7 +135,7 @@ func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 			log.G(ctx).Warn("rootnode.Lookup: uknown node type detected")
 			return nil, syscall.EIO
 		}
-		out.Attr.Ino = cn.StableAttr().Ino
+		out.Ino = cn.StableAttr().Ino
 		return cn, 0
 	}
 	switch name {
@@ -145,7 +145,7 @@ func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 		cn := &MemSymlinkOnForget{fusefs.MemSymlink{Data: []byte(n.fs.layerManager.refPool.root())}, n.fs, fattr}
 		copyAttr(cn.attr, &out.Attr)
 		return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
-			out.Attr.Ino = uint64(ino)
+			out.Ino = uint64(ino)
 			cn.attr.Ino = uint64(ino)
 			sAttr.Ino = uint64(ino)
 			fattr.Ino = uint64(ino)
@@ -170,7 +170,7 @@ func (n *rootnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) 
 	}
 	copyAttr(&cn.attr, &out.Attr)
 	return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
-		out.Attr.Ino = uint64(ino)
+		out.Ino = uint64(ino)
 		cn.attr.Ino = uint64(ino)
 		sAttr.Ino = uint64(ino)
 		return n.NewPersistentInode(ctx, cn, sAttr)
@@ -207,7 +207,7 @@ func (n *refnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 			log.G(ctx).Warn("refnode.Lookup: uknown node type detected")
 			return nil, syscall.EIO
 		}
-		out.Attr.Ino = cn.StableAttr().Ino
+		out.Ino = cn.StableAttr().Ino
 		return cn, 0
 	}
 	targetDigest, err := digest.Parse(name)
@@ -223,7 +223,7 @@ func (n *refnode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 	}
 	copyAttr(&cn.attr, &out.Attr)
 	return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
-		out.Attr.Ino = uint64(ino)
+		out.Ino = uint64(ino)
 		cn.attr.Ino = uint64(ino)
 		sAttr.Ino = uint64(ino)
 		return n.NewPersistentInode(ctx, cn, sAttr)
@@ -321,7 +321,7 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 			log.G(ctx).Warn("layernode.Lookup: uknown node type detected")
 			return nil, syscall.EIO
 		}
-		out.Attr.Ino = cn.StableAttr().Ino
+		out.Ino = cn.StableAttr().Ino
 		return cn, 0
 	}
 	switch name {
@@ -342,7 +342,7 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 		cn := &MemRegularFileOnForget{fusefs.MemRegularFile{Data: infoData}, n.fs, &fattr}
 		copyAttr(cn.attr, &out.Attr)
 		return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
-			out.Attr.Ino = uint64(ino)
+			out.Ino = uint64(ino)
 			cn.attr.Ino = uint64(ino)
 			sAttr.Ino = uint64(ino)
 			fattr.Ino = uint64(ino)
@@ -381,7 +381,7 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 			cn := &blobnode{l: l, fs: n.fs}
 			copyAttr(&cn.attr, &out.Attr)
 			return n.fs.newInodeWithID(ctx, func(ino uint32) fusefs.InodeEmbedder {
-				out.Attr.Ino = uint64(ino)
+				out.Ino = uint64(ino)
 				cn.attr.Ino = uint64(ino)
 				sAttr.Ino = uint64(ino)
 				return n.NewPersistentInode(ctx, cn, sAttr)
@@ -408,8 +408,8 @@ func (n *layernode) Lookup(ctx context.Context, name string, out *fuse.EntryOut)
 
 			copyAttr(&out.Attr, &ao.Attr)
 			cn = n.NewPersistentInode(ctx, root, fusefs.StableAttr{
-				Mode: out.Attr.Mode,
-				Ino:  out.Attr.Ino,
+				Mode: out.Mode,
+				Ino:  out.Ino,
 			})
 			return nil
 		}()

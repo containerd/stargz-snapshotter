@@ -84,7 +84,7 @@ func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseIno
 	}
 	opq, ok := opaqueXattrs[opaque]
 	if !ok {
-		return nil, fmt.Errorf("Unknown overlay opaque type")
+		return nil, fmt.Errorf("unknown overlay opaque type")
 	}
 	ffs := &fs{
 		r:            r,

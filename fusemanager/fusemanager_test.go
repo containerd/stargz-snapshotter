@@ -135,7 +135,7 @@ func TestFuseManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create fuse manager: %v", err)
 	}
-	defer fm.Server.Close(context.Background())
+	defer fm.Close(context.Background())
 
 	pb.RegisterStargzFuseManagerServiceServer(grpcServer, fm)
 

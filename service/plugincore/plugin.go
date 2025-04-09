@@ -78,17 +78,17 @@ func RegisterPlugin() {
 
 			// Configure keychain
 			credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
-			if config.Config.KubeconfigKeychainConfig.EnableKeychain {
+			if config.KubeconfigKeychainConfig.EnableKeychain {
 				var opts []kubeconfig.Option
-				if kcp := config.Config.KubeconfigKeychainConfig.KubeconfigPath; kcp != "" {
+				if kcp := config.KubeconfigPath; kcp != "" {
 					opts = append(opts, kubeconfig.WithKubeconfigPath(kcp))
 				}
 				credsFuncs = append(credsFuncs, kubeconfig.NewKubeconfigKeychain(ctx, opts...))
 			}
-			if addr := config.CRIKeychainImageServicePath; config.Config.CRIKeychainConfig.EnableKeychain && addr != "" {
+			if addr := config.CRIKeychainImageServicePath; config.CRIKeychainConfig.EnableKeychain && addr != "" {
 				// connects to the backend CRI service (defaults to containerd socket)
 				criAddr := ic.Properties[ctdplugins.PropertyGRPCAddress]
-				if cp := config.Config.CRIKeychainConfig.ImageServicePath; cp != "" {
+				if cp := config.ImageServicePath; cp != "" {
 					criAddr = cp
 				}
 				if criAddr == "" {

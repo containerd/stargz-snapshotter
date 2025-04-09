@@ -40,9 +40,9 @@ func init() {
 		keyChainConfig := keychainconfig.Config{
 			EnableKubeKeychain:         cc.Config.Config.KubeconfigKeychainConfig.EnableKeychain,
 			EnableCRIKeychain:          cc.Config.Config.CRIKeychainConfig.EnableKeychain,
-			KubeconfigPath:             cc.Config.Config.KubeconfigKeychainConfig.KubeconfigPath,
+			KubeconfigPath:             cc.Config.Config.KubeconfigPath,
 			DefaultImageServiceAddress: cc.Config.DefaultImageServiceAddress,
-			ImageServicePath:           cc.Config.Config.CRIKeychainConfig.ImageServicePath,
+			ImageServicePath:           cc.Config.Config.ImageServicePath,
 		}
 		credsFuncs, err := keychainconfig.ConfigKeychain(cc.Ctx, cc.Server, &keyChainConfig)
 		if err != nil {

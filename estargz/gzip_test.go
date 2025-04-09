@@ -52,7 +52,7 @@ type gzipController struct {
 }
 
 func (gc *gzipController) String() string {
-	return fmt.Sprintf("gzip_compression_level=%v", gc.GzipCompressor.compressionLevel)
+	return fmt.Sprintf("gzip_compression_level=%v", gc.compressionLevel)
 }
 
 // TestStream tests the passed estargz blob contains the specified list of streams.
@@ -106,7 +106,7 @@ func checkLegacyFooter(t *testing.T, off int64) {
 func legacyFooterBytes(tocOff int64) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, legacyFooterSize))
 	gz, _ := gzip.NewWriterLevel(buf, gzip.NoCompression)
-	gz.Header.Extra = []byte(fmt.Sprintf("%016xSTARGZ", tocOff))
+	gz.Extra = []byte(fmt.Sprintf("%016xSTARGZ", tocOff))
 	gz.Close()
 	if buf.Len() != legacyFooterSize {
 		panic(fmt.Sprintf("footer buffer = %d, not %d", buf.Len(), legacyFooterSize))

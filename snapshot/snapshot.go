@@ -122,7 +122,7 @@ type snapshotter struct {
 // the root as same as overlayfs snapshotter.
 func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts ...Opt) (snapshots.Snapshotter, error) {
 	if targetFs == nil {
-		return nil, fmt.Errorf("Specify filesystem to use")
+		return nil, fmt.Errorf("specify filesystem to use")
 	}
 
 	var config SnapshotterConfig

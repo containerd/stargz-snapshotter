@@ -68,7 +68,7 @@ func Serve(target string, r io.Reader, w io.Writer) error {
 			return fmt.Errorf("read fanotify fd: %w", err)
 		}
 		if event.Vers != unix.FANOTIFY_METADATA_VERSION {
-			return fmt.Errorf("Fanotify version mismatch %d(got) != %d(want)",
+			return fmt.Errorf("fanotify version mismatch %d(got) != %d(want)",
 				event.Vers, unix.FANOTIFY_METADATA_VERSION)
 		}
 		if event.Fd < 0 {

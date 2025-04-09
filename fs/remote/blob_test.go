@@ -609,7 +609,7 @@ func TestCheckInterval(t *testing.T) {
 		if !tr.called {
 			return b.lastCheck, false
 		}
-		if !(b.lastCheck.After(beforeUpdate) && b.lastCheck.Before(afterUpdate)) {
+		if !b.lastCheck.After(beforeUpdate) || !b.lastCheck.Before(afterUpdate) {
 			t.Errorf("%q: updated time must be after %q and before %q but %q", name, beforeUpdate, afterUpdate, b.lastCheck)
 		}
 

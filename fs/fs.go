@@ -139,12 +139,12 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		maxConcurrency = defaultMaxConcurrency
 	}
 
-	attrTimeout := time.Duration(cfg.FuseConfig.AttrTimeout) * time.Second
+	attrTimeout := time.Duration(cfg.AttrTimeout) * time.Second
 	if attrTimeout == 0 {
 		attrTimeout = defaultFuseTimeout
 	}
 
-	entryTimeout := time.Duration(cfg.FuseConfig.EntryTimeout) * time.Second
+	entryTimeout := time.Duration(cfg.EntryTimeout) * time.Second
 	if entryTimeout == 0 {
 		entryTimeout = defaultFuseTimeout
 	}

@@ -1,44 +1,54 @@
-# This is applied to `estargz` submodule as well.
-# https://golangci-lint.run/usage/configuration#config-file
-
+version: "2"
 linters:
   enable:
-    - depguard      # Checks for imports that shouldn't be used.
-    - staticcheck
-    - unconvert
-    - gofmt
-    - goimports
-    - revive
-    - ineffassign
-    - govet
-    - unused
+    - depguard
     - misspell
+    - revive
+    - unconvert
   disable:
     - errcheck
-
-linters-settings:
-  depguard:
+  settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: github.com/containerd/containerd/errdefs
+              desc: The containerd errdefs package was migrated to a separate module. Use github.com/containerd/errdefs instead.
+            - pkg: github.com/containerd/containerd/log
+              desc: The containerd log package was migrated to a separate module. Use github.com/containerd/log instead.
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      main:
-        deny:
-          - pkg: "github.com/containerd/containerd/errdefs"
-            desc: The containerd errdefs package was migrated to a separate module. Use github.com/containerd/errdefs instead.
-          - pkg: "github.com/containerd/containerd/log"
-            desc: The containerd log package was migrated to a separate module. Use github.com/containerd/log instead.
-
-run:
-  timeout: 4m
-
-issues:
-  exclude-rules:
-    - linters:
-        - revive
-      text: "unused-parameter"
-    - linters:
-        - revive
-      text: "redefines-builtin-id"
-  exclude-dirs:
-    - docs
-    - images
-    - out
-    - script
+      - linters:
+          - revive
+        text: unused-parameter
+      - linters:
+          - revive
+        text: redefines-builtin-id
+    paths:
+      - docs
+      - images
+      - out
+      - script
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - docs
+      - images
+      - out
+      - script
+      - third_party$
+      - builtin$
+      - examples$
