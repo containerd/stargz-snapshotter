@@ -91,6 +91,7 @@ func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseIno
 		layerDigest:  layerDgst,
 		baseInode:    baseInode,
 		rootID:       rootID,
+		nameLen:      getNameMaxLength(),
 		opaqueXattrs: opq,
 		passThrough:  pth,
 	}
@@ -109,6 +110,7 @@ type fs struct {
 	layerDigest  digest.Digest
 	baseInode    uint32
 	rootID       uint32
+	nameLen      uint32
 	opaqueXattrs []string
 	passThrough  passThroughConfig
 }
@@ -434,7 +436,7 @@ func (n *node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 var _ = (fusefs.NodeStatfser)((*node)(nil))
 
 func (n *node) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	defaultStatfs(out)
+	defaultStatfs(out, n.fs.nameLen)
 	return 0
 }
 
@@ -507,7 +509,7 @@ func (w *whiteout) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.A
 var _ = (fusefs.NodeStatfser)((*whiteout)(nil))
 
 func (w *whiteout) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	defaultStatfs(out)
+	defaultStatfs(out, w.fs.nameLen)
 	return 0
 }
 
@@ -573,7 +575,7 @@ func (s *state) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.Attr
 var _ = (fusefs.NodeStatfser)((*state)(nil))
 
 func (s *state) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	defaultStatfs(out)
+	defaultStatfs(out, s.fs.nameLen)
 	return 0
 }
 
@@ -635,7 +637,7 @@ func (sf *statFile) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.
 var _ = (fusefs.NodeStatfser)((*statFile)(nil))
 
 func (sf *statFile) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	defaultStatfs(out)
+	defaultStatfs(out, sf.fs.nameLen)
 	return 0
 }
 
@@ -823,8 +825,19 @@ func fileModeToSystemMode(m os.FileMode) uint32 {
 	return res
 }
 
-func defaultStatfs(stat *fuse.StatfsOut) {
+func getNameMaxLength() uint32 {
+	if rootPath == "" {
+		return 1<<32 - 1
+	}
 
+	fs := syscall.Statfs_t{}
+	if err := syscall.Statfs(rootPath, &fs); err != nil {
+		return 1<<32 - 1
+	}
+	return uint32(fs.Namelen)
+}
+
+func defaultStatfs(stat *fuse.StatfsOut, nameLen uint32) {
 	// http://man7.org/linux/man-pages/man2/statfs.2.html
 	stat.Blocks = 0 // dummy
 	stat.Bfree = 0
@@ -832,7 +845,7 @@ func defaultStatfs(stat *fuse.StatfsOut) {
 	stat.Files = 0 // dummy
 	stat.Ffree = 0
 	stat.Bsize = blockSize
-	stat.NameLen = 1<<32 - 1
+	stat.NameLen = nameLen
 	stat.Frsize = blockSize
 	stat.Padding = 0
 	stat.Spare = [6]uint32{}
