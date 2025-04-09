@@ -14,23 +14,23 @@ require (
 	github.com/containerd/plugin v1.0.0
 	github.com/containerd/stargz-snapshotter/estargz v0.16.1
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v27.5.1+incompatible
+	github.com/docker/cli v28.0.4+incompatible
 	github.com/docker/go-metrics v0.0.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/hanwen/go-fuse/v2 v2.7.2
 	github.com/hashicorp/go-retryablehttp v0.7.7
-	github.com/klauspost/compress v1.17.11
+	github.com/klauspost/compress v1.18.0
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.2.1
-	github.com/prometheus/client_golang v1.20.5
+	github.com/prometheus/client_golang v1.21.1
 	github.com/rs/xid v1.6.0
 	github.com/sirupsen/logrus v1.9.3
-	go.etcd.io/bbolt v1.3.11
-	golang.org/x/sync v0.11.0
-	golang.org/x/sys v0.30.0
+	go.etcd.io/bbolt v1.4.0
+	golang.org/x/sync v0.12.0
+	golang.org/x/sys v0.31.0
 	google.golang.org/grpc v1.71.1
 	k8s.io/api v0.31.2
 	k8s.io/apimachinery v0.31.2
@@ -88,13 +88,13 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
-	github.com/prometheus/common v0.55.0 // indirect
+	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sasha-s/go-deadlock v0.3.5 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
-	github.com/urfave/cli/v2 v2.27.5 // indirect
+	github.com/urfave/cli/v2 v2.27.6 // indirect
 	github.com/vbatts/tar-split v0.12.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
