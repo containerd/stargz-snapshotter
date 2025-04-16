@@ -59,6 +59,9 @@ const (
 	memoryCacheType                 = "memory"
 )
 
+// rootPath stores the filesystem root path used for Statfs operations
+var rootPath string
+
 // passThroughConfig contains configuration for FUSE passthrough mode
 type passThroughConfig struct {
 	// enable indicates whether to enable FUSE passthrough mode
@@ -141,6 +144,9 @@ type Resolver struct {
 
 // NewResolver returns a new layer resolver.
 func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager, cfg config.Config, resolveHandlers map[string]remote.Handler, metadataStore metadata.Store, overlayOpaqueType OverlayOpaqueType, additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor) (*Resolver, error) {
+	// Set it for Statfs operations
+	rootPath = root
+
 	resolveResultEntryTTL := time.Duration(cfg.ResolveResultEntryTTLSec) * time.Second
 	if resolveResultEntryTTL == 0 {
 		resolveResultEntryTTL = defaultResolveResultEntryTTLSec * time.Second
