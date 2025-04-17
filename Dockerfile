@@ -38,20 +38,20 @@ ARG CRI_TOOLS_VERSION=v1.30.0
 FROM golang:1.24-bullseye AS golang-base
 
 # Build containerd
-FROM golang-base AS containerd-dev
+FROM --platform=$BUILDPLATFORM golang:1.24-bullseye AS containerd-dev
 ARG CONTAINERD_VERSION
-RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
-    git clone -b ${CONTAINERD_VERSION} --depth 1 \
+ARG TARGETARCH
+RUN git clone -b ${CONTAINERD_VERSION} --depth 1 \
               https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
-    make && DESTDIR=/out/ PREFIX= make install
+    GOARCH=$TARGETARCH make && DESTDIR=/out/ PREFIX= make install
 
 # Build containerd with builtin stargz snapshotter
-FROM golang-base AS containerd-snapshotter-dev
+FROM --platform=$BUILDPLATFORM golang:1.24-bullseye AS containerd-snapshotter-dev
 ARG CONTAINERD_VERSION
+ARG TARGETARCH
 COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
-RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
-    git clone -b ${CONTAINERD_VERSION} --depth 1 \
+RUN git clone -b ${CONTAINERD_VERSION} --depth 1 \
       https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
     echo 'require github.com/containerd/stargz-snapshotter v0.0.0' >> go.mod && \
@@ -67,7 +67,7 @@ RUN apt-get update -y && apt-get install -y libbtrfs-dev libseccomp-dev && \
       echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> integration/client/go.mod ; \
     fi && \
     echo 'package main \nimport _ "github.com/containerd/stargz-snapshotter/service/plugin"' > cmd/containerd/builtins_stargz_snapshotter.go && \
-    make vendor && make && DESTDIR=/out/ PREFIX= make install
+    make vendor && GOARCH=$TARGETARCH make && DESTDIR=/out/ PREFIX= make install
 
 # Build runc
 FROM golang:1.24-bullseye AS runc-dev
@@ -79,7 +79,7 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev && \
     make && make install PREFIX=/out/
 
 # Build stargz snapshotter
-FROM golang-base AS snapshotter-dev
+FROM --platform=$BUILDPLATFORM golang:1.24-bullseye AS snapshotter-dev
 ARG TARGETARCH
 ARG GOARM
 ARG SNAPSHOTTER_BUILD_FLAGS
