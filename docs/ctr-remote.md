@@ -2,7 +2,7 @@
 
 This doc describes example usages of `ctr-remote image optimize` command for converting images into eStargz.
 
-`ctr-remote images optimize` command (call `ctr-remote` in this doc) enables users to convert an image into eStargz.
+`ctr-remote image optimize` command (call `ctr-remote` in this doc) enables users to convert an image into eStargz.
 This command works on containerd so containerd needs to run on your environment.
 So this converts an image stored in containerd and stores the resulting image to containerd.
 
