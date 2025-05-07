@@ -18,13 +18,13 @@ package cache
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/util/cacheutil"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
 )
@@ -61,6 +61,9 @@ type DirectoryCacheConfig struct {
 	// Direct forcefully enables direct mode for all operation in cache.
 	// Thus operation won't use on-memory caches.
 	Direct bool
+
+	// EnableHardlink enables hardlinking of cache files to reduce memory usage
+	EnableHardlink bool
 }
 
 // TODO: contents validation.
@@ -99,6 +102,7 @@ type Writer interface {
 type cacheOpt struct {
 	direct      bool
 	passThrough bool
+	chunkDigest string
 }
 
 type Option func(o *cacheOpt) *cacheOpt
@@ -119,6 +123,14 @@ func Direct() Option {
 func PassThrough() Option {
 	return func(o *cacheOpt) *cacheOpt {
 		o.passThrough = true
+		return o
+	}
+}
+
+// ChunkDigest option allows specifying a chunk digest for the cache
+func ChunkDigest(digest string) Option {
+	return func(o *cacheOpt) *cacheOpt {
+		o.chunkDigest = digest
 		return o
 	}
 }
@@ -166,15 +178,24 @@ func NewDirectoryCache(directory string, config DirectoryCacheConfig) (BlobCache
 		return nil, err
 	}
 	dc := &directoryCache{
-		cache:        dataCache,
-		fileCache:    fdCache,
-		wipLock:      new(namedmutex.NamedMutex),
-		directory:    directory,
-		wipDirectory: wipdir,
-		bufPool:      bufPool,
-		direct:       config.Direct,
+		cache:          dataCache,
+		fileCache:      fdCache,
+		wipLock:        new(namedmutex.NamedMutex),
+		directory:      directory,
+		wipDirectory:   wipdir,
+		bufPool:        bufPool,
+		direct:         config.Direct,
+		enableHardlink: config.EnableHardlink,
+		syncAdd:        config.SyncAdd,
 	}
-	dc.syncAdd = config.SyncAdd
+
+	// Initialize hardlink manager if enabled
+	if config.EnableHardlink {
+		hlManager, enabled := InitializeHardlinkManager(filepath.Dir(filepath.Dir(directory)), config.EnableHardlink)
+		dc.hlManager = hlManager
+		dc.enableHardlink = enabled
+	}
+
 	return dc, nil
 }
 
@@ -193,6 +214,9 @@ type directoryCache struct {
 
 	closed   bool
 	closedMu sync.Mutex
+
+	enableHardlink bool
+	hlManager      *HardlinkManager
 }
 
 func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
@@ -205,9 +229,15 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 		opt = o(opt)
 	}
 
+	// Try to get from memory cache
 	if !dc.direct && !opt.direct {
-		// Get data from memory
-		if b, done, ok := dc.cache.Get(key); ok {
+		// Try memory cache for digest or key
+		cacheKey := key
+		if dc.hlManager != nil && dc.hlManager.IsEnabled() && opt.chunkDigest != "" {
+			cacheKey = opt.chunkDigest
+		}
+
+		if b, done, ok := dc.cache.Get(cacheKey); ok {
 			return &reader{
 				ReaderAt: bytes.NewReader(b.(*bytes.Buffer).Bytes()),
 				closeFunc: func() error {
@@ -217,8 +247,8 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 			}, nil
 		}
 
-		// Get data from disk. If the file is already opened, use it.
-		if f, done, ok := dc.fileCache.Get(key); ok {
+		// Get data from file cache for digest or key
+		if f, done, ok := dc.fileCache.Get(cacheKey); ok {
 			return &reader{
 				ReaderAt: f.(*os.File),
 				closeFunc: func() error {
@@ -229,24 +259,28 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 		}
 	}
 
+	// First try regular file path
+	filepath := BuildCachePath(dc.directory, key)
+
+	// Check hardlink manager for existing digest file
+	if dc.hlManager != nil && opt.chunkDigest != "" {
+		if digestPath, exists := dc.hlManager.ProcessCacheGet(key, opt.chunkDigest, opt.direct); exists {
+			log.L.Debugf("Using existing file for digest %q instead of key %q", opt.chunkDigest, key)
+			filepath = digestPath
+		}
+	}
+
 	// Open the cache file and read the target region
-	// TODO: If the target cache is write-in-progress, should we wait for the completion
-	//       or simply report the cache miss?
-	file, err := os.Open(dc.cachePath(key))
+	file, err := os.Open(filepath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open blob file for %q: %w", key, err)
 	}
 
-	// If "direct" option is specified, do not cache the file on memory.
-	// This option is useful for preventing memory cache from being polluted by data
-	// that won't be accessed immediately.
+	// If in direct mode, don't cache file descriptor
 	if dc.direct || opt.direct {
 		return &reader{
 			ReaderAt: file,
 			closeFunc: func() error {
-				// In passthough model, close will be toke over by go-fuse
-				// If "passThrough" option is specified, "direct" option also will
-				// be specified, so adding this branch here is enough
 				if opt.passThrough {
 					return nil
 				}
@@ -255,16 +289,19 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 		}, nil
 	}
 
-	// TODO: should we cache the entire file data on memory?
-	//       but making I/O (possibly huge) on every fetching
-	//       might be costly.
+	// Cache file descriptor
 	return &reader{
 		ReaderAt: file,
 		closeFunc: func() error {
-			_, done, added := dc.fileCache.Add(key, file)
-			defer done() // Release it immediately. Cleaned up on eviction.
+			cacheKey := key
+			if dc.hlManager != nil && dc.hlManager.IsEnabled() && opt.chunkDigest != "" {
+				cacheKey = opt.chunkDigest
+			}
+
+			_, done, added := dc.fileCache.Add(cacheKey, file)
+			defer done()
 			if !added {
-				return file.Close() // file already exists in the cache. close it.
+				return file.Close()
 			}
 			return nil
 		},
@@ -281,81 +318,74 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 		opt = o(opt)
 	}
 
-	wip, err := dc.wipFile(key)
+	// If hardlink manager exists and digest is provided, check if a hardlink can be created
+	if dc.hlManager != nil && opt.chunkDigest != "" {
+		keyPath := BuildCachePath(dc.directory, key)
+
+		// Try to create a hardlink from existing digest file
+		if dc.hlManager.ProcessCacheAdd(key, opt.chunkDigest, keyPath) {
+			// Return a no-op writer since the file already exists
+			return &writer{
+				WriteCloser: nopWriteCloser(io.Discard),
+				commitFunc:  func() error { return nil },
+				abortFunc:   func() error { return nil },
+			}, nil
+		}
+	}
+
+	// Create temporary file
+	w, err := WipFile(dc.wipDirectory, key)
 	if err != nil {
 		return nil, err
 	}
-	w := &writer{
-		WriteCloser: wip,
+
+	// Create writer
+	writer := &writer{
+		WriteCloser: w,
 		commitFunc: func() error {
 			if dc.isClosed() {
 				return fmt.Errorf("cache is already closed")
 			}
-			// Commit the cache contents
-			c := dc.cachePath(key)
-			if err := os.MkdirAll(filepath.Dir(c), os.ModePerm); err != nil {
-				var errs []error
-				if err := os.Remove(wip.Name()); err != nil {
-					errs = append(errs, err)
-				}
-				errs = append(errs, fmt.Errorf("failed to create cache directory %q: %w", c, err))
-				return errors.Join(errs...)
+
+			// Commit file
+			targetPath := BuildCachePath(dc.directory, key)
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
+				return fmt.Errorf("failed to create cache directory: %w", err)
 			}
-			return os.Rename(wip.Name(), c)
+
+			if err := os.Rename(w.Name(), targetPath); err != nil {
+				return fmt.Errorf("failed to commit cache file: %w", err)
+			}
+
+			// If hardlink manager exists and digest is provided, register the file
+			if dc.hlManager != nil && dc.hlManager.IsEnabled() && opt.chunkDigest != "" {
+				// Register this file as the primary source for this digest
+				if err := dc.hlManager.RegisterDigestFile(opt.chunkDigest, targetPath); err != nil {
+					log.L.Debugf("Failed to register digest file: %v", err)
+				}
+
+				// Map key to digest
+				internalKey := dc.hlManager.GenerateInternalKey(dc.directory, key)
+				if err := dc.hlManager.MapKeyToDigest(internalKey, opt.chunkDigest); err != nil {
+					log.L.Debugf("Failed to map key to digest: %v", err)
+				}
+			}
+
+			return nil
 		},
 		abortFunc: func() error {
-			return os.Remove(wip.Name())
+			return os.Remove(w.Name())
 		},
 	}
 
-	// If "direct" option is specified, do not cache the passed data on memory.
-	// This option is useful for preventing memory cache from being polluted by data
-	// that won't be accessed immediately.
+	// Return directly if in direct mode
 	if dc.direct || opt.direct {
-		return w, nil
+		return writer, nil
 	}
 
+	// Create memory cache
 	b := dc.bufPool.Get().(*bytes.Buffer)
-	memW := &writer{
-		WriteCloser: nopWriteCloser(io.Writer(b)),
-		commitFunc: func() error {
-			if dc.isClosed() {
-				w.Close()
-				return fmt.Errorf("cache is already closed")
-			}
-			cached, done, added := dc.cache.Add(key, b)
-			if !added {
-				dc.putBuffer(b) // already exists in the cache. abort it.
-			}
-			commit := func() error {
-				defer done()
-				defer w.Close()
-				n, err := w.Write(cached.(*bytes.Buffer).Bytes())
-				if err != nil || n != cached.(*bytes.Buffer).Len() {
-					w.Abort()
-					return err
-				}
-				return w.Commit()
-			}
-			if dc.syncAdd {
-				return commit()
-			}
-			go func() {
-				if err := commit(); err != nil {
-					fmt.Println("failed to commit to file:", err)
-				}
-			}()
-			return nil
-		},
-		abortFunc: func() error {
-			defer w.Close()
-			defer w.Abort()
-			dc.putBuffer(b) // abort it.
-			return nil
-		},
-	}
-
-	return memW, nil
+	return dc.wrapMemoryWriter(b, writer, key)
 }
 
 func (dc *directoryCache) putBuffer(b *bytes.Buffer) {
@@ -378,14 +408,6 @@ func (dc *directoryCache) isClosed() bool {
 	closed := dc.closed
 	dc.closedMu.Unlock()
 	return closed
-}
-
-func (dc *directoryCache) cachePath(key string) string {
-	return filepath.Join(dc.directory, key[:2], key)
-}
-
-func (dc *directoryCache) wipFile(key string) (*os.File, error) {
-	return os.CreateTemp(dc.wipDirectory, key+"-*")
 }
 
 func NewMemoryCache() BlobCache {
@@ -462,4 +484,51 @@ func (w *writeCloser) Close() error { return w.closeFunc() }
 
 func nopWriteCloser(w io.Writer) io.WriteCloser {
 	return &writeCloser{w, func() error { return nil }}
+}
+
+// wrapMemoryWriter wraps a writer with memory caching
+func (dc *directoryCache) wrapMemoryWriter(b *bytes.Buffer, w *writer, key string) (Writer, error) {
+	return &writer{
+		WriteCloser: nopWriteCloser(b),
+		commitFunc: func() error {
+			if dc.isClosed() {
+				w.Close()
+				return fmt.Errorf("cache is already closed")
+			}
+
+			cached, done, added := dc.cache.Add(key, b)
+			if !added {
+				dc.putBuffer(b)
+			}
+
+			commit := func() error {
+				defer done()
+				defer w.Close()
+
+				n, err := w.Write(cached.(*bytes.Buffer).Bytes())
+				if err != nil || n != cached.(*bytes.Buffer).Len() {
+					w.Abort()
+					return err
+				}
+				return w.Commit()
+			}
+
+			if dc.syncAdd {
+				return commit()
+			}
+
+			go func() {
+				if err := commit(); err != nil {
+					log.L.Infof("failed to commit to file: %v", err)
+				}
+			}()
+			return nil
+		},
+		abortFunc: func() error {
+			defer w.Close()
+			defer w.Abort()
+			dc.putBuffer(b)
+			return nil
+		},
+	}, nil
 }
