@@ -43,9 +43,9 @@ const (
 )
 
 type Config struct {
-	Config                     *service.Config
-	IPFS                       bool   `toml:"ipfs"`
-	MetadataStore              string `toml:"metadata_store" default:"memory"`
+	Config                     service.Config
+	IPFS                       bool   `toml:"ipfs" json:"ipfs"`
+	MetadataStore              string `toml:"metadata_store" default:"memory" json:"metadata_store"`
 	DefaultImageServiceAddress string `json:"default_image_service_address"`
 }
 
@@ -195,7 +195,7 @@ func (fm *Server) Init(ctx context.Context, req *pb.InitRequest) (*pb.Response, 
 		opts = append(opts, funcOpts...)
 	}
 
-	fs, err := service.NewFileSystem(ctx, fm.root, fm.config.Config, opts...)
+	fs, err := service.NewFileSystem(ctx, fm.root, &fm.config.Config, opts...)
 	if err != nil {
 		return &pb.Response{}, err
 	}
@@ -229,7 +229,7 @@ func (fm *Server) Mount(ctx context.Context, req *pb.MountRequest) (*pb.Response
 		Root:       fm.root,
 		Mountpoint: req.Mountpoint,
 		Labels:     req.Labels,
-		Config:     *fm.config.Config,
+		Config:     fm.config.Config,
 	})
 
 	return &pb.Response{}, nil

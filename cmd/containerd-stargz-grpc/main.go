@@ -71,19 +71,19 @@ type snapshotterConfig struct {
 	service.Config
 
 	// MetricsAddress is address for the metrics API
-	MetricsAddress string `toml:"metrics_address"`
+	MetricsAddress string `toml:"metrics_address" json:"metrics_address"`
 
 	// NoPrometheus is a flag to disable the emission of the metrics
-	NoPrometheus bool `toml:"no_prometheus"`
+	NoPrometheus bool `toml:"no_prometheus" json:"no_prometheus"`
 
 	// DebugAddress is a Unix domain socket address where the snapshotter exposes /debug/ endpoints.
-	DebugAddress string `toml:"debug_address"`
+	DebugAddress string `toml:"debug_address" json:"debug_address"`
 
 	// IPFS is a flag to enbale lazy pulling from IPFS.
-	IPFS bool `toml:"ipfs"`
+	IPFS bool `toml:"ipfs" json:"ipfs"`
 
 	// MetadataStore is the type of the metadata store to use.
-	MetadataStore string `toml:"metadata_store" default:"memory"`
+	MetadataStore string `toml:"metadata_store" default:"memory" json:"metadata_store"`
 
 	// FuseManagerConfig is configuration for fusemanager
 	FuseManagerConfig `toml:"fuse_manager" json:"fuse_manager"`
@@ -179,7 +179,7 @@ func main() {
 		}
 
 		fuseManagerConfig := fusemanager.Config{
-			Config:                     &config.Config,
+			Config:                     config.Config,
 			IPFS:                       config.IPFS,
 			MetadataStore:              config.MetadataStore,
 			DefaultImageServiceAddress: defaultImageServiceAddress,
