@@ -116,7 +116,8 @@ fi
 
 FUSE_MANAGER_CONFIG=""
 if [ "${FUSE_MANAGER:-}" == "true" ] ; then
-    FUSE_MANAGER_CONFIG='[fuse_manager]
+    FUSE_MANAGER_CONFIG='listen_path = "/run/containerd-stargz-grpc/cri.sock"
+[fuse_manager]
 enable = true'
 fi
 
@@ -166,17 +167,17 @@ COPY ./test.conflist /etc/cni/net.d/test.conflist
 
 ${ADDITIONAL_INST}
 
-RUN if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then \
-      sed -i '1imetadata_store = "${USE_METADATA_STORE}"' "${SNAPSHOTTER_CONFIG_FILE}" && \
-      echo '[fuse]' >> "${SNAPSHOTTER_CONFIG_FILE}" && \
-      echo "passthrough = ${USE_FUSE_PASSTHROUGH}" >> "${SNAPSHOTTER_CONFIG_FILE}" ; \
-    fi
-
 RUN <<EEE
 cat <<EOT >> "${SNAPSHOTTER_CONFIG_FILE}"
 ${FUSE_MANAGER_CONFIG}
 EOT
 EEE
+
+RUN if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then \
+      sed -i '1imetadata_store = "${USE_METADATA_STORE}"' "${SNAPSHOTTER_CONFIG_FILE}" && \
+      echo '[fuse]' >> "${SNAPSHOTTER_CONFIG_FILE}" && \
+      echo "passthrough = ${USE_FUSE_PASSTHROUGH}" >> "${SNAPSHOTTER_CONFIG_FILE}" ; \
+    fi
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
 EOF
