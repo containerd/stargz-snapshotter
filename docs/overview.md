@@ -178,12 +178,22 @@ The snapshotter acquires registry creds by scanning requests.
 
 You must specify `--image-service-endpoint=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock` option to kubelet.
 
+You can specify the backing image service's socket using `image_service_path`.
+The default is the containerd's socket (`/run/containerd/containerd.sock`).
+
 ```toml
 # Stargz Snapshotter proxies CRI Image Service into containerd socket.
 [cri_keychain]
 enable_keychain = true
 image_service_path = "/run/containerd/containerd.sock"
 ```
+
+The default path where containerd-stargz-grpc serves the CRI Image Service API is `unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock`.
+You can also change this path using `listen_path` field.
+
+> Note that if you enabled the FUSE manager and CRI-based authentication together, `listen_path` is a mandatory field with some caveats:
+> - This path must be different from the FUSE manager's socket path (`/run/containerd-stargz-grpc/fuse-manager.sock`) because they have different lifecycle. Specifically, the CRI socket is recreted on each reload of the configuration to the FUSE manager.
+> - containerd-stargz-grpc's socket path (`/run/containerd-stargz-grpc/containerd-stargz-grpc.sock`) can't be used as `listen_path` because the CRI socket is served by the FUSE manager process (not containerd-stargz-grpc process).
 
 #### kubeconfig-based authentication
 

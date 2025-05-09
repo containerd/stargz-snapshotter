@@ -194,7 +194,7 @@ func runFuseManager(ctx context.Context) error {
 	}
 
 	server := grpc.NewServer()
-	fm, err := NewFuseManager(ctx, l, server, fuseStoreAddr)
+	fm, err := NewFuseManager(ctx, l, server, fuseStoreAddr, address)
 	if err != nil {
 		return fmt.Errorf("failed to configure manager server: %w", err)
 	}

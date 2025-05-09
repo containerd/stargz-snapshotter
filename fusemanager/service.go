@@ -55,6 +55,8 @@ type ConfigContext struct {
 	RootDir    string
 	Server     *grpc.Server
 	OpenBoltDB func(string) (*bolt.DB, error)
+	Address    string
+	CRIServer  *grpc.Server
 }
 
 var (
@@ -123,9 +125,13 @@ type Server struct {
 	fuseStoreAddr string
 
 	dbOpener *dbOpener
+
+	serverAddr string
+
+	curCRIServer *grpc.Server
 }
 
-func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Server, fuseStoreAddr string) (*Server, error) {
+func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Server, fuseStoreAddr string, serverAddr string) (*Server, error) {
 	if err := os.MkdirAll(filepath.Dir(fuseStoreAddr), 0700); err != nil {
 		return nil, fmt.Errorf("failed to create directory %q: %w", filepath.Dir(fuseStoreAddr), err)
 	}
@@ -144,6 +150,7 @@ func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Ser
 		server:        server,
 		fuseStoreAddr: fuseStoreAddr,
 		dbOpener:      &dbOpener{},
+		serverAddr:    serverAddr,
 	}
 
 	return fm, nil
@@ -177,12 +184,18 @@ func (fm *Server) Init(ctx context.Context, req *pb.InitRequest) (*pb.Response, 
 	fm.root = req.Root
 	fm.config = config
 
+	if fm.curCRIServer != nil {
+		fm.curCRIServer.Stop()
+		fm.curCRIServer = nil
+	}
+
 	cc := &ConfigContext{
 		Ctx:        ctx,
 		Config:     fm.config,
 		RootDir:    fm.root,
 		Server:     fm.server,
 		OpenBoltDB: fm.dbOpener.openBoltDB,
+		Address:    fm.serverAddr,
 	}
 
 	var opts []service.Option
@@ -194,6 +207,8 @@ func (fm *Server) Init(ctx context.Context, req *pb.InitRequest) (*pb.Response, 
 		}
 		opts = append(opts, funcOpts...)
 	}
+
+	fm.curCRIServer = cc.CRIServer
 
 	fs, err := service.NewFileSystem(ctx, fm.root, &fm.config.Config, opts...)
 	if err != nil {

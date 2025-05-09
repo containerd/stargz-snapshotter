@@ -55,6 +55,9 @@ type CRIKeychainConfig struct {
 
 	// ImageServicePath is the path to the unix socket of backing CRI Image Service (e.g. containerd CRI plugin)
 	ImageServicePath string `toml:"image_service_path" json:"image_service_path"`
+
+	// ListenPath is the path to the unix socket to listen
+	ListenPath string `toml:"listen_path" json:"listen_path"`
 }
 
 // ResolverConfig is config for resolving registries.

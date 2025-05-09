@@ -203,9 +203,38 @@ func main() {
 		}
 		log.G(ctx).Infof("Start snapshotter with fusemanager mode")
 	} else {
-		credsFuncs, err := keychainconfig.ConfigKeychain(ctx, rpc, &keyChainConfig)
+		crirpc := rpc
+		// For CRI keychain, if listening path is different from stargz-snapshotter's socket, prepare for the dedicated grpc server and the socket.
+		serveCRISocket := config.CRIKeychainConfig.EnableKeychain && config.ListenPath != "" && config.ListenPath != *address
+		if serveCRISocket {
+			crirpc = grpc.NewServer()
+		}
+		credsFuncs, err := keychainconfig.ConfigKeychain(ctx, crirpc, &keyChainConfig)
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure keychain")
+		}
+		if serveCRISocket {
+			addr := config.ListenPath
+			// Prepare the directory for the socket
+			if err := os.MkdirAll(filepath.Dir(addr), 0700); err != nil {
+				log.G(ctx).WithError(err).Fatalf("failed to create directory %q", filepath.Dir(addr))
+			}
+
+			// Try to remove the socket file to avoid EADDRINUSE
+			if err := os.RemoveAll(addr); err != nil {
+				log.G(ctx).WithError(err).Fatalf("failed to remove %q", addr)
+			}
+
+			// Listen and serve
+			l, err := net.Listen("unix", addr)
+			if err != nil {
+				log.G(ctx).WithError(err).Fatalf("error on listen socket %q", addr)
+			}
+			go func() {
+				if err := crirpc.Serve(l); err != nil {
+					log.G(ctx).WithError(err).Errorf("error on serving CRI via socket %q", addr)
+				}
+			}()
 		}
 
 		fsConfig := fsopts.Config{
