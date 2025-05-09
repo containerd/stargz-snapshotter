@@ -71,33 +71,33 @@ type snapshotterConfig struct {
 	service.Config
 
 	// MetricsAddress is address for the metrics API
-	MetricsAddress string `toml:"metrics_address"`
+	MetricsAddress string `toml:"metrics_address" json:"metrics_address"`
 
 	// NoPrometheus is a flag to disable the emission of the metrics
-	NoPrometheus bool `toml:"no_prometheus"`
+	NoPrometheus bool `toml:"no_prometheus" json:"no_prometheus"`
 
 	// DebugAddress is a Unix domain socket address where the snapshotter exposes /debug/ endpoints.
-	DebugAddress string `toml:"debug_address"`
+	DebugAddress string `toml:"debug_address" json:"debug_address"`
 
 	// IPFS is a flag to enbale lazy pulling from IPFS.
-	IPFS bool `toml:"ipfs"`
+	IPFS bool `toml:"ipfs" json:"ipfs"`
 
 	// MetadataStore is the type of the metadata store to use.
-	MetadataStore string `toml:"metadata_store" default:"memory"`
+	MetadataStore string `toml:"metadata_store" default:"memory" json:"metadata_store"`
 
 	// FuseManagerConfig is configuration for fusemanager
-	FuseManagerConfig `toml:"fusemanager"`
+	FuseManagerConfig `toml:"fusemanager" json:"fusemanager"`
 }
 
 type FuseManagerConfig struct {
 	// EnableFuseManager is whether detach fusemanager or not
-	EnableFuseManager bool `toml:"enable_fusemanager" default:"false"`
+	EnableFuseManager bool `toml:"enable_fusemanager" default:"false" json:"enable_fusemanager"`
 
 	// FuseManagerAddress is address for the fusemanager's GRPC server (default: "/run/containerd-stargz-grpc/fuse-manager.sock")
-	FuseManagerAddress string `toml:"fusemanager_address"`
+	FuseManagerAddress string `toml:"fusemanager_address" json:"fusemanager_address"`
 
 	// FuseManagerPath is path to the fusemanager's executable (default: looking for a binary "stargz-fuse-manager")
-	FuseManagerPath string `toml:"fusemanager_path"`
+	FuseManagerPath string `toml:"fusemanager_path" json:"fusemanager_path"`
 }
 
 func main() {
@@ -178,7 +178,7 @@ func main() {
 		}
 
 		fuseManagerConfig := fusemanager.Config{
-			Config:                     &config.Config,
+			Config:                     config.Config,
 			IPFS:                       config.IPFS,
 			MetadataStore:              config.MetadataStore,
 			DefaultImageServiceAddress: defaultImageServiceAddress,

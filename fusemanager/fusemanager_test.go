@@ -187,7 +187,7 @@ func TestFuseManager(t *testing.T) {
 			fm.initCalled = false
 
 			config := &Config{
-				Config: &service.Config{},
+				Config: service.Config{},
 			}
 			client, err := NewManagerClient(context.Background(), tmpDir, socketPath, config)
 			if err != nil {
