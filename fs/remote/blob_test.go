@@ -24,6 +24,7 @@ package remote
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"mime"
@@ -152,7 +153,7 @@ func TestReadAt(t *testing.T) {
 
 								// data we get through a remote blob.
 								blob := []byte(sampleData1)[:blobsize]
-
+								digest := sha256.Sum256(blob)
 								// Check with allowing multi range requests
 								var cacheChunks []region
 								var except []region
@@ -165,12 +166,12 @@ func TestReadAt(t *testing.T) {
 								tr := multiRoundTripper(t, blob, allowMultiRange(trCond.allowMultiRange), exceptChunks(except))
 
 								// Check ReadAt method
-								bb1 := makeTestBlob(t, blobsize, sampleChunkSize, prefetchchunksize, tr)
+								bb1 := makeTestBlob(t, blobsize, sampleChunkSize, prefetchchunksize, fmt.Sprintf("%x", digest), tr)
 								cacheAll(t, bb1, cacheChunks)
 								checkRead(t, wantData, bb1, offset, size)
 
 								// Check Cache method
-								bb2 := makeTestBlob(t, blobsize, sampleChunkSize, prefetchchunksize, tr)
+								bb2 := makeTestBlob(t, blobsize, sampleChunkSize, prefetchchunksize, fmt.Sprintf("%x", digest), tr)
 								cacheAll(t, bb2, cacheChunks)
 								checkCache(t, bb2, offset, size)
 							})
@@ -258,9 +259,9 @@ func checkAllCached(t *testing.T, r *blob, offset, size int64) {
 
 // Tests ReadAt method for failure cases.
 func TestFailReadAt(t *testing.T) {
-
+	digest := sha256.Sum256([]byte(sampleData1))
 	// test failed http respose.
-	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, failRoundTripper())
+	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, fmt.Sprintf("%x", digest), failRoundTripper())
 	respData := make([]byte, len(sampleData1))
 	_, err := r.ReadAt(respData, 0)
 	if err == nil || err == io.EOF {
@@ -278,13 +279,14 @@ func TestFailReadAt(t *testing.T) {
 }
 
 func checkBrokenBody(t *testing.T, allowMultiRange bool) {
+	digest := sha256.Sum256([]byte(sampleData1))
 	respData := make([]byte, len(sampleData1))
-	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, fmt.Sprintf("%x", digest), brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	if _, err := r.ReadAt(respData, 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken full body but err=%v (allowMultiRange=%v)", err, allowMultiRange)
 		return
 	}
-	r = makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	r = makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, fmt.Sprintf("%x", digest), brokenBodyRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	if _, err := r.ReadAt(respData[0:len(sampleData1)/2], 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken multipart body but err=%v (allowMultiRange=%v)", err, allowMultiRange)
 		return
@@ -292,7 +294,8 @@ func checkBrokenBody(t *testing.T, allowMultiRange bool) {
 }
 
 func checkBrokenHeader(t *testing.T, allowMultiRange bool) {
-	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, brokenHeaderRoundTripper(t, []byte(sampleData1), allowMultiRange))
+	digest := sha256.Sum256([]byte(sampleData1))
+	r := makeTestBlob(t, int64(len(sampleData1)), sampleChunkSize, defaultPrefetchChunkSize, fmt.Sprintf("%x", digest), brokenHeaderRoundTripper(t, []byte(sampleData1), allowMultiRange))
 	respData := make([]byte, len(sampleData1))
 	if _, err := r.ReadAt(respData[0:len(sampleData1)/2], 0); err == nil || err == io.EOF {
 		t.Errorf("must be fail for broken multipart header but err=%v (allowMultiRange=%v)", err, allowMultiRange)
@@ -558,7 +561,7 @@ func TestParallelDownloadingBehavior(t *testing.T) {
 	}
 }
 
-func makeTestBlob(t *testing.T, size int64, chunkSize int64, prefetchChunkSize int64, fn RoundTripFunc) *blob {
+func makeTestBlob(t *testing.T, size int64, chunkSize int64, prefetchChunkSize int64, digest string, fn RoundTripFunc) *blob {
 	var (
 		lastCheck     time.Time
 		checkInterval time.Duration
@@ -576,7 +579,8 @@ func makeTestBlob(t *testing.T, size int64, chunkSize int64, prefetchChunkSize i
 		lastCheck,
 		checkInterval,
 		&Resolver{},
-		time.Duration(defaultFetchTimeoutSec)*time.Second)
+		time.Duration(defaultFetchTimeoutSec)*time.Second,
+		digest)
 }
 
 func TestCheckInterval(t *testing.T) {
