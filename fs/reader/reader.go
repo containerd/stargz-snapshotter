@@ -506,7 +506,7 @@ type chunkData struct {
 func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (uintptr, error) {
 	var (
 		offset           int64
-		firstChunkOffset int64 = -1
+		firstChunkOffset int64
 		totalSize        int64
 	)
 
@@ -515,9 +515,6 @@ func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (u
 		chunkOffset, chunkSize, digestStr, ok := sf.fr.ChunkEntryForOffset(offset)
 		if !ok {
 			break
-		}
-		if firstChunkOffset == -1 {
-			firstChunkOffset = chunkOffset
 		}
 		chunks = append(chunks, chunkData{
 			offset:    chunkOffset,
@@ -571,10 +568,6 @@ func (sf *file) prefetchEntireFile(entireCacheID string, chunks []chunkData, tot
 		return fmt.Errorf("failed to create cache writer: %w", err)
 	}
 	defer w.Close()
-
-	if len(chunks) == 0 {
-		return nil
-	}
 
 	batchCount := (totalSize + bufferSize - 1) / bufferSize
 
