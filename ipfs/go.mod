@@ -8,7 +8,7 @@ require (
 	github.com/containerd/containerd/v2 v2.1.1
 	github.com/containerd/platforms v1.0.0-rc.1
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/multiformats/go-multiaddr v0.15.0
+	github.com/multiformats/go-multiaddr v0.16.0
 	github.com/opencontainers/image-spec v1.1.1
 )
 
