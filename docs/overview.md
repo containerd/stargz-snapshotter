@@ -1,22 +1,22 @@
 # Containerd Stargz Snapshotter Plugin Overview
 
-__Before get through this overview document, we recommend you to read [README](../README.md).__
+__Before reading this overview document, we recommend you read [README](../README.md).__
 
-Pulling image is one of the time-consuming steps in the container startup process.
-In containerd community, we have had a lot of discussions to address this issue as the following,
+Pulling images is one of the most time-consuming steps in the container startup process.
+In the containerd community, we have had a lot of discussions to address this issue at the following:
 
 - [#3731 Support remote snapshotter to speed up image pulling](https://github.com/containerd/containerd/issues/3731)
 - [#2968 Support `Prepare` for existing snapshots in Snapshotter interface](https://github.com/containerd/containerd/issues/2968)
 - [#2943 remote filesystem snapshotter](https://github.com/containerd/containerd/issues/2943)
 
-The solution for the fast image distribution is called *Remote Snapshotter* plugin.
-This prepares container's rootfs layers by directly mounting from remote stores instead of downloading and unpacking the entire image contents.
-The actual image contents can be fetched *lazily* so runtimes can startup containers before the entire image contents to be locally available.
-We call these remotely mounted layers as *remote snapshots*.
+The solution for fast image distribution is called *Remote Snapshotter* plugin.
+This prepares the container's rootfs layers by directly mounting from remote stores instead of downloading and unpacking the entire image contents.
+The actual image contents can be fetched *lazily* so runtimes can start containers before the entire image contents are locally available.
+We call these remotely mounted layers *remote snapshots*.
 
 *Stargz Snapshotter* is a remote snapshotter plugin implementation which supports standard compatible remote snapshots functionality.
 This snapshotter leverages [eStargz](/docs/stargz-estargz.md) image, which is lazily-pullable and still standard-compatible.
-Because of this compatibility, eStargz image can be pushed to and lazily pulled from [OCI](https://github.com/opencontainers/distribution-spec)/[Docker](https://docs.docker.com/registry/spec/api/) registries (e.g. ghcr.io).
+Because of this compatibility, eStargz images can be pushed to and lazily pulled from [OCI](https://github.com/opencontainers/distribution-spec)/[Docker](https://docs.docker.com/registry/spec/api/) registries (e.g. ghcr.io).
 Furthermore, images can run even on eStargz-agnostic runtimes (e.g. Docker).
 When you run a container image and it is formatted by eStargz, stargz snapshotter prepares container's rootfs layers as remote snapshots by mounting layers from the registry to the node, instead of pulling the entire image contents.
 
@@ -27,10 +27,10 @@ This document gives you a high-level overview of stargz snapshotter.
 ## Stargz Snapshotter proxy plugin
 
 Stargz snapshotter is implemented as a [proxy plugin](https://github.com/containerd/containerd/blob/04985039cede6aafbb7dfb3206c9c4d04e2f924d/PLUGINS.md#proxy-plugins) daemon (`containerd-stargz-grpc`) for containerd.
-When containerd starts a container, it queries the rootfs snapshots to stargz snapshotter daemon through an unix socket.
+When containerd starts a container, it queries the rootfs snapshots to stargz snapshotter daemon through a unix socket.
 This snapshotter remotely mounts queried eStargz layers from registries to the node and provides these mount points as remote snapshots to containerd.
 
-Containerd recognizes this plugin through an unix socket specified in the configuration file (e.g. `/etc/containerd/config.toml`).
+Containerd recognizes this plugin through a unix socket specified in the configuration file (e.g. `/etc/containerd/config.toml`).
 Stargz snapshotter can also be used through Kubernetes CRI by specifying the snapshotter name in the CRI plugin configuration.
 We assume that you are using containerd (> v1.4.2).
 
@@ -56,19 +56,19 @@ This repo contains [a Dockerfile as a KinD node image](/Dockerfile) which includ
 ## State directory
 
 Stargz snapshotter mounts eStargz layers from registries to the node using FUSE.
-The all files metadata in the image are preserved on the filesystem and files contents are fetched from registries on demand.
+Metadata for all files in the image are preserved on the container filesystem and the file contents are fetched from registries on demand.
 
-At the root of the filesystem, there is a *state directory* (`/.stargz-snapshotter`) for status monitoring for the filesystem.
+At the root of the container filesystem, there is a *state directory* (`/.stargz-snapshotter`) for status monitoring for the filesystem.
 This directory is hidden from `getdents(2)` so you can't see this with `ls -a /`.
 Instead, you can directly access the directory by specifying the path (`/.stargz-snapshotter`).
 
-State directory contains JSON-formatted metadata files for each layer.
+The state directory contains JSON-formatted metadata files for each layer.
 In the following example, metadata JSON files for overlayed 7 layers are visible.
-In each metadata JSON file, the following fields are contained,
+In each metadata JSON file, the following fields are contained:
 
 - `digest` contains the layer digest. This is the same value as that in the image's manifest.
 - `size` is the size bytes of the layer.
-- `fetchedSize` and `fetchedPercent` indicate how many bytes have been fetched for this layer. Stargz snapshotter aggressively downloads this layer in the background - unless configured otherwise - so these values gradually increase. When `fetchedPercent` reaches to `100` percents, this layer has been fully downloaded on the node and no further access will occur for reading files.
+- `fetchedSize` and `fetchedPercent` indicate how many bytes have been fetched for this layer. Stargz snapshotter aggressively downloads this layer in the background - unless configured otherwise - so these values gradually increase. When `fetchedPercent` reaches `100` percent, this layer has been fully downloaded on the node and no further access will occur for reading files.
 
 Note that the state directory layout and the metadata JSON structure are subject to change.
 
