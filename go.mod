@@ -18,7 +18,7 @@ require (
 	github.com/docker/go-metrics v0.0.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
-	github.com/hanwen/go-fuse/v2 v2.7.2
+	github.com/hanwen/go-fuse/v2 v2.8.0
 	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/klauspost/compress v1.18.0
 	github.com/moby/sys/mountinfo v0.7.2
@@ -28,7 +28,7 @@ require (
 	github.com/prometheus/client_golang v1.22.0
 	github.com/rs/xid v1.6.0
 	github.com/sirupsen/logrus v1.9.3
-	go.etcd.io/bbolt v1.4.0
+	go.etcd.io/bbolt v1.4.1
 	golang.org/x/sync v0.15.0
 	golang.org/x/sys v0.33.0
 	google.golang.org/grpc v1.73.0
