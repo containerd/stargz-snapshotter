@@ -22,8 +22,8 @@ require (
 	github.com/opencontainers/runtime-spec v1.2.1
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.6.0
-	github.com/urfave/cli/v2 v2.27.6
-	go.etcd.io/bbolt v1.4.0
+	github.com/urfave/cli/v2 v2.27.7
+	go.etcd.io/bbolt v1.4.1
 	golang.org/x/sync v0.15.0
 	golang.org/x/sys v0.33.0
 	google.golang.org/grpc v1.73.0
@@ -47,7 +47,7 @@ require (
 	github.com/containerd/typeurl/v2 v2.2.3 // indirect
 	github.com/containernetworking/cni v1.3.0 // indirect
 	github.com/containernetworking/plugins v1.7.1 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v28.2.2+incompatible // indirect
