@@ -149,6 +149,10 @@ jobs:
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - uses: actions/checkout@v4
+    - name: Disable AppArmor
+      run: |
+        sudo aa-teardown || true
+        sudo systemctl disable --now apparmor.service
     - name: Validate containerd through CRI
       env:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
