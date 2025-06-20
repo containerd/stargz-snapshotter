@@ -39,8 +39,8 @@ function cleanup {
 
 TEST_NODE_ID=$(docker run --rm -d --privileged \
                       -v /dev/fuse:/dev/fuse \
-                      --tmpfs=/var/lib/containerd:suid \
-                      --tmpfs=/var/lib/containerd-stargz-grpc:suid \
+                      -v containerd-data:/var/lib/containerd \
+                      -v containerd-stargz-data:/var/lib/containerd-stargz-grpc \
                       "${NODE_TEST_IMAGE_NAME}")
 echo "Running node on: ${TEST_NODE_ID}"
 FAIL=
