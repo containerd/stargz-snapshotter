@@ -508,6 +508,7 @@ func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (u
 		offset           int64
 		firstChunkOffset int64
 		totalSize        int64
+		hasLargeChunk    bool
 	)
 
 	var chunks []chunkData
@@ -515,6 +516,10 @@ func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (u
 		chunkOffset, chunkSize, digestStr, ok := sf.fr.ChunkEntryForOffset(offset)
 		if !ok {
 			break
+		}
+		// Check if any chunk size exceeds merge buffer size to avoid bounds out of range
+		if chunkSize > mergeBufferSize {
+			hasLargeChunk = true
 		}
 		chunks = append(chunks, chunkData{
 			offset:    chunkOffset,
@@ -530,8 +535,14 @@ func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (u
 	// cache.PassThrough() is necessary to take over files
 	r, err := sf.gr.cache.Get(id, cache.PassThrough())
 	if err != nil {
-		if err := sf.prefetchEntireFile(id, chunks, totalSize, mergeBufferSize, mergeWorkerCount); err != nil {
-			return 0, err
+		if hasLargeChunk {
+			if err := sf.prefetchEntireFileSequential(id); err != nil {
+				return 0, err
+			}
+		} else {
+			if err := sf.prefetchEntireFile(id, chunks, totalSize, mergeBufferSize, mergeWorkerCount); err != nil {
+				return 0, err
+			}
 		}
 
 		// just retry once to avoid exception stuck
@@ -551,6 +562,68 @@ func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (u
 	fd := file.Fd()
 	r.Close()
 	return fd, nil
+}
+
+// prefetchEntireFileSequential uses the legacy sequential approach for processing chunks
+// when chunk size exceeds merge buffer size to avoid slice bounds out of range panic
+func (sf *file) prefetchEntireFileSequential(entireCacheID string) error {
+	w, err := sf.gr.cache.Add(entireCacheID)
+	if err != nil {
+		return fmt.Errorf("failed to create cache writer: %w", err)
+	}
+	defer w.Close()
+
+	var offset int64
+
+	for {
+		chunkOffset, chunkSize, chunkDigestStr, ok := sf.fr.ChunkEntryForOffset(offset)
+		if !ok {
+			break
+		}
+
+		id := genID(sf.id, chunkOffset, chunkSize)
+		b := sf.gr.bufPool.Get().(*bytes.Buffer)
+		b.Reset()
+		b.Grow(int(chunkSize))
+		ip := b.Bytes()[:chunkSize]
+
+		if r, err := sf.gr.cache.Get(id); err == nil {
+			n, err := r.ReadAt(ip, 0)
+			if (err == nil || err == io.EOF) && int64(n) == chunkSize {
+				if _, err := w.Write(ip[:n]); err != nil {
+					r.Close()
+					sf.gr.putBuffer(b)
+					w.Abort()
+					return fmt.Errorf("failed to write cached data: %w", err)
+				}
+				offset = chunkOffset + int64(n)
+				r.Close()
+				sf.gr.putBuffer(b)
+				continue
+			}
+			r.Close()
+		}
+
+		if _, err := sf.fr.ReadAt(ip, chunkOffset); err != nil && err != io.EOF {
+			sf.gr.putBuffer(b)
+			w.Abort()
+			return fmt.Errorf("failed to read data: %w", err)
+		}
+		if err := sf.gr.verifyOneChunk(sf.id, ip, chunkDigestStr); err != nil {
+			sf.gr.putBuffer(b)
+			w.Abort()
+			return err
+		}
+		if _, err := w.Write(ip); err != nil {
+			sf.gr.putBuffer(b)
+			w.Abort()
+			return fmt.Errorf("failed to write fetched data: %w", err)
+		}
+		offset = chunkOffset + chunkSize
+		sf.gr.putBuffer(b)
+	}
+
+	return w.Commit()
 }
 
 type batchWorkerArgs struct {
