@@ -320,6 +320,19 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     echo "Diffing between two root filesystems(normal vs stargz snapshotter(containerd labels), IPFS rootfs)"
     diff --no-dereference -qr "${USR_NORMALSN_IPFS}/" "${USR_STARGZSN_CTD_IPFS}/"
 
+    # test pulling images via image ref
+    # stargz snapshotter
+    ctr-remote image pull --local --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
+    CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:22.04")
+    reboot_containerd
+    run_and_check_remote_snapshots ctr-remote i rpull --ipfs "${REGISTRY_HOST}/ubuntu:22.04"
+
+    # overlayfs snapshotter
+    ctr-remote image pull --local --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
+    CID=$(ctr-remote i ipfs-push --estargz=false "${REGISTRY_HOST}/ubuntu:22.04")
+    reboot_containerd
+    ctr-remote i rpull --snapshotter=overlayfs --ipfs "${REGISTRY_HOST}/ubuntu:22.04"
+
     kill_all ipfs
 fi
 
