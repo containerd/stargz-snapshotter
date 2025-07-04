@@ -60,6 +60,15 @@ if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
     SNAPSHOTTER_CONFIG_FILE=/etc/containerd/config.toml
 fi
 
+USE_FUSE_PASSTHROUGH="false"
+if [ "${FUSE_PASSTHROUGH:-}" != "" ] ; then
+    USE_FUSE_PASSTHROUGH="${FUSE_PASSTHROUGH}"
+    if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] && [ "${FUSE_PASSTHROUGH}" == "true" ] ; then
+        echo "builtin snapshotter + fuse passthrough test is unsupported"
+        exit 1
+    fi
+fi
+
 DOCKER_COMPOSE_YAML=$(mktemp)
 AUTH_DIR=$(mktemp -d)
 SS_ROOT_DIR=$(mktemp -d)
@@ -92,7 +101,10 @@ COPY ./containerd/config.containerd.toml /etc/containerd/config.toml
 COPY ./containerd/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
 COPY ./containerd/entrypoint.sh ./utils.sh /
 
-RUN sed -i 's/^metadata_store.*/metadata_store = "${USE_METADATA_STORE}"/g' "${SNAPSHOTTER_CONFIG_FILE}"
+RUN if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then \
+      sed -i 's/^metadata_store.*/metadata_store = "${USE_METADATA_STORE}"/g' "${SNAPSHOTTER_CONFIG_FILE}" && \
+      sed -i 's/^passthrough.*/passthrough = ${USE_FUSE_PASSTHROUGH}/g' "${SNAPSHOTTER_CONFIG_FILE}" ; \
+    fi
 
 ENV CONTAINERD_SNAPSHOTTER=""
 
