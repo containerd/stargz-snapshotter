@@ -119,6 +119,15 @@ if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
     SNAPSHOTTER_CONFIG_FILE=/etc/containerd/config.toml
 fi
 
+USE_FUSE_PASSTHROUGH="false"
+if [ "${FUSE_PASSTHROUGH:-}" != "" ] ; then
+    USE_FUSE_PASSTHROUGH="${FUSE_PASSTHROUGH}"
+    if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] && [ "${FUSE_PASSTHROUGH}" == "true" ] ; then
+        echo "builtin snapshotter + fuse passthrough test is unsupported"
+        exit 1
+    fi
+fi
+
 # Prepare the testing node
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
@@ -145,7 +154,11 @@ COPY ./test.conflist /etc/cni/net.d/test.conflist
 
 ${BUILTIN_HACK_INST}
 
-RUN sed -i 's/^metadata_store.*/metadata_store = "${USE_METADATA_STORE}"/g' "${SNAPSHOTTER_CONFIG_FILE}"
+RUN if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then \
+      sed -i '1imetadata_store = "${USE_METADATA_STORE}"' "${SNAPSHOTTER_CONFIG_FILE}" && \
+      echo '[fuse]' >> "${SNAPSHOTTER_CONFIG_FILE}" && \
+      echo "passthrough = ${USE_FUSE_PASSTHROUGH}" >> "${SNAPSHOTTER_CONFIG_FILE}" ; \
+    fi
 
 ENTRYPOINT [ "/usr/local/bin/entrypoint", "/sbin/init" ]
 EOF

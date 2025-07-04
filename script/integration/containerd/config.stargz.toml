@@ -1,6 +1,9 @@
 metadata_store = "memory"
 ipfs = true
 
+[fuse]
+passthrough = false
+
 [blob]
 check_always = true
 max_retries = 1
