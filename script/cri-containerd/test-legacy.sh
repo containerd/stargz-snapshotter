@@ -62,7 +62,11 @@ if [ "${FAIL}" == "" ] ; then
                 docker exec "${TEST_NODE_ID}" runc --version && \
                 docker exec "${TEST_NODE_ID}" containerd --version && \
                 echo "===============================" && \
-                docker exec -i "${TEST_NODE_ID}" /go/bin/critest --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${SNAPSHOTTER_SOCK}
+                # FIXME: remove the skip flag once kind adds support for the user namespace
+                # See also https://github.com/kubernetes-sigs/kind/issues/3436
+                docker exec -i "${TEST_NODE_ID}" /go/bin/critest \
+                       --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${SNAPSHOTTER_SOCK} \
+                       --ginkgo.skip 'runtime should support NamespaceMode_POD'
         ) ; then
         FAIL=true
     fi
