@@ -221,17 +221,16 @@ func runFuseManager(ctx context.Context) error {
 	return nil
 }
 
-func StartFuseManager(ctx context.Context, executable, address, fusestore, logLevel, logPath string) error {
+func StartFuseManager(ctx context.Context, executable, address, fusestore, logLevel, logPath string) (newlyStarted bool, err error) {
 	// if socket exists, do not start it
 	if _, err := os.Stat(address); err == nil {
-		return nil
+		return false, nil
 	} else if !os.IsNotExist(err) {
-		return err
+		return false, err
 	}
 
 	if _, err := os.Stat(executable); err != nil {
-		log.G(ctx).WithError(err).Errorf("failed to stat fusemanager binary: %s", executable)
-		return err
+		return false, fmt.Errorf("failed to stat fusemanager binary: %q", executable)
 	}
 
 	args := []string{
@@ -244,12 +243,12 @@ func StartFuseManager(ctx context.Context, executable, address, fusestore, logLe
 
 	cmd := exec.Command(executable, args...)
 	if err := cmd.Start(); err != nil {
-		return err
+		return false, err
 	}
 
 	if err := cmd.Wait(); err != nil {
-		return err
+		return false, err
 	}
 
-	return nil
+	return true, nil
 }
