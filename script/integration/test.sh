@@ -81,7 +81,7 @@ cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${INTEGRATION_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
-    apt-get --no-install-recommends install -y iptables jq && \
+    apt-get --no-install-recommends install -y iptables jq netcat && \
     go install github.com/google/crfs/stargz/stargzify@71d77da419c90be7b05d12e59945ac7a8c94a543 && \
     wget https://dist.ipfs.io/go-ipfs/${IPFS_VERSION}/go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
     tar -xvzf go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
