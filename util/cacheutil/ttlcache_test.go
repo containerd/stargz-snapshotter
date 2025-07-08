@@ -78,12 +78,12 @@ func TestTTLRemove(t *testing.T) {
 		t.Fatalf("no content must be evicted after remove")
 	}
 
-	done1()
+	done1(false)
 	if len(evicted) != 0 {
 		t.Fatalf("no content must be evicted until all reference are discarded")
 	}
 
-	done12()
+	done12(false)
 	if len(evicted) != 1 {
 		t.Fatalf("content must be evicted")
 	}
@@ -101,7 +101,7 @@ func TestTTLRemoveOverwritten(t *testing.T) {
 	}
 	key1, value1 := "key1", "abcd1"
 	_, done1, _ := c.Add(key1, value1)
-	done1()
+	done1(false)
 	c.Remove(key1) // remove key1 as soon as possible
 
 	// add another content with a new key
@@ -120,8 +120,8 @@ func TestTTLRemoveOverwritten(t *testing.T) {
 	}
 
 	time.Sleep(2 * time.Second)
-	done122()
-	done12()
+	done122(false)
+	done12(false)
 	// spent 4 sec since the new key1 was added. This should be expierd.
 	if _, _, ok := c.Get(key1); ok {
 		t.Fatalf("%q must be expierd but remaining", key1)
@@ -143,7 +143,7 @@ func TestTTLEviction(t *testing.T) {
 	key1, value1 := "key1", "abcd1"
 	key2, value2 := "key2", "abcd2"
 	_, done1, _ := c.Add(key1, value1)
-	done1() // evict key1 on expiering ttl
+	done1(false) // evict key1 on expiering ttl
 	_, done2, _ := c.Add(key2, value2)
 	_, done22, _ := c.Get(key2) // hold reference of key2 to prevent eviction
 	time.Sleep(3 * time.Second) // wait until elements reach ttl
@@ -157,16 +157,16 @@ func TestTTLEviction(t *testing.T) {
 	}
 	evictedMu.Unlock()
 
-	done2() // effective
-	done2() // ignored
-	done2() // ignored
+	done2(false) // effective
+	done2(false) // ignored
+	done2(false) // ignored
 	evictedMu.Lock()
 	if len(evicted) != 1 {
 		t.Fatalf("only 1 content must be evicted")
 	}
 	evictedMu.Unlock()
 
-	done22()
+	done22(false)
 	evictedMu.Lock()
 	if len(evicted) != 2 {
 		t.Fatalf("2 contents must be evicted")
@@ -175,4 +175,30 @@ func TestTTLEviction(t *testing.T) {
 		t.Fatalf("2nd content %q must be evicted but got %q", key2, evicted[1])
 	}
 	evictedMu.Unlock()
+}
+
+// TestTTLQuickDone tests the case where "done" with the explicit evict
+// is called before TTL
+func TestTTLQuickDone(t *testing.T) {
+	var evicted []string
+	c := NewTTLCache(time.Hour)
+	c.OnEvicted = func(key string, value interface{}) {
+		evicted = append(evicted, key)
+	}
+	key1, value1 := "key1", "abcd1"
+	_, done1, _ := c.Add(key1, value1)
+	_, done12, _ := c.Get(key1)
+
+	done1(false)
+	if len(evicted) != 0 {
+		t.Fatalf("no content must be evicted until all reference are discarded")
+	}
+
+	done12(true)
+	if len(evicted) != 1 {
+		t.Fatalf("content must be evicted on an explicit evict before TTL")
+	}
+	if evicted[0] != key1 {
+		t.Fatalf("1st content %q must be evicted but got %q", key1, evicted[0])
+	}
 }

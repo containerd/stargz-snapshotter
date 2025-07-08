@@ -217,7 +217,7 @@ func testPrefetch(t *testing.T, factory metadata.Store) {
 						backgroundTaskManager: task.NewBackgroundTaskManager(10, 5*time.Second),
 					},
 					ocispec.Descriptor{Digest: testStateLayerDigest},
-					&blobRef{blob, func() {}},
+					&blobRef{blob, func(bool) {}},
 					vr,
 					passThroughConfig{
 						enable: false,
