@@ -91,4 +91,5 @@ func (l *breakableLayer) Refresh(ctx context.Context, hosts source.RegistryHosts
 	}
 	return nil
 }
-func (l *breakableLayer) Done() {}
+func (l *breakableLayer) Done()        {}
+func (l *breakableLayer) Close() error { return nil }

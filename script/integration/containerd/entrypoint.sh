@@ -14,7 +14,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-set -euo pipefail
+set -eux -o pipefail
 
 # NOTE: The entire contents of containerd/stargz-snapshotter are located in
 # the testing container so utils.sh is visible from this script during runtime.
@@ -93,7 +93,8 @@ function retry {
 
 function kill_all {
     if [ "${1}" != "" ] ; then
-        ps aux | grep "${1}" | grep -v grep | grep -v $(basename ${0}) | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill -9 {} || true
+        TARGET_SIGNAL="-s ${2:-SIGKILL}"
+        ps aux | grep "${1}" | grep -v grep | grep -v $(basename ${0}) | sed -E 's/ +/ /g' | cut -f 2 -d ' ' | xargs -I{} kill ${TARGET_SIGNAL} {} || true
     fi
 }
 
@@ -481,5 +482,38 @@ ctr-remote --namespace=dummy images rpull --user "${DUMMYUSER}:${DUMMYPASS}" \
 mv /etc/containerd-stargz-grpc/config.toml /etc/containerd-stargz-grpc/config.toml_rm
 reboot_containerd
 mv /etc/containerd-stargz-grpc/config.toml_rm /etc/containerd-stargz-grpc/config.toml
+
+############
+# Test graceful restart
+
+reboot_containerd
+if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
+    # Snapshots should be available even after restarting the snapshotter with a signal
+    run_and_check_remote_snapshots ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
+    ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}/alpine:esgz" test echo hi
+
+    TARGET_SIGNALS=(SIGINT)
+    for S in "${TARGET_SIGNALS[@]}" ; do
+        # Kill the snapshotter
+        kill_all containerd-stargz-grpc "$S"
+
+        # wait until stargz snapshotter is finished
+        while ps aux | grep -v grep | grep containerd-stargz-grpc ; do sleep 3 ; done
+
+        # Check if resource are cleaned up
+        TARGET_DIRS=("${REMOTE_SNAPSHOTTER_ROOT}stargz/httpcache/" "${REMOTE_SNAPSHOTTER_ROOT}stargz/fscache/")
+        for D in "${TARGET_DIRS[@]}" ; do
+            test -z "$( ls -A $D )"
+        done
+
+        # Restart the snapshotter without additional operation
+        containerd-stargz-grpc --log-level=debug --address="${REMOTE_SNAPSHOTTER_SOCKET}" 2>&1 | tee -a "${LOG_FILE}" & # Dump all log
+        retry nc -z -U "${REMOTE_SNAPSHOTTER_SOCKET}"
+        sleep 3 # FIXME: Additional wait; sometimes snapshotter is still unavailable after the socket ready
+
+        # Check if the snapshotter is still usable
+        ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}/alpine:esgz" test echo hi
+    done
+fi
 
 exit 0

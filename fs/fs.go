@@ -450,8 +450,10 @@ func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
 		fs.layerMu.Unlock()
 		return fmt.Errorf("specified path %q isn't a mountpoint", mountpoint)
 	}
-	delete(fs.layer, mountpoint) // unregisters the corresponding layer
-	l.Done()
+	delete(fs.layer, mountpoint)      // unregisters the corresponding layer
+	if err := l.Close(); err != nil { // Cleanup associated resources
+		log.G(ctx).WithError(err).Warn("failed to release resources of the layer")
+	}
 	fs.layerMu.Unlock()
 	fs.metricsController.Remove(mountpoint)
 

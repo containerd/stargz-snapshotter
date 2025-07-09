@@ -433,15 +433,6 @@ func (o *snapshotter) cleanup(ctx context.Context, cleanupCommitted bool) error 
 	return nil
 }
 
-func (o *snapshotter) cleanupMetadataDB() error {
-	metadataDBPath := filepath.Join(o.root, "metadata.db")
-	err := os.Remove(metadataDBPath)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (o *snapshotter) cleanupDirectories(ctx context.Context, cleanupCommitted bool) ([]string, error) {
 	// Get a write transaction to ensure no other write transaction can be entered
 	// while the cleanup is scanning.
@@ -676,10 +667,6 @@ func (o *snapshotter) Close() error {
 		log.G(ctx).WithError(err).Warn("failed to cleanup")
 	}
 
-	if err := o.cleanupMetadataDB(); err != nil {
-		log.G(ctx).WithError(err).Warn("failed to cleanup metadata.db")
-	}
-
 	return o.ms.Close()
 }
 
@@ -774,6 +761,24 @@ func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
 		return err
 	}
 	for _, info := range task {
+		// First, prepare the snapshot directory
+		if err := func() error {
+			ctx, t, err := o.ms.TransactionContext(ctx, false)
+			if err != nil {
+				return err
+			}
+			defer t.Rollback()
+			id, _, _, err := storage.GetInfo(ctx, info.Name)
+			if err != nil {
+				return err
+			}
+			if err := os.Mkdir(filepath.Join(o.root, "snapshots", id), 0700); err != nil {
+				return err
+			}
+			return os.Mkdir(o.upperPath(id), 0755)
+		}(); err != nil {
+			return fmt.Errorf("failed to create remote snapshot directory: %s: %w", info.Name, err)
+		}
 		if err := o.prepareRemoteSnapshot(ctx, info.Name, info.Labels); err != nil {
 			if o.allowInvalidMountsOnRestart {
 				log.G(ctx).WithError(err).Warnf("failed to restore remote snapshot %s; remove this snapshot manually", info.Name)

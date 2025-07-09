@@ -110,6 +110,10 @@ type Layer interface {
 	// Done releases the reference to this layer. The resources related to this layer will be
 	// discarded sooner or later. Queries after calling this function won't be serviced.
 	Done()
+
+	// Close is the same as Done. But this evicts the resources related to this Layer immediately.
+	// This can be used for cleaning up resources on unmount.
+	Close() error
 }
 
 // Info is the current status of a layer.
@@ -261,7 +265,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 			return &layerRef{l, done}, nil
 		}
 		// Cached layer is invalid
-		done()
+		done(true)
 		r.layerCacheMu.Lock()
 		r.layerCache.Remove(name)
 		r.layerCacheMu.Unlock()
@@ -276,7 +280,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	}
 	defer func() {
 		if retErr != nil {
-			blobR.done()
+			blobR.done(true)
 		}
 	}()
 
@@ -356,7 +360,7 @@ func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, 
 			return &blobRef{blob, done}, nil
 		}
 		// invalid blob. discard this.
-		done()
+		done(true)
 		r.blobCacheMu.Lock()
 		r.blobCache.Remove(name)
 		r.blobCacheMu.Unlock()
@@ -592,7 +596,12 @@ func (l *layer) backgroundFetch(ctx context.Context) error {
 }
 
 func (l *layerRef) Done() {
-	l.done()
+	l.done(false) // leave chances to reuse this
+}
+
+func (l *layerRef) Close() error {
+	l.done(true) // evict this from the cache
+	return nil
 }
 
 func (l *layer) RootNode(baseInode uint32) (fusefs.InodeEmbedder, error) {
@@ -616,7 +625,7 @@ func (l *layer) close() error {
 		return nil
 	}
 	l.closed = true
-	defer l.blob.done() // Close reader first, then close the blob
+	defer l.blob.done(true) // Close reader first, then close the blob
 	l.verifiableReader.Close()
 	if l.r != nil {
 		return l.r.Close()
@@ -636,7 +645,7 @@ func (l *layer) isClosed() bool {
 // to this blob will be discarded.
 type blobRef struct {
 	remote.Blob
-	done func()
+	done func(bool)
 }
 
 // layerRef is a reference to the layer in the cache. Calling `Done` or `done` decreases the
@@ -644,7 +653,7 @@ type blobRef struct {
 // cache, resources bound to this layer will be discarded.
 type layerRef struct {
 	*layer
-	done func()
+	done func(bool)
 }
 
 func newWaiter() *waiter {
