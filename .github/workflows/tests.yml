@@ -55,6 +55,7 @@ jobs:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
+        fuse-passthrough: ["true", "false"]
         exclude:
         - buildargs: ""
           builtin: "true"
@@ -62,6 +63,12 @@ jobs:
           builtin: "true"
         - metadata-store: "db"
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - fuse-passthrough: "true"
+          builtin: "true"
+        - fuse-passthrough: "true"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - fuse-passthrough: "true"
+          metadata-store: "db"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -71,6 +78,7 @@ jobs:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
+        FUSE_PASSTHROUGH: ${{ matrix.fuse-passthrough }}
       run: make integration
 
   test-optimize:
@@ -140,6 +148,7 @@ jobs:
         buildargs: ["", "--build-arg=CONTAINERD_VERSION=main"] # released version & main version
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
+        fuse-passthrough: ["true", "false"]
         exclude:
         - buildargs: ""
           builtin: "true"
@@ -147,6 +156,12 @@ jobs:
           builtin: "true"
         - metadata-store: "db"
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - fuse-passthrough: "true"
+          builtin: "true"
+        - fuse-passthrough: "true"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - fuse-passthrough: "true"
+          metadata-store: "db"
     steps:
     - uses: actions/checkout@v4
     - name: Validate containerd through CRI
@@ -154,6 +169,7 @@ jobs:
         DOCKER_BUILD_ARGS: ${{ matrix.buildargs }}
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
+        FUSE_PASSTHROUGH: ${{ matrix.fuse-passthrough }}
       run: make test-cri-containerd
 
   test-cri-cri-o:
