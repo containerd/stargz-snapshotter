@@ -106,29 +106,34 @@ To avoid this, we use a fuse daemon called the fuse manager to handle filesystem
 
 You can enable the fuse manager by adding the flag `--detach-fuse-manager=true` to the stargz snapshotter.
 
-### Upgrading Fuse Manager
+## Killing and restarting Stargz Snapshotter
 
-When upgrading the fuse manager, it's recommended to follow these steps:
+Stargz Snapshotter works as a FUSE server for the snapshots.
+When you stop Stargz Sanpshotter on the node, it takes the following behaviour depending on the configuration.
 
-1. Stop the containers using the stargz snapshotter.
-2. Stop the fuse manager and containerd-stargz-grpc process.
-3. Upgrade the your binary.
-4. Restart the containerd-stargz-grpc process.
+### FUSE manager mode is disabled
+
+killing containerd-stargz-grpc will result in unmounting all snapshot mounts managed by Stargz Snapshotter.
+When containerd-stargz-grpc is restarted, all those snapshots are mounted again by lazy pulling all layers.
+If the snapshotter fails to mount one of the snapshots (e.g. because of lazy pulling failure) during this step, the behaviour differs depending on `allow_invalid_mounts_on_restart` flag in the config TOML.
+
+- `allow_invalid_mounts_on_restart = true`: containerd-stargz-grpc leaves the failed snapshots as empty directories. The user needs to manually remove those snapshot via containerd (e.g. using `ctr snapshot rm` command). The name of those snapshots can be seen in the log with `failed to restore remote snapshot` message.
+
+- `allow_invalid_mounts_on_restart = false`: containerd-stargz-grpc doesn't start. The user needs to manually recover this (e.g. by wiping snapshotter and containerd state).
+
+### FUSE manager mode is enabled
+
+Killing containerd-stargz-grpc using non-SIGINT signal (e.g. using SIGTERM) doesn't affect the snapshot mounts because the FUSE manager process detached from containerd-stargz-grpc keeps on serving FUSE mounts to the kernel.
+This is useful when you reload the updated config TOML to Stargz Snapshotter without unmounting existing snapshots.
+
+FUSE manager serves FUSE mounts of the snapshots so if you kill this process, all snapshot mounts will be unavailable.
+When stopping FUSE manager for upgrading the binary or restarting the node, you can use SIGINT signal to trigger the graceful exit as shown in the following steps.
+
+1. Stop containers that use Stargz Snapshotter. Stopping FUSE manager makes all snapshot mounts unavailable so containers can't keep working.
+2. Stop containerd-stargz-grpc process using SIGINT. This signal triggers unmounting of all snapshots and cleaning up of the associated resources.
+3. Kill the FUSE manager process (`stargz-fuse-manager`)
+4. Restart the containerd-stargz-grpc process. This restores all snapshot mounts by lazy pulling them. `allow_invalid_mounts_on_restart` (described in the above) can still be used for controlling the behaviour of the error cases.
 5. Restart the containers.
-
-This ensures a clean upgrade without impacting running containers.
-
-### Important Considerations
-
-Before restarting the `containerd-stargz-grpc` process, it is essential to consider the state of any running containers.
-
-1. **When to Use SIGKILL** :
-
-If there are running containers, it is crucial to terminate the `containerd-stargz-grpc` process using `SIGKILL`. This approach prevents the normal shutdown sequence from attempting to clean up the mount points of the running containers, which could disrupt their availability. By using `SIGKILL`, you ensure that the process is forcefully terminated without affecting the ongoing operations of the containers.
-
-2. **When to Use SIGTERM** :
-
-If there are no running containers, you should use `SIGTERM` to terminate the `containerd-stargz-grpc` process. This allows the process to follow its normal shutdown sequence, ensuring that it properly cleans up resources and mount points.
 
 ## Registry-related configuration
 

@@ -165,7 +165,7 @@ func main() {
 		if !filepath.IsAbs(fmAddr) {
 			log.G(ctx).WithError(err).Fatalf("fuse manager address must be an absolute path: %s", fmAddr)
 		}
-		err := fusemanager.StartFuseManager(ctx, fmPath, fmAddr, filepath.Join(*rootDir, "fusestore.db"), *logLevel, filepath.Join(*rootDir, "stargz-fuse-manager.log"))
+		managerNewlyStarted, err := fusemanager.StartFuseManager(ctx, fmPath, fmAddr, filepath.Join(*rootDir, "fusestore.db"), *logLevel, filepath.Join(*rootDir, "stargz-fuse-manager.log"))
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to start fusemanager")
 		}
@@ -181,7 +181,15 @@ func main() {
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure fusemanager")
 		}
-		rs, err = snbase.NewSnapshotter(ctx, filepath.Join(*rootDir, "snapshotter"), fs, snbase.AsynchronousRemove, snbase.SetDetachFlag)
+		flags := []snbase.Opt{snbase.AsynchronousRemove}
+		// "managerNewlyStarted" being true indicates that the FUSE manager is newly started. To
+		// fully recover the snapshotter and the FUSE manager's state, we need to restore
+		// all snapshot mounts. If managerNewlyStarted is false, the existing FUSE manager maintains
+		// snapshot mounts so we don't need to restore them.
+		if !managerNewlyStarted {
+			flags = append(flags, snbase.NoRestore)
+		}
+		rs, err = snbase.NewSnapshotter(ctx, filepath.Join(*rootDir, "snapshotter"), fs, flags...)
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
 		}
@@ -213,7 +221,18 @@ func main() {
 		log.G(ctx).WithError(err).Fatalf("failed to serve snapshotter")
 	}
 
-	if cleanup {
+	// When FUSE manager is disabled, FUSE servers are goroutines in the
+	// contaienrd-stargz-grpc process. So killing containerd-stargz-grpc will
+	// result in all FUSE mount becoming unavailable with leaving all resources
+	// (e.g. temporary cache) on the node. To ensure graceful shutdown, we
+	// should always cleanup mounts and associated resources here.
+	//
+	// When FUSE manager is enabled, those mounts are still under the control by
+	// the FUSE manager so we need to avoid cleaning them up unless explicitly
+	// commanded via SIGINT. The user can use SIGINT to gracefully killing the FUSE
+	// manager before rebooting the node for ensuring that the all snapshots are
+	// unmounted with cleaning up associated temporary resources.
+	if cleanup || !*detachFuseManager {
 		log.G(ctx).Debug("Closing the snapshotter")
 		rs.Close()
 	}

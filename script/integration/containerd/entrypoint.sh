@@ -492,7 +492,7 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     run_and_check_remote_snapshots ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
     ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}/alpine:esgz" test echo hi
 
-    TARGET_SIGNALS=(SIGINT)
+    TARGET_SIGNALS=(SIGINT SIGTERM)
     for S in "${TARGET_SIGNALS[@]}" ; do
         # Kill the snapshotter
         kill_all containerd-stargz-grpc "$S"
