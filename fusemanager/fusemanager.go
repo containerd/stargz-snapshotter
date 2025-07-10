@@ -201,19 +201,24 @@ func runFuseManager(ctx context.Context) error {
 
 	pb.RegisterStargzFuseManagerServiceServer(server, fm)
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, unix.SIGINT, unix.SIGTERM)
+	errCh := make(chan error, 1)
 	go func() {
-		sig := <-sigCh
-		log.G(ctx).Infof("Got %v", sig)
-		fm.server.Stop()
-		os.Remove(address)
+		if err := server.Serve(l); err != nil {
+			errCh <- fmt.Errorf("error on serving via socket %q: %w", address, err)
+		}
 	}()
 
-	if err = server.Serve(l); err != nil {
-		return fmt.Errorf("failed to serve fuse manager: %w", err)
+	var s os.Signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, unix.SIGINT, unix.SIGTERM)
+	select {
+	case s = <-sigCh:
+		log.G(ctx).Infof("Got %v", s)
+	case err := <-errCh:
+		log.G(ctx).WithError(err).Warnf("error during running the server")
 	}
 
+	server.Stop()
 	if err = fm.Close(ctx); err != nil {
 		return fmt.Errorf("failed to close fuse manager: %w", err)
 	}
