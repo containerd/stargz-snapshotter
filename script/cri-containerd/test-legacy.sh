@@ -19,7 +19,10 @@ set -euo pipefail
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
-SNAPSHOTTER_SOCK=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock
+IMAGE_ENDPOINT_SOCK=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock
+if [ "${FUSE_MANAGER:-}" == "true" ] ; then
+    IMAGE_ENDPOINT_SOCK=unix:///run/containerd-stargz-grpc/cri.sock
+fi
 
 source "${CONTEXT}/const.sh"
 source "${REPO}/script/util/utils.sh"
@@ -65,7 +68,7 @@ if [ "${FAIL}" == "" ] ; then
                 # FIXME: remove the skip flag once kind adds support for the user namespace
                 # See also https://github.com/kubernetes-sigs/kind/issues/3436
                 docker exec -i "${TEST_NODE_ID}" /go/bin/critest \
-                       --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${SNAPSHOTTER_SOCK} \
+                       --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${IMAGE_ENDPOINT_SOCK} \
                        --ginkgo.skip 'runtime should support NamespaceMode_POD'
         ) ; then
         FAIL=true

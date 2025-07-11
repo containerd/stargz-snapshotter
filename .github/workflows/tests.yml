@@ -56,6 +56,7 @@ jobs:
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         fuse-passthrough: ["true", "false"]
+        fuse-manager: ["true", "false"]
         exclude:
         - buildargs: ""
           builtin: "true"
@@ -69,6 +70,10 @@ jobs:
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - fuse-passthrough: "true"
           metadata-store: "db"
+        - fuse-manager: "true"
+          builtin: "true"
+        - fuse-manager: "true"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -79,6 +84,7 @@ jobs:
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
         FUSE_PASSTHROUGH: ${{ matrix.fuse-passthrough }}
+        FUSE_MANAGER: ${{ matrix.fuse-manager }}
       run: make integration
 
   test-optimize:
@@ -149,6 +155,7 @@ jobs:
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         fuse-passthrough: ["true", "false"]
+        fuse-manager: ["true", "false"]
         exclude:
         - buildargs: ""
           builtin: "true"
@@ -162,6 +169,10 @@ jobs:
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - fuse-passthrough: "true"
           metadata-store: "db"
+        - fuse-manager: "true"
+          builtin: "true"
+        - fuse-manager: "true"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
     steps:
     - uses: actions/checkout@v4
     - name: Validate containerd through CRI
@@ -170,6 +181,7 @@ jobs:
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
         FUSE_PASSTHROUGH: ${{ matrix.fuse-passthrough }}
+        FUSE_MANAGER: ${{ matrix.fuse-manager }}
       run: make test-cri-containerd
 
   test-cri-cri-o:
