@@ -34,6 +34,7 @@ import (
 type Config struct {
 	EnableIpfs    bool
 	MetadataStore string
+	OpenBoltDB    func(string) (*bolt.DB, error)
 }
 
 const (
@@ -62,12 +63,10 @@ func getMetadataStore(rootDir string, config *Config) (metadata.Store, error) {
 	case "", memoryMetadataType:
 		return memorymetadata.NewReader, nil
 	case dbMetadataType:
-		bOpts := bolt.Options{
-			NoFreelistSync:  true,
-			InitialMmapSize: 64 * 1024 * 1024,
-			FreelistType:    bolt.FreelistMapType,
+		if config.OpenBoltDB == nil {
+			return nil, fmt.Errorf("bolt DB is not configured")
 		}
-		db, err := bolt.Open(filepath.Join(rootDir, "metadata.db"), 0600, &bOpts)
+		db, err := config.OpenBoltDB(filepath.Join(rootDir, "metadata.db"))
 		if err != nil {
 			return nil, err
 		}

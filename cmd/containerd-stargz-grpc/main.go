@@ -44,6 +44,7 @@ import (
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	metrics "github.com/docker/go-metrics"
 	"github.com/pelletier/go-toml"
+	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 )
@@ -210,6 +211,13 @@ func main() {
 		fsConfig := fsopts.Config{
 			EnableIpfs:    config.IPFS,
 			MetadataStore: config.MetadataStore,
+			OpenBoltDB: func(p string) (*bolt.DB, error) {
+				return bolt.Open(p, 0600, &bolt.Options{
+					NoFreelistSync:  true,
+					InitialMmapSize: 64 * 1024 * 1024,
+					FreelistType:    bolt.FreelistMapType,
+				})
+			},
 		}
 		fsOpts, err := fsopts.ConfigFsOpts(ctx, *rootDir, &fsConfig)
 		if err != nil {
