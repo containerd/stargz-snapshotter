@@ -50,10 +50,11 @@ type Config struct {
 }
 
 type ConfigContext struct {
-	Ctx     context.Context
-	Config  *Config
-	RootDir string
-	Server  *grpc.Server
+	Ctx        context.Context
+	Config     *Config
+	RootDir    string
+	Server     *grpc.Server
+	OpenBoltDB func(string) (*bolt.DB, error)
 }
 
 var (
@@ -67,6 +68,36 @@ func RegisterConfigFunc(f ConfigFunc) {
 	configMu.Lock()
 	defer configMu.Unlock()
 	configFuncs = append(configFuncs, f)
+}
+
+// Opens bolt DB with avoiding opening the same DB multiple times
+type dbOpener struct {
+	mu      sync.Mutex
+	handles map[string]*bolt.DB
+}
+
+func (o *dbOpener) openBoltDB(p string) (*bolt.DB, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if db, ok := o.handles[p]; ok && db != nil {
+		// we opened it before. avoid trying to open this again.
+		return db, nil
+	}
+
+	db, err := bolt.Open(p, 0600, &bolt.Options{
+		NoFreelistSync:  true,
+		InitialMmapSize: 64 * 1024 * 1024,
+		FreelistType:    bolt.FreelistMapType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if o.handles == nil {
+		o.handles = make(map[string]*bolt.DB)
+	}
+	o.handles[p] = db
+	return db, nil
 }
 
 type Server struct {
@@ -90,6 +121,8 @@ type Server struct {
 	ms    *bolt.DB
 
 	fuseStoreAddr string
+
+	dbOpener *dbOpener
 }
 
 func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Server, fuseStoreAddr string) (*Server, error) {
@@ -110,6 +143,7 @@ func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Ser
 		listener:      listener,
 		server:        server,
 		fuseStoreAddr: fuseStoreAddr,
+		dbOpener:      &dbOpener{},
 	}
 
 	return fm, nil
@@ -144,10 +178,11 @@ func (fm *Server) Init(ctx context.Context, req *pb.InitRequest) (*pb.Response, 
 	fm.config = config
 
 	cc := &ConfigContext{
-		Ctx:     ctx,
-		Config:  fm.config,
-		RootDir: fm.root,
-		Server:  fm.server,
+		Ctx:        ctx,
+		Config:     fm.config,
+		RootDir:    fm.root,
+		Server:     fm.server,
+		OpenBoltDB: fm.dbOpener.openBoltDB,
 	}
 
 	var opts []service.Option

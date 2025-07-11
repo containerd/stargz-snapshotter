@@ -28,6 +28,7 @@ func init() {
 		fsConfig := fsopts.Config{
 			EnableIpfs:    cc.Config.IPFS,
 			MetadataStore: cc.Config.MetadataStore,
+			OpenBoltDB:    cc.OpenBoltDB,
 		}
 		fsOpts, err := fsopts.ConfigFsOpts(cc.Ctx, cc.RootDir, &fsConfig)
 		if err != nil {
