@@ -146,13 +146,13 @@ function optimize {
     local DST="${2}"
     local PLAINHTTP="${3}"
     local OPTS=${@:4}
-    ctr-remote image pull --local -u "${DUMMYUSER}:${DUMMYPASS}" "${SRC}"
+    ctr-remote image pull -u "${DUMMYUSER}:${DUMMYPASS}" "${SRC}"
     ctr-remote image optimize ${OPTS} --oci "${SRC}" "${DST}"
     PUSHOPTS=
     if [ "${PLAINHTTP}" == "true" ] ; then
         PUSHOPTS=--plain-http
     fi
-    ctr-remote image push --local ${PUSHOPTS} -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
+    ctr-remote image push ${PUSHOPTS} -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
 }
 
 function convert {
@@ -164,17 +164,17 @@ function convert {
     if [ "${PLAINHTTP}" == "true" ] ; then
         PUSHOPTS=--plain-http
     fi
-    ctr-remote image pull --local -u "${DUMMYUSER}:${DUMMYPASS}" "${SRC}"
+    ctr-remote image pull -u "${DUMMYUSER}:${DUMMYPASS}" "${SRC}"
     ctr-remote image convert ${OPTS} --oci "${SRC}" "${DST}"
-    ctr-remote image push --local ${PUSHOPTS} -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
+    ctr-remote image push ${PUSHOPTS} -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
 }
 
 function copy {
     local SRC="${1}"
     local DST="${2}"
-    ctr-remote image pull --local --all-platforms "${SRC}"
-    ctr-remote image tag --local "${SRC}" "${DST}"
-    ctr-remote image push --local -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
+    ctr-remote image pull --all-platforms "${SRC}"
+    ctr-remote image tag "${SRC}" "${DST}"
+    ctr-remote image push -u "${DUMMYUSER}:${DUMMYPASS}" "${DST}"
 }
 
 function copy_out_dir {
@@ -192,6 +192,11 @@ function copy_out_dir {
     rm "${TMPFILE}"
 }
 
+RPULL_COMMAND="rpull"
+if [ "${USE_TRANSFER_SERVICE}" == "true" ] ; then
+    RPULL_COMMAND="pull --snapshotter=stargz"
+fi
+
 function dump_dir {
     local IMAGE="${1}"
     local TARGETDIR="${2}"
@@ -201,9 +206,9 @@ function dump_dir {
 
     reboot_containerd
     if [ "${REMOTE}" == "true" ] ; then
-        run_and_check_remote_snapshots ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${IMAGE}"
+        run_and_check_remote_snapshots ctr-remote images ${RPULL_COMMAND} --user "${DUMMYUSER}:${DUMMYPASS}" "${IMAGE}"
     else
-        ctr-remote image pull --local --snapshotter="${SNAPSHOTTER}" --user "${DUMMYUSER}:${DUMMYPASS}" "${IMAGE}"
+        ctr-remote image pull --snapshotter="${SNAPSHOTTER}" --user "${DUMMYUSER}:${DUMMYPASS}" "${IMAGE}"
     fi
     copy_out_dir "${IMAGE}" "${TARGETDIR}" "${DEST}" "${SNAPSHOTTER}"
 }
@@ -244,6 +249,8 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
   [proxy_plugins.stargz]
     type = "snapshot"
     address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+  [proxy_plugins.stargz.exports]
+    enable_remote_snapshot_annotations = "true"
 EOF
 fi
 
@@ -277,9 +284,9 @@ optimize "${REGISTRY_HOST}/alpine:3.15.3" "${REGISTRY_ALT_HOST}:5000/alpine:esgz
 # TODO: support external TOC suffix other than "-esgztoc"
 optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz-50000" "false" --estargz-min-chunk-size=50000
 optimize "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz-ex" "false" --estargz-external-toc
-ctr-remote image push --local -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:esgz-ex-esgztoc"
+ctr-remote image push -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:esgz-ex-esgztoc"
 convert "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id" "false" --estargz --estargz-external-toc --estargz-keep-diff-id
-ctr-remote image push --local -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id-esgztoc"
+ctr-remote image push -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id-esgztoc"
 
 if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
 
@@ -295,21 +302,21 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     retry curl -X POST localhost:5001/api/v0/version >/dev/null 2>&1 # wait for up
 
     # stargz snapshotter (default labels)
-    ctr-remote image pull --local --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
+    ctr-remote image pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
     CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:22.04")
     reboot_containerd
     run_and_check_remote_snapshots ctr-remote i rpull --ipfs "${CID}"
     copy_out_dir "${CID}" "/usr" "${USR_STARGZSN_IPFS}" "stargz"
 
     # stargz snapshotter (containerd labels)
-    ctr-remote image pull --local --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
+    ctr-remote image pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
     CID=$(ctr-remote i ipfs-push "${REGISTRY_HOST}/ubuntu:22.04")
     reboot_containerd
     run_and_check_remote_snapshots ctr-remote i rpull --use-containerd-labels --ipfs "${CID}"
     copy_out_dir "${CID}" "/usr" "${USR_STARGZSN_CTD_IPFS}" "stargz"
 
     # overlayfs snapshotter
-    ctr-remote image pull --local --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
+    ctr-remote image pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:22.04"
     CID=$(ctr-remote i ipfs-push --estargz=false "${REGISTRY_HOST}/ubuntu:22.04")
     reboot_containerd
     ctr-remote i rpull --snapshotter=overlayfs --ipfs "${CID}"
@@ -330,11 +337,11 @@ echo "Testing refreshing and mirror..."
 
 reboot_containerd
 echo "Getting image with normal snapshotter..."
-ctr-remote image pull --local --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
+ctr-remote image pull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
 copy_out_dir "${REGISTRY_HOST}/alpine:esgz" "/usr" "${USR_ORG}" "overlayfs"
 
 echo "Getting image with stargz snapshotter..."
-run_and_check_remote_snapshots ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
+run_and_check_remote_snapshots ctr-remote images ${RPULL_COMMAND} --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
 
 REGISTRY_HOST_IP=$(getent hosts "${REGISTRY_HOST}" | awk '{ print $1 }')
 REGISTRY_ALT_HOST_IP=$(getent hosts "${REGISTRY_ALT_HOST}" | awk '{ print $1 }')
@@ -474,7 +481,7 @@ diff --no-dereference -qr "${USR_NORMALSN_PLAIN_STARGZ}/" "${USR_STARGZSN_PLAIN_
 
 ############
 # Try to pull this image from different namespace.
-ctr-remote --namespace=dummy images rpull --user "${DUMMYUSER}:${DUMMYPASS}" \
+ctr-remote --namespace=dummy images ${RPULL_COMMAND} --user "${DUMMYUSER}:${DUMMYPASS}" \
            "${REGISTRY_HOST}/ubuntu:esgz"
 
 ############
@@ -489,7 +496,7 @@ mv /etc/containerd-stargz-grpc/config.toml_rm /etc/containerd-stargz-grpc/config
 reboot_containerd
 if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     # Snapshots should be available even after restarting the snapshotter with a signal
-    run_and_check_remote_snapshots ctr-remote images rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
+    run_and_check_remote_snapshots ctr-remote images ${RPULL_COMMAND} --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
     ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}/alpine:esgz" test echo hi
 
     TARGET_SIGNALS=(SIGINT SIGTERM)

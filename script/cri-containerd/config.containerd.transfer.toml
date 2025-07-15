@@ -1,0 +1,26 @@
+version = 2
+
+# Basic CRI configuration with enabling Stargz Snapshotter
+[plugins."io.containerd.grpc.v1.cri".containerd]
+  default_runtime_name = "runc"
+  snapshotter = "stargz"
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+
+# Enable Stargz Snapshotter in Transfer Service
+[[plugins."io.containerd.transfer.v1.local".unpack_config]]
+  platform = "linux"
+  snapshotter = "stargz"
+# Enable overlayfs in Transfer Service
+[[plugins."io.containerd.transfer.v1.local".unpack_config]]
+  platform = "linux"
+  snapshotter = "overlayfs"
+
+# Plugin Stargz Snapshotter
+[proxy_plugins]
+  [proxy_plugins.stargz]
+    type = "snapshot"
+    address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+  [proxy_plugins.stargz.exports]
+    root = "/var/lib/containerd-stargz-grpc/"
+    enable_remote_snapshot_annotations = "true"

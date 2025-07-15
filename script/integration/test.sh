@@ -69,6 +69,11 @@ if [ "${FUSE_PASSTHROUGH:-}" != "" ] ; then
     fi
 fi
 
+USE_TRANSFER_SERVICE=false
+if [ "${TRANSFER_SERVICE:-}" == "true" ] ; then
+    USE_TRANSFER_SERVICE=true
+fi
+
 DOCKER_COMPOSE_YAML=$(mktemp)
 AUTH_DIR=$(mktemp -d)
 SS_ROOT_DIR=$(mktemp -d)
@@ -107,7 +112,7 @@ RUN if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then \
     fi
 
 ENV CONTAINERD_SNAPSHOTTER=""
-
+ENV USE_TRANSFER_SERVICE="${USE_TRANSFER_SERVICE}"
 ENTRYPOINT [ "/entrypoint.sh" ]
 EOF
 docker build ${DOCKER_BUILD_ARGS:-} -t "${INTEGRATION_TEST_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
