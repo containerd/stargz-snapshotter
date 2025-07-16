@@ -108,7 +108,12 @@ Remote snapshots are mounted using FUSE, and its filesystem processes are attach
 
 To avoid this, we use a fuse daemon called the fuse manager to handle filesystem processes. The fuse manager is responsible for mounting and unmounting remote snapshotters. Its process is detached from the stargz snapshotter main process to an independent one in a shim-like way during the snapshotter's startup. This design ensures that the restart of the snapshotter won't affect the filesystem processes it manages, keeping mountpoints and running containers available during the restart. However, it is important to note that the restart of the fuse manager itself triggers a remount, so it is recommended to keep the fuse manager running in a good state.
 
-You can enable the fuse manager by adding the flag `--detach-fuse-manager=true` to the stargz snapshotter.
+You can enable the fuse manager by adding the following configuration.
+
+```toml
+[fusem_anager]
+enable = true
+```
 
 ## Killing and restarting Stargz Snapshotter
 
@@ -173,12 +178,22 @@ The snapshotter acquires registry creds by scanning requests.
 
 You must specify `--image-service-endpoint=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock` option to kubelet.
 
+You can specify the backing image service's socket using `image_service_path`.
+The default is the containerd's socket (`/run/containerd/containerd.sock`).
+
 ```toml
 # Stargz Snapshotter proxies CRI Image Service into containerd socket.
 [cri_keychain]
 enable_keychain = true
 image_service_path = "/run/containerd/containerd.sock"
 ```
+
+The default path where containerd-stargz-grpc serves the CRI Image Service API is `unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock`.
+You can also change this path using `listen_path` field.
+
+> Note that if you enabled the FUSE manager and CRI-based authentication together, `listen_path` is a mandatory field with some caveats:
+> - This path must be different from the FUSE manager's socket path (`/run/containerd-stargz-grpc/fuse-manager.sock`) because they have different lifecycle. Specifically, the CRI socket is recreted on each reload of the configuration to the FUSE manager.
+> - containerd-stargz-grpc's socket path (`/run/containerd-stargz-grpc/containerd-stargz-grpc.sock`) can't be used as `listen_path` because the CRI socket is served by the FUSE manager process (not containerd-stargz-grpc process).
 
 #### kubeconfig-based authentication
 

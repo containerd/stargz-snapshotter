@@ -26,35 +26,38 @@ type Config struct {
 	config.Config
 
 	// KubeconfigKeychainConfig is config for kubeconfig-based keychain.
-	KubeconfigKeychainConfig `toml:"kubeconfig_keychain"`
+	KubeconfigKeychainConfig `toml:"kubeconfig_keychain" json:"kubeconfig_keychain"`
 
 	// CRIKeychainConfig is config for CRI-based keychain.
-	CRIKeychainConfig `toml:"cri_keychain"`
+	CRIKeychainConfig `toml:"cri_keychain" json:"cri_keychain"`
 
 	// ResolverConfig is config for resolving registries.
-	ResolverConfig `toml:"resolver"`
+	ResolverConfig `toml:"resolver" json:"resolver"`
 
 	// SnapshotterConfig is snapshotter-related config.
-	SnapshotterConfig `toml:"snapshotter"`
+	SnapshotterConfig `toml:"snapshotter" json:"snapshotter"`
 }
 
 // KubeconfigKeychainConfig is config for kubeconfig-based keychain.
 type KubeconfigKeychainConfig struct {
 	// EnableKeychain enables kubeconfig-based keychain
-	EnableKeychain bool `toml:"enable_keychain"`
+	EnableKeychain bool `toml:"enable_keychain" json:"enable_keychain"`
 
 	// KubeconfigPath is the path to kubeconfig which can be used to sync
 	// secrets on the cluster into this snapshotter.
-	KubeconfigPath string `toml:"kubeconfig_path"`
+	KubeconfigPath string `toml:"kubeconfig_path" json:"kubeconfig_path"`
 }
 
 // CRIKeychainConfig is config for CRI-based keychain.
 type CRIKeychainConfig struct {
 	// EnableKeychain enables CRI-based keychain
-	EnableKeychain bool `toml:"enable_keychain"`
+	EnableKeychain bool `toml:"enable_keychain" json:"enable_keychain"`
 
 	// ImageServicePath is the path to the unix socket of backing CRI Image Service (e.g. containerd CRI plugin)
-	ImageServicePath string `toml:"image_service_path"`
+	ImageServicePath string `toml:"image_service_path" json:"image_service_path"`
+
+	// ListenPath is the path to the unix socket to listen
+	ListenPath string `toml:"listen_path" json:"listen_path"`
 }
 
 // ResolverConfig is config for resolving registries.
@@ -66,5 +69,5 @@ type SnapshotterConfig struct {
 	// data source when restarting the snapshotter.
 	// NOTE: User needs to manually remove the snapshots from containerd's metadata store using
 	//       ctr (e.g. `ctr snapshot rm`).
-	AllowInvalidMountsOnRestart bool `toml:"allow_invalid_mounts_on_restart"`
+	AllowInvalidMountsOnRestart bool `toml:"allow_invalid_mounts_on_restart" json:"allow_invalid_mounts_on_restart"`
 }

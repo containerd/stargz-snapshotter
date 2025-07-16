@@ -85,8 +85,8 @@ type mockServer struct {
 	initErr    error
 }
 
-func newMockServer(ctx context.Context, listener net.Listener, server *grpc.Server, fuseStoreAddr string) (*mockServer, error) {
-	s, err := NewFuseManager(ctx, listener, server, fuseStoreAddr)
+func newMockServer(ctx context.Context, listener net.Listener, server *grpc.Server, fuseStoreAddr, serverAddr string) (*mockServer, error) {
+	s, err := NewFuseManager(ctx, listener, server, fuseStoreAddr, serverAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +121,7 @@ func TestFuseManager(t *testing.T) {
 
 	socketPath := filepath.Join(tmpDir, "test.sock")
 	fuseStorePath := filepath.Join(tmpDir, "fusestore.db")
+	fuseManagerSocketPath := filepath.Join(tmpDir, "test-fusemanager.sock")
 
 	l, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -131,7 +132,7 @@ func TestFuseManager(t *testing.T) {
 	// Create server with mock
 	grpcServer := grpc.NewServer()
 	mockFs := newMockFileSystem(t)
-	fm, err := newMockServer(context.Background(), l, grpcServer, fuseStorePath)
+	fm, err := newMockServer(context.Background(), l, grpcServer, fuseStorePath, fuseManagerSocketPath)
 	if err != nil {
 		t.Fatalf("failed to create fuse manager: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestFuseManager(t *testing.T) {
 			fm.initCalled = false
 
 			config := &Config{
-				Config: &service.Config{},
+				Config: service.Config{},
 			}
 			client, err := NewManagerClient(context.Background(), tmpDir, socketPath, config)
 			if err != nil {

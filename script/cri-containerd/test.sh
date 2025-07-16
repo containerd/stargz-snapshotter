@@ -114,6 +114,13 @@ if [ "${METADATA_STORE:-}" != "" ] ; then
     USE_METADATA_STORE="${METADATA_STORE}"
 fi
 
+FUSE_MANAGER_CONFIG=""
+if [ "${FUSE_MANAGER:-}" == "true" ] ; then
+    FUSE_MANAGER_CONFIG='listen_path = "/run/containerd-stargz-grpc/cri.sock"
+[fuse_manager]
+enable = true'
+fi
+
 SNAPSHOTTER_CONFIG_FILE=/etc/containerd-stargz-grpc/config.toml
 if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
     SNAPSHOTTER_CONFIG_FILE=/etc/containerd/config.toml
@@ -159,6 +166,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends make && \
 COPY ./test.conflist /etc/cni/net.d/test.conflist
 
 ${ADDITIONAL_INST}
+
+RUN <<EEE
+cat <<EOT >> "${SNAPSHOTTER_CONFIG_FILE}"
+${FUSE_MANAGER_CONFIG}
+EOT
+EEE
 
 RUN if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then \
       sed -i '1imetadata_store = "${USE_METADATA_STORE}"' "${SNAPSHOTTER_CONFIG_FILE}" && \

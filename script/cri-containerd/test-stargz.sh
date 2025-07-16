@@ -22,7 +22,10 @@ REPO="${CONTEXT}../../"
 REGISTRY_HOST="cri-registry"
 TEST_NODE_NAME="cri-testenv-container"
 CONTAINERD_SOCK=unix:///run/containerd/containerd.sock
-SNAPSHOTTER_SOCK=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock
+IMAGE_ENDPOINT_SOCK=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock
+if [ "${FUSE_MANAGER:-}" == "true" ] ; then
+    IMAGE_ENDPOINT_SOCK=unix:///run/containerd-stargz-grpc/cri.sock
+fi
 PREPARE_NODE_NAME="cri-prepare-node"
 
 source "${CONTEXT}/const.sh"
@@ -191,7 +194,7 @@ echo "==============================="
 # FIXME: remove the skip flag once kind adds support for the user namespace
 # See also https://github.com/kubernetes-sigs/kind/issues/3436
 docker exec "${TEST_NODE_NAME}" /go/bin/critest \
-       --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${SNAPSHOTTER_SOCK} \
+       --runtime-endpoint=${CONTAINERD_SOCK} --image-endpoint=${IMAGE_ENDPOINT_SOCK} \
        --ginkgo.skip 'runtime should support NamespaceMode_POD'
 
 echo "Check if stargz snapshotter is working"

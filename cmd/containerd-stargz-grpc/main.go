@@ -44,6 +44,7 @@ import (
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	metrics "github.com/docker/go-metrics"
 	"github.com/pelletier/go-toml"
+	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 )
@@ -55,42 +56,48 @@ const (
 	defaultRootDir             = "/var/lib/containerd-stargz-grpc"
 	defaultImageServiceAddress = "/run/containerd/containerd.sock"
 	defaultFuseManagerAddress  = "/run/containerd-stargz-grpc/fuse-manager.sock"
-
-	fuseManagerBin     = "stargz-fuse-manager"
-	fuseManagerAddress = "fuse-manager.sock"
+	fuseManagerBin             = "stargz-fuse-manager"
 )
 
 var (
-	address           = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
-	configPath        = flag.String("config", defaultConfigPath, "path to the configuration file")
-	logLevel          = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
-	rootDir           = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
-	detachFuseManager = flag.Bool("detach-fuse-manager", false, "whether detach fusemanager or not")
-	printVersion      = flag.Bool("version", false, "print the version")
+	address      = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
+	configPath   = flag.String("config", defaultConfigPath, "path to the configuration file")
+	logLevel     = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
+	rootDir      = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
+	printVersion = flag.Bool("version", false, "print the version")
 )
 
 type snapshotterConfig struct {
 	service.Config
 
 	// MetricsAddress is address for the metrics API
-	MetricsAddress string `toml:"metrics_address"`
+	MetricsAddress string `toml:"metrics_address" json:"metrics_address"`
 
 	// NoPrometheus is a flag to disable the emission of the metrics
-	NoPrometheus bool `toml:"no_prometheus"`
+	NoPrometheus bool `toml:"no_prometheus" json:"no_prometheus"`
 
 	// DebugAddress is a Unix domain socket address where the snapshotter exposes /debug/ endpoints.
-	DebugAddress string `toml:"debug_address"`
+	DebugAddress string `toml:"debug_address" json:"debug_address"`
 
 	// IPFS is a flag to enbale lazy pulling from IPFS.
-	IPFS bool `toml:"ipfs"`
+	IPFS bool `toml:"ipfs" json:"ipfs"`
 
 	// MetadataStore is the type of the metadata store to use.
-	MetadataStore string `toml:"metadata_store" default:"memory"`
-	// FuseManagerAddress is address for the fusemanager's GRPC server
-	FuseManagerAddress string `toml:"fusemanager_address"`
+	MetadataStore string `toml:"metadata_store" default:"memory" json:"metadata_store"`
 
-	// FuseManagerPath is path to the fusemanager's executable
-	FuseManagerPath string `toml:"fusemanager_path"`
+	// FuseManagerConfig is configuration for fusemanager
+	FuseManagerConfig `toml:"fuse_manager" json:"fuse_manager"`
+}
+
+type FuseManagerConfig struct {
+	// Enable is whether detach fusemanager or not
+	Enable bool `toml:"enable" default:"false" json:"enable"`
+
+	// Address is address for the fusemanager's GRPC server (default: "/run/containerd-stargz-grpc/fuse-manager.sock")
+	Address string `toml:"address" json:"address"`
+
+	// Path is path to the fusemanager's executable (default: looking for a binary "stargz-fuse-manager")
+	Path string `toml:"path" json:"path"`
 }
 
 func main() {
@@ -148,8 +155,9 @@ func main() {
 	}
 
 	var rs snapshots.Snapshotter
-	if *detachFuseManager {
-		fmPath := config.FuseManagerPath
+	fuseManagerConfig := config.FuseManagerConfig
+	if fuseManagerConfig.Enable {
+		fmPath := fuseManagerConfig.Path
 		if fmPath == "" {
 			var err error
 			fmPath, err = exec.LookPath(fuseManagerBin)
@@ -157,7 +165,7 @@ func main() {
 				log.G(ctx).WithError(err).Fatalf("failed to find fusemanager bin")
 			}
 		}
-		fmAddr := config.FuseManagerAddress
+		fmAddr := fuseManagerConfig.Address
 		if fmAddr == "" {
 			fmAddr = defaultFuseManagerAddress
 		}
@@ -171,7 +179,7 @@ func main() {
 		}
 
 		fuseManagerConfig := fusemanager.Config{
-			Config:                     &config.Config,
+			Config:                     config.Config,
 			IPFS:                       config.IPFS,
 			MetadataStore:              config.MetadataStore,
 			DefaultImageServiceAddress: defaultImageServiceAddress,
@@ -195,14 +203,50 @@ func main() {
 		}
 		log.G(ctx).Infof("Start snapshotter with fusemanager mode")
 	} else {
-		credsFuncs, err := keychainconfig.ConfigKeychain(ctx, rpc, &keyChainConfig)
+		crirpc := rpc
+		// For CRI keychain, if listening path is different from stargz-snapshotter's socket, prepare for the dedicated grpc server and the socket.
+		serveCRISocket := config.CRIKeychainConfig.EnableKeychain && config.ListenPath != "" && config.ListenPath != *address
+		if serveCRISocket {
+			crirpc = grpc.NewServer()
+		}
+		credsFuncs, err := keychainconfig.ConfigKeychain(ctx, crirpc, &keyChainConfig)
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure keychain")
+		}
+		if serveCRISocket {
+			addr := config.ListenPath
+			// Prepare the directory for the socket
+			if err := os.MkdirAll(filepath.Dir(addr), 0700); err != nil {
+				log.G(ctx).WithError(err).Fatalf("failed to create directory %q", filepath.Dir(addr))
+			}
+
+			// Try to remove the socket file to avoid EADDRINUSE
+			if err := os.RemoveAll(addr); err != nil {
+				log.G(ctx).WithError(err).Fatalf("failed to remove %q", addr)
+			}
+
+			// Listen and serve
+			l, err := net.Listen("unix", addr)
+			if err != nil {
+				log.G(ctx).WithError(err).Fatalf("error on listen socket %q", addr)
+			}
+			go func() {
+				if err := crirpc.Serve(l); err != nil {
+					log.G(ctx).WithError(err).Errorf("error on serving CRI via socket %q", addr)
+				}
+			}()
 		}
 
 		fsConfig := fsopts.Config{
 			EnableIpfs:    config.IPFS,
 			MetadataStore: config.MetadataStore,
+			OpenBoltDB: func(p string) (*bolt.DB, error) {
+				return bolt.Open(p, 0600, &bolt.Options{
+					NoFreelistSync:  true,
+					InitialMmapSize: 64 * 1024 * 1024,
+					FreelistType:    bolt.FreelistMapType,
+				})
+			},
 		}
 		fsOpts, err := fsopts.ConfigFsOpts(ctx, *rootDir, &fsConfig)
 		if err != nil {
@@ -232,7 +276,7 @@ func main() {
 	// commanded via SIGINT. The user can use SIGINT to gracefully killing the FUSE
 	// manager before rebooting the node for ensuring that the all snapshots are
 	// unmounted with cleaning up associated temporary resources.
-	if cleanup || !*detachFuseManager {
+	if cleanup || !fuseManagerConfig.Enable {
 		log.G(ctx).Debug("Closing the snapshotter")
 		rs.Close()
 	}

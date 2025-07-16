@@ -43,17 +43,20 @@ const (
 )
 
 type Config struct {
-	Config                     *service.Config
-	IPFS                       bool   `toml:"ipfs"`
-	MetadataStore              string `toml:"metadata_store" default:"memory"`
+	Config                     service.Config
+	IPFS                       bool   `toml:"ipfs" json:"ipfs"`
+	MetadataStore              string `toml:"metadata_store" default:"memory" json:"metadata_store"`
 	DefaultImageServiceAddress string `json:"default_image_service_address"`
 }
 
 type ConfigContext struct {
-	Ctx     context.Context
-	Config  *Config
-	RootDir string
-	Server  *grpc.Server
+	Ctx        context.Context
+	Config     *Config
+	RootDir    string
+	Server     *grpc.Server
+	OpenBoltDB func(string) (*bolt.DB, error)
+	Address    string
+	CRIServer  *grpc.Server
 }
 
 var (
@@ -67,6 +70,36 @@ func RegisterConfigFunc(f ConfigFunc) {
 	configMu.Lock()
 	defer configMu.Unlock()
 	configFuncs = append(configFuncs, f)
+}
+
+// Opens bolt DB with avoiding opening the same DB multiple times
+type dbOpener struct {
+	mu      sync.Mutex
+	handles map[string]*bolt.DB
+}
+
+func (o *dbOpener) openBoltDB(p string) (*bolt.DB, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if db, ok := o.handles[p]; ok && db != nil {
+		// we opened it before. avoid trying to open this again.
+		return db, nil
+	}
+
+	db, err := bolt.Open(p, 0600, &bolt.Options{
+		NoFreelistSync:  true,
+		InitialMmapSize: 64 * 1024 * 1024,
+		FreelistType:    bolt.FreelistMapType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if o.handles == nil {
+		o.handles = make(map[string]*bolt.DB)
+	}
+	o.handles[p] = db
+	return db, nil
 }
 
 type Server struct {
@@ -90,9 +123,15 @@ type Server struct {
 	ms    *bolt.DB
 
 	fuseStoreAddr string
+
+	dbOpener *dbOpener
+
+	serverAddr string
+
+	curCRIServer *grpc.Server
 }
 
-func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Server, fuseStoreAddr string) (*Server, error) {
+func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Server, fuseStoreAddr string, serverAddr string) (*Server, error) {
 	if err := os.MkdirAll(filepath.Dir(fuseStoreAddr), 0700); err != nil {
 		return nil, fmt.Errorf("failed to create directory %q: %w", filepath.Dir(fuseStoreAddr), err)
 	}
@@ -110,6 +149,8 @@ func NewFuseManager(ctx context.Context, listener net.Listener, server *grpc.Ser
 		listener:      listener,
 		server:        server,
 		fuseStoreAddr: fuseStoreAddr,
+		dbOpener:      &dbOpener{},
+		serverAddr:    serverAddr,
 	}
 
 	return fm, nil
@@ -143,11 +184,18 @@ func (fm *Server) Init(ctx context.Context, req *pb.InitRequest) (*pb.Response, 
 	fm.root = req.Root
 	fm.config = config
 
+	if fm.curCRIServer != nil {
+		fm.curCRIServer.Stop()
+		fm.curCRIServer = nil
+	}
+
 	cc := &ConfigContext{
-		Ctx:     ctx,
-		Config:  fm.config,
-		RootDir: fm.root,
-		Server:  fm.server,
+		Ctx:        ctx,
+		Config:     fm.config,
+		RootDir:    fm.root,
+		Server:     fm.server,
+		OpenBoltDB: fm.dbOpener.openBoltDB,
+		Address:    fm.serverAddr,
 	}
 
 	var opts []service.Option
@@ -160,7 +208,9 @@ func (fm *Server) Init(ctx context.Context, req *pb.InitRequest) (*pb.Response, 
 		opts = append(opts, funcOpts...)
 	}
 
-	fs, err := service.NewFileSystem(ctx, fm.root, fm.config.Config, opts...)
+	fm.curCRIServer = cc.CRIServer
+
+	fs, err := service.NewFileSystem(ctx, fm.root, &fm.config.Config, opts...)
 	if err != nil {
 		return &pb.Response{}, err
 	}
@@ -194,7 +244,7 @@ func (fm *Server) Mount(ctx context.Context, req *pb.MountRequest) (*pb.Response
 		Root:       fm.root,
 		Mountpoint: req.Mountpoint,
 		Labels:     req.Labels,
-		Config:     *fm.config.Config,
+		Config:     fm.config.Config,
 	})
 
 	return &pb.Response{}, nil

@@ -31,28 +31,28 @@ const defaultRequestTimeoutSec = 30
 
 // Config is config for resolving registries.
 type Config struct {
-	Host map[string]HostConfig `toml:"host"`
+	Host map[string]HostConfig `toml:"host" json:"host"`
 }
 
 type HostConfig struct {
-	Mirrors []MirrorConfig `toml:"mirrors"`
+	Mirrors []MirrorConfig `toml:"mirrors" json:"mirrors"`
 }
 
 type MirrorConfig struct {
 
 	// Host is the hostname of the host.
-	Host string `toml:"host"`
+	Host string `toml:"host" json:"host"`
 
 	// Insecure is true means use http scheme instead of https.
-	Insecure bool `toml:"insecure"`
+	Insecure bool `toml:"insecure" json:"insecure"`
 
 	// RequestTimeoutSec is timeout seconds of each request to the registry.
 	// RequestTimeoutSec == 0 indicates the default timeout (defaultRequestTimeoutSec).
 	// RequestTimeoutSec < 0 indicates no timeout.
-	RequestTimeoutSec int `toml:"request_timeout_sec"`
+	RequestTimeoutSec int `toml:"request_timeout_sec" json:"request_timeout_sec"`
 
 	// Header are additional headers to send to the server
-	Header map[string]interface{} `toml:"header"`
+	Header map[string]interface{} `toml:"header" json:"header"`
 }
 
 type Credential func(string, reference.Spec) (string, string, error)
