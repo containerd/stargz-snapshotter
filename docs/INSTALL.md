@@ -44,6 +44,8 @@ We assume that you are using containerd (> v1.4.2) as a CRI runtime.
     [proxy_plugins.stargz]
       type = "snapshot"
       address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+    [proxy_plugins.stargz.exports]
+      root = "/var/lib/containerd-stargz-grpc/"
 
   ```
 
@@ -145,6 +147,8 @@ We assume that you are using CRI-O newer than https://github.com/cri-o/cri-o/pul
     [proxy_plugins.stargz]
       type = "snapshot"
       address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+    [proxy_plugins.stargz.exports]
+      root = "/var/lib/containerd-stargz-grpc/"
   ```
 
 - Install fuse

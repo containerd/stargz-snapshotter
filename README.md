@@ -62,14 +62,14 @@ version = 2
   [proxy_plugins.stargz]
     type = "snapshot"
     address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+  [proxy_plugins.stargz.exports]
+    root = "/var/lib/containerd-stargz-grpc/"
 
 # Use stargz snapshotter through CRI
 [plugins."io.containerd.grpc.v1.cri".containerd]
   snapshotter = "stargz"
   disable_snapshot_annotations = false
 ```
-
-**Note that `disable_snapshot_annotations = false` is required since containerd > v1.4.2**
 
 You can try our [prebuilt](/Dockerfile) [KinD](https://github.com/kubernetes-sigs/kind) node image that contains the above configuration.
 

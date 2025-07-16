@@ -44,12 +44,16 @@ version = 2
   [proxy_plugins.stargz]
     type = "snapshot"
     address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+  [proxy_plugins.stargz.exports]
+    root = "/var/lib/containerd-stargz-grpc/"
 
 # Use stargz snapshotter through CRI
 [plugins."io.containerd.grpc.v1.cri".containerd]
   snapshotter = "stargz"
   disable_snapshot_annotations = false
 ```
+
+> NOTE: `root` field of `proxy_plugins` is needed for the CRI plugin to recognize stargz snapshotter's root directory.
 
 This repo contains [a Dockerfile as a KinD node image](/Dockerfile) which includes the above configuration.
 

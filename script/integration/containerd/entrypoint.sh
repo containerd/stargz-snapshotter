@@ -250,6 +250,7 @@ if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
     type = "snapshot"
     address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
   [proxy_plugins.stargz.exports]
+    root = "/var/lib/containerd-stargz-grpc/"
     enable_remote_snapshot_annotations = "true"
 EOF
 fi
