@@ -116,7 +116,8 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		time.Now(),
 		time.Duration(blobConfig.ValidInterval)*time.Second,
 		r,
-		time.Duration(blobConfig.FetchTimeoutSec)*time.Second), nil
+		time.Duration(blobConfig.FetchTimeoutSec)*time.Second,
+		desc.Digest.String()), nil
 }
 
 func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (f fetcher, size int64, err error) {
