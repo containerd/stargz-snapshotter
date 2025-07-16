@@ -50,7 +50,7 @@ function cleanup {
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
-BUILTIN_HACK_INST=
+ADDITIONAL_INST=
 if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
     # Special configuration for CRI containerd + builtin stargz snapshotter
     cat <<EOF > "${TMP_CONTEXT}/containerd.hack.toml"
@@ -75,7 +75,7 @@ metadata_store = "memory"
 [plugins."io.containerd.snapshotter.v1.stargz".cri_keychain]
 enable_keychain = true
 EOF
-    BUILTIN_HACK_INST="COPY containerd.hack.toml /etc/containerd/config.toml"
+    ADDITIONAL_INST="COPY containerd.hack.toml /etc/containerd/config.toml"
 fi
 
 cat <<EOF > "${TMP_CONTEXT}/test.conflist"
@@ -128,6 +128,12 @@ if [ "${FUSE_PASSTHROUGH:-}" != "" ] ; then
     fi
 fi
 
+if [ "${TRANSFER_SERVICE:-}" == "true" ] ; then
+    cp "${CONTEXT}/config.containerd.transfer.toml" "${TMP_CONTEXT}/"
+    ADDITIONAL_INST="${ADDITIONAL_INST}
+COPY config.containerd.transfer.toml /etc/containerd/config.toml"
+fi
+
 # Prepare the testing node
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
@@ -152,7 +158,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends make && \
 
 COPY ./test.conflist /etc/cni/net.d/test.conflist
 
-${BUILTIN_HACK_INST}
+${ADDITIONAL_INST}
 
 RUN if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then \
       sed -i '1imetadata_store = "${USE_METADATA_STORE}"' "${SNAPSHOTTER_CONFIG_FILE}" && \

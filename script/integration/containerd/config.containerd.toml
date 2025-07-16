@@ -10,3 +10,13 @@ check_always = true
 
 [plugins."io.containerd.snapshotter.v1.stargz".registry.mirrors."registry-integration.test"]
 endpoint = ["http://registry-alt.test:5000"]
+
+# Enable Stargz Snapshotter in Transfer Service
+[[plugins."io.containerd.transfer.v1.local".unpack_config]]
+  platform = "linux"
+  snapshotter = "stargz"
+
+# Enable overlayfs in Transfer Service
+[[plugins."io.containerd.transfer.v1.local".unpack_config]]
+  platform = "linux"
+  snapshotter = "overlayfs"

@@ -56,6 +56,7 @@ jobs:
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         fuse-passthrough: ["true", "false"]
+        transfer-service: ["true", "false"]
         exclude:
         - buildargs: ""
           builtin: "true"
@@ -69,6 +70,14 @@ jobs:
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - fuse-passthrough: "true"
           metadata-store: "db"
+        - transfer-service: "true"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - transfer-service: "true"
+          builtin: "true"
+        - transfer-service: "true"
+          metadata-store: "db"
+        - transfer-service: "true"
+          fuse-passthrough: "true"
     steps:
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
@@ -79,6 +88,7 @@ jobs:
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
         FUSE_PASSTHROUGH: ${{ matrix.fuse-passthrough }}
+        TRANSFER_SERVICE: ${{ matrix.transfer-service }}
       run: make integration
 
   test-optimize:
@@ -149,6 +159,7 @@ jobs:
         builtin: ["true", "false"]
         metadata-store: ["memory", "db"]
         fuse-passthrough: ["true", "false"]
+        transfer-service: ["true", "false"]
         exclude:
         - buildargs: ""
           builtin: "true"
@@ -162,6 +173,14 @@ jobs:
           buildargs: "--build-arg=CONTAINERD_VERSION=main"
         - fuse-passthrough: "true"
           metadata-store: "db"
+        - transfer-service: "true"
+          buildargs: "--build-arg=CONTAINERD_VERSION=main"
+        - transfer-service: "true"
+          builtin: "true"
+        - transfer-service: "true"
+          metadata-store: "db"
+        - transfer-service: "true"
+          fuse-passthrough: "true"
     steps:
     - uses: actions/checkout@v4
     - name: Validate containerd through CRI
@@ -170,6 +189,7 @@ jobs:
         BUILTIN_SNAPSHOTTER: ${{ matrix.builtin }}
         METADATA_STORE: ${{ matrix.metadata-store }}
         FUSE_PASSTHROUGH: ${{ matrix.fuse-passthrough }}
+        TRANSFER_SERVICE: ${{ matrix.transfer-service }}
       run: make test-cri-containerd
 
   test-cri-cri-o:

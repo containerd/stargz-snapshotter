@@ -115,11 +115,16 @@ docker exec "${PREPARE_NODE_NAME}" /bin/bash /tools/mirror.sh
 # Configure mirror registries for containerd and snapshotter
 docker exec "${TEST_NODE_NAME}" cat /etc/containerd/config.toml > "${CONTAINERD_CONFIG}"
 docker exec "${TEST_NODE_NAME}" cat /etc/containerd-stargz-grpc/config.toml > "${SNAPSHOTTER_CONFIG}"
+docker exec "${TEST_NODE_NAME}" mkdir -p "/etc/containerd/certs.d"
+cat <<EOF >> "${CONTAINERD_CONFIG}"
+[plugins."io.containerd.cri.v1.images".registry]
+   config_path = "/etc/containerd/certs.d"
+EOF
 cat "${IMAGE_LIST}" | sed -E 's/^([^/]*).*/\1/g' | sort | uniq | while read DOMAIN ; do
     echo "Adding mirror config: ${DOMAIN}"
-    cat <<EOF >> "${CONTAINERD_CONFIG}"
-[plugins."io.containerd.grpc.v1.cri".registry.mirrors."${DOMAIN}"]
-endpoint = ["http://${REGISTRY_HOST}:5000"]
+    docker exec "${TEST_NODE_NAME}" mkdir -p "/etc/containerd/certs.d/${DOMAIN}/"
+    cat <<EOF | docker exec -i "${TEST_NODE_NAME}" tee -a "/etc/containerd/certs.d/${DOMAIN}/hosts.toml"
+server = "http://${REGISTRY_HOST}:5000"
 EOF
     if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
         cat <<EOF >> "${CONTAINERD_CONFIG}"
