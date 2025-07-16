@@ -71,8 +71,6 @@ version = 2
   disable_snapshot_annotations = false
 ```
 
-**Note that `disable_snapshot_annotations = false` is required since containerd > v1.4.2**
-
 You can try our [prebuilt](/Dockerfile) [KinD](https://github.com/kubernetes-sigs/kind) node image that contains the above configuration.
 
 ```console
