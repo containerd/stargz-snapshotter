@@ -760,10 +760,13 @@ func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if err := os.Mkdir(filepath.Join(o.root, "snapshots", id), 0700); err != nil {
+			if err := os.Mkdir(filepath.Join(o.root, "snapshots", id), 0700); err != nil && !os.IsExist(err) {
 				return err
 			}
-			return os.Mkdir(o.upperPath(id), 0755)
+			if err := os.Mkdir(o.upperPath(id), 0755); err != nil && !os.IsExist(err) {
+				return err
+			}
+			return nil
 		}(); err != nil {
 			return fmt.Errorf("failed to create remote snapshot directory: %s: %w", info.Name, err)
 		}
