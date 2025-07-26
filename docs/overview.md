@@ -144,6 +144,14 @@ When stopping FUSE manager for upgrading the binary or restarting the node, you 
 4. Restart the containerd-stargz-grpc process. This restores all snapshot mounts by lazy pulling them. `allow_invalid_mounts_on_restart` (described in the above) can still be used for controlling the behaviour of the error cases.
 5. Restart the containers.
 
+### Unexpected restart handling
+
+When Stargz Snapshotter is killed unexpectedly (e.g., by OOM killer or system crash), the process doesn't get a chance to perform graceful cleanup. In such cases, the snapshotter can successfully restart and restore remote snapshots, but this may lead to fscache duplicating cached data.
+
+**Recommended handling:**
+
+Since this scenario is caused by abnormal exit, users are expected to manually clean up the cache directory after an unexpected restart to avoid cache duplication issues. The cache cleanup should be performed before restarting the snapshotter service.
+
 ## Registry-related configuration
 
 You can configure stargz snapshotter for accessing registries with custom configurations.
