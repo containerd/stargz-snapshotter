@@ -484,6 +484,24 @@ func (f *file) InitFd(fd int) {
 	f.fd = fd
 }
 
+var _ = (fusefs.FileReleaser)((*file)(nil))
+
+func (f *file) Release(ctx context.Context) syscall.Errno {
+	// Only executed in passthrough mode to immediately release fd
+	// and prevent exceeding max open files limit in high concurrency scenarios
+	// where kernel cleanup may be delayed
+	if f.fd > 0 {
+		err := syscall.Close(f.fd)
+		if err != nil {
+			f.n.fs.s.report(fmt.Errorf("file.Release: %v", err))
+			return syscall.EIO
+		}
+		f.fd = -1
+	}
+
+	return syscall.EBADF
+}
+
 // whiteout is a whiteout abstraction compliant to overlayfs.
 type whiteout struct {
 	fusefs.Inode
