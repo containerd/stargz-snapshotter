@@ -30,7 +30,22 @@ import (
 
 // TestZstdChunked tests zstd:chunked
 func TestZstdChunked(t *testing.T) {
-	estargz.CompressionTestSuite(t,
+	testRunner := &estargz.TestRunner{
+		TestingT: t,
+		Runner: func(testingT estargz.TestingT, name string, run func(t estargz.TestingT)) {
+			tt, ok := testingT.(*testing.T)
+			if !ok {
+				testingT.Fatal("TestingT is not a *testing.T")
+				return
+			}
+
+			tt.Run(name, func(t *testing.T) {
+				run(t)
+			})
+		},
+	}
+
+	estargz.CompressionTestSuite(testRunner,
 		zstdControllerWithLevel(zstd.SpeedFastest),
 		zstdControllerWithLevel(zstd.SpeedDefault),
 		zstdControllerWithLevel(zstd.SpeedBetterCompression),
@@ -55,7 +70,7 @@ func (zc *zstdController) String() string {
 
 // TestStream tests the passed zstdchunked blob contains the specified list of streams.
 // The last entry of streams must be the offset of footer (len(b) - footerSize).
-func (zc *zstdController) TestStreams(t *testing.T, b []byte, streams []int64) {
+func (zc *zstdController) TestStreams(t estargz.TestingT, b []byte, streams []int64) {
 	t.Logf("got zstd streams (compressed size: %d):", len(b))
 
 	if len(streams) == 0 {
@@ -122,7 +137,7 @@ func nextIndex(s1, sub []byte) int {
 	return -1
 }
 
-func (zc *zstdController) DiffIDOf(t *testing.T, b []byte) string {
+func (zc *zstdController) DiffIDOf(t estargz.TestingT, b []byte) string {
 	h := sha256.New()
 	zr, err := zstd.NewReader(bytes.NewReader(b))
 	if err != nil {

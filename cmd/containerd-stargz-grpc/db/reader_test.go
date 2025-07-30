@@ -29,15 +29,60 @@ import (
 )
 
 func TestReader(t *testing.T) {
-	testutil.TestReader(t, newTestableReader)
+	testRunner := &testutil.TestRunner{
+		TestingT: t,
+		Runner: func(testingT testutil.TestingT, name string, run func(t testutil.TestingT)) {
+			tt, ok := testingT.(*testing.T)
+			if !ok {
+				testingT.Fatal("TestingT is not a *testing.T")
+				return
+			}
+
+			tt.Run(name, func(t *testing.T) {
+				run(t)
+			})
+		},
+	}
+
+	testutil.TestReader(testRunner, newTestableReader)
 }
 
 func TestFSReader(t *testing.T) {
-	fsreader.TestSuiteReader(t, newStore)
+	testRunner := &fsreader.TestRunner{
+		TestingT: t,
+		Runner: func(testingT fsreader.TestingT, name string, run func(t fsreader.TestingT)) {
+			tt, ok := testingT.(*testing.T)
+			if !ok {
+				testingT.Fatal("TestingT is not a *testing.T")
+				return
+			}
+
+			tt.Run(name, func(t *testing.T) {
+				run(t)
+			})
+		},
+	}
+
+	fsreader.TestSuiteReader(testRunner, newStore)
 }
 
 func TestFSLayer(t *testing.T) {
-	layer.TestSuiteLayer(t, newStore)
+	testRunner := &layer.TestRunner{
+		TestingT: t,
+		Runner: func(testingT layer.TestingT, name string, run func(t layer.TestingT)) {
+			tt, ok := testingT.(*testing.T)
+			if !ok {
+				testingT.Fatal("TestingT is not a *testing.T")
+				return
+			}
+
+			tt.Run(name, func(t *testing.T) {
+				run(t)
+			})
+		},
+	}
+
+	layer.TestSuiteLayer(testRunner, newStore)
 }
 
 func newTestableReader(sr *io.SectionReader, opts ...metadata.Option) (testutil.TestableReader, error) {

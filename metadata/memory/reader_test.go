@@ -25,7 +25,21 @@ import (
 )
 
 func TestReader(t *testing.T) {
-	testutil.TestReader(t, readerFactory)
+	testRunner := &testutil.TestRunner{
+		TestingT: t,
+		Runner: func(testingT testutil.TestingT, name string, run func(t testutil.TestingT)) {
+			tt, ok := testingT.(*testing.T)
+			if !ok {
+				testingT.Fatal("TestingT is not a *testing.T")
+				return
+			}
+
+			tt.Run(name, func(t *testing.T) {
+				run(t)
+			})
+		},
+	}
+	testutil.TestReader(testRunner, readerFactory)
 }
 
 func readerFactory(sr *io.SectionReader, opts ...metadata.Option) (testutil.TestableReader, error) {
