@@ -118,7 +118,11 @@ func TestSuiteLayer(t *testing.T, store metadata.Store) {
 var testStateLayerDigest = digest.FromString("dummy")
 
 func testPrefetch(t *testing.T, factory metadata.Store, lc layerConfig) {
-	data64KB := string(tutil.RandomBytes(t, 64000))
+	randomData, err := tutil.RandomBytes(64000)
+	if err != nil {
+		t.Fatalf("failed rand.Read: %v", err)
+	}
+	data64KB := string(randomData)
 	defaultPrefetchSize := int64(10000)
 	landmarkPosition := func(t *testing.T, l *layer) int64 {
 		if l.r == nil {
@@ -533,7 +537,11 @@ func testNodes(t *testing.T, factory metadata.Store, lc layerConfig) {
 }
 
 func testNodesWithOpaque(t *testing.T, factory metadata.Store, opaque OverlayOpaqueType, lc layerConfig) {
-	data64KB := string(tutil.RandomBytes(t, 64000))
+	randomData, err := tutil.RandomBytes(64000)
+	if err != nil {
+		t.Fatalf("failed rand.Read: %v", err)
+	}
+	data64KB := string(randomData)
 	hasOpaque := func(entry string) check {
 		return func(t *testing.T, root *node, cc cache.BlobCache, cr *calledReaderAt) {
 			for _, k := range opaqueXattrs[opaque] {

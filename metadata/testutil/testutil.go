@@ -64,7 +64,11 @@ type TestableReader interface {
 func TestReader(t *testing.T, factory ReaderFactory) {
 	sampleTime := time.Now().Truncate(time.Second)
 	sampleText := "qwer" + "tyui" + "opas" + "dfgh" + "jk"
-	data64KB := string(tutil.RandomBytes(t, 64000))
+	randomData, err := tutil.RandomBytes(64000)
+	if err != nil {
+		t.Fatalf("failed rand.Read: %v", err)
+	}
+	data64KB := string(randomData)
 	tests := []struct {
 		name         string
 		chunkSize    int

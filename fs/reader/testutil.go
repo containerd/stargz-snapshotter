@@ -596,7 +596,11 @@ func (bev *testChunkVerifier) verifier(id uint32, chunkDigest string) (digest.Ve
 }
 
 func testPreReader(t *testing.T, factory metadata.Store) {
-	data64KB := string(tutil.RandomBytes(t, 64000))
+	randomData, err := tutil.RandomBytes(64000)
+	if err != nil {
+		t.Fatalf("failed rand.Read: %v", err)
+	}
+	data64KB := string(randomData)
 	tests := []struct {
 		name         string
 		chunkSize    int
