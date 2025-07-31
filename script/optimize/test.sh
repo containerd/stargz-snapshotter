@@ -82,7 +82,7 @@ FROM ${OPTIMIZE_BASE_IMAGE_NAME}
 ARG TARGETARCH
 
 RUN apt-get update -y && \
-    apt-get --no-install-recommends install -y jq iptables zstd && \
+    apt-get --no-install-recommends install -y jq iptables zstd dnsutils && \
     go install github.com/google/go-containerregistry/cmd/crane@v0.8.0 && \
     mkdir -p /opt/tmp/cni/bin /etc/tmp/cni/net.d && \
     curl -Ls https://github.com/containernetworking/plugins/releases/download/v${CNI_PLUGINS_VERSION}/cni-plugins-linux-\${TARGETARCH:-amd64}-v${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/tmp/cni/bin && \
@@ -142,6 +142,9 @@ services:
     - REGISTRY_HTTP_ADDR=${REGISTRY_HOST}:443
     volumes:
     - ${AUTH_DIR}:/auth:ro
+  testserver:
+    image: httpd
+    container_name: testserver.test
 volumes:
   optimize-containerd-data:
   optimize-containerd-stargz-grpc-data:
