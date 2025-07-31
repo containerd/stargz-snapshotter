@@ -6,7 +6,7 @@ toolchain go1.24.2
 
 require (
 	github.com/containerd/console v1.0.5
-	github.com/containerd/containerd/v2 v2.1.3
+	github.com/containerd/containerd/v2 v2.1.4
 	github.com/containerd/continuity v0.4.5
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/log v0.1.0
