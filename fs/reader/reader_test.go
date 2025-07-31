@@ -29,5 +29,20 @@ import (
 )
 
 func TestReader(t *testing.T) {
-	TestSuiteReader(t, memorymetadata.NewReader)
+	testRunner := &TestRunner{
+		TestingT: t,
+		Runner: func(testingT TestingT, name string, run func(t TestingT)) {
+			tt, ok := testingT.(*testing.T)
+			if !ok {
+				testingT.Fatal("TestingT is not a *testing.T")
+				return
+			}
+
+			tt.Run(name, func(t *testing.T) {
+				run(t)
+			})
+		},
+	}
+
+	TestSuiteReader(testRunner, memorymetadata.NewReader)
 }

@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -60,11 +59,41 @@ type TestableReader interface {
 	NumOfNodes() (i int, _ error)
 }
 
+// TestingT is the minimal set of testing.T required to run the
+// tests defined in TestReader. This interface exists to prevent
+// leaking the testing package from being exposed outside tests.
+type TestingT interface {
+	Errorf(format string, args ...any)
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+	Logf(format string, args ...any)
+}
+
+// Runner allows running subtests of TestingT. This exists instead of adding
+// a Run method to TestingT interface because the Run implementation of
+// testing.T would not satisfy the interface.
+type Runner func(t TestingT, name string, fn func(t TestingT))
+
+type TestRunner struct {
+	TestingT
+	Runner Runner
+}
+
+func (r *TestRunner) Run(name string, run func(*TestRunner)) {
+	r.Runner(r.TestingT, name, func(t TestingT) {
+		run(&TestRunner{TestingT: t, Runner: r.Runner})
+	})
+}
+
 // TestReader tests Reader returns correct file metadata.
-func TestReader(t *testing.T, factory ReaderFactory) {
+func TestReader(t *TestRunner, factory ReaderFactory) {
 	sampleTime := time.Now().Truncate(time.Second)
 	sampleText := "qwer" + "tyui" + "opas" + "dfgh" + "jk"
-	data64KB := string(tutil.RandomBytes(t, 64000))
+	randomData, err := tutil.RandomBytes(64000)
+	if err != nil {
+		t.Fatalf("failed rand.Read: %v", err)
+	}
+	data64KB := string(randomData)
 	tests := []struct {
 		name         string
 		chunkSize    int
@@ -286,7 +315,8 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 			prefix := prefix
 			for srcCompresionName, srcCompression := range srcCompressions {
 				srcCompression := srcCompression()
-				t.Run(tt.name+"-"+srcCompresionName, func(t *testing.T) {
+
+				t.Run(tt.name+"-"+srcCompresionName, func(t *TestRunner) {
 					opts := []tutil.BuildEStargzOption{
 						tutil.WithBuildTarOptions(tutil.WithPrefix(prefix)),
 						tutil.WithEStargzOptions(estargz.WithCompression(srcCompression)),
@@ -343,7 +373,7 @@ func TestReader(t *testing.T, factory ReaderFactory) {
 		}
 	}
 
-	t.Run("clone-id-stability", func(t *testing.T) {
+	t.Run("clone-id-stability", func(t *TestRunner) {
 		var mapEntries func(r TestableReader, id uint32, m map[string]uint32) (map[string]uint32, error)
 		mapEntries = func(r TestableReader, id uint32, m map[string]uint32) (map[string]uint32, error) {
 			if m == nil {
@@ -426,7 +456,7 @@ func newCalledTelemetry() (telemetry *metadata.Telemetry, check func() error) {
 		}
 }
 
-func dumpNodes(t *testing.T, r TestableReader, id uint32, level int) {
+func dumpNodes(t TestingT, r TestableReader, id uint32, level int) {
 	if err := r.ForeachChild(id, func(name string, id uint32, mode os.FileMode) bool {
 		ind := ""
 		for i := 0; i < level; i++ {
@@ -440,10 +470,10 @@ func dumpNodes(t *testing.T, r TestableReader, id uint32, level int) {
 	}
 }
 
-type check func(*testing.T, TestableReader)
+type check func(TestingT, TestableReader)
 
 func numOfNodes(want int) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		i, err := r.NumOfNodes()
 		if err != nil {
 			t.Errorf("num of nodes: %v", err)
@@ -455,7 +485,7 @@ func numOfNodes(want int) check {
 }
 
 func numOfChunks(name string, num int) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		nr, ok := r.(interface {
 			NumOfChunks(id uint32) (i int, _ error)
 		})
@@ -479,7 +509,7 @@ func numOfChunks(name string, num int) check {
 }
 
 func sameNodes(n string, nodes ...string) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, n)
 		if err != nil {
 			t.Errorf("failed to lookup %q: %v", n, err)
@@ -499,7 +529,7 @@ func sameNodes(n string, nodes ...string) check {
 }
 
 func linkName(name string, linkName string) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("failed to lookup %q: %v", name, err)
@@ -522,7 +552,7 @@ func linkName(name string, linkName string) check {
 }
 
 func hasNumLink(name string, numLink int) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("failed to lookup %q: %v", name, err)
@@ -541,7 +571,7 @@ func hasNumLink(name string, numLink int) check {
 }
 
 func hasDirChildren(name string, children ...string) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("failed to lookup %q: %v", name, err)
@@ -576,7 +606,7 @@ func hasDirChildren(name string, children ...string) check {
 }
 
 func hasChardev(name string, maj, min int) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("cannot find chardev %q: %v", name, err)
@@ -599,7 +629,7 @@ func hasChardev(name string, maj, min int) check {
 }
 
 func hasBlockdev(name string, maj, min int) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("cannot find blockdev %q: %v", name, err)
@@ -622,7 +652,7 @@ func hasBlockdev(name string, maj, min int) check {
 }
 
 func hasFifo(name string) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("cannot find blockdev %q: %v", name, err)
@@ -641,7 +671,7 @@ func hasFifo(name string) check {
 }
 
 func hasFile(name, content string, size int64) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("cannot find file %q: %v", name, err)
@@ -686,7 +716,7 @@ type chunkInfo struct {
 }
 
 func hasFileContentsWithPreRead(name string, off int64, contents string, extra ...chunkInfo) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		extraMap := make(map[uint32]chunkInfo)
 		for _, e := range extra {
 			id, err := lookup(r, e.name)
@@ -753,7 +783,7 @@ func hasFileContentsWithPreRead(name string, off int64, contents string, extra .
 }
 
 func hasFileContentsOffset(name string, off int64, contents string) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("failed to lookup %q: %v", name, err)
@@ -782,7 +812,7 @@ func hasFileContentsOffset(name string, off int64, contents string) check {
 }
 
 func hasMode(name string, mode os.FileMode) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("cannot find file %q: %v", name, err)
@@ -801,7 +831,7 @@ func hasMode(name string, mode os.FileMode) check {
 }
 
 func hasOwner(name string, uid, gid int) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("cannot find file %q: %v", name, err)
@@ -820,7 +850,7 @@ func hasOwner(name string, uid, gid int) check {
 }
 
 func hasModTime(name string, modTime time.Time) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("cannot find file %q: %v", name, err)
@@ -840,7 +870,7 @@ func hasModTime(name string, modTime time.Time) check {
 }
 
 func hasXattrs(name string, xattrs map[string]string) check {
-	return func(t *testing.T, r TestableReader) {
+	return func(t TestingT, r TestableReader) {
 		id, err := lookup(r, name)
 		if err != nil {
 			t.Errorf("cannot find file %q: %v", name, err)

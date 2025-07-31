@@ -31,7 +31,22 @@ import (
 
 // TestGzipEStargz tests gzip-based eStargz
 func TestGzipEStargz(t *testing.T) {
-	CompressionTestSuite(t,
+	testRunner := &TestRunner{
+		TestingT: t,
+		Runner: func(testingT TestingT, name string, run func(t TestingT)) {
+			tt, ok := testingT.(*testing.T)
+			if !ok {
+				testingT.Fatal("TestingT is not a *testing.T")
+				return
+			}
+
+			tt.Run(name, func(t *testing.T) {
+				run(t)
+			})
+		},
+	}
+
+	CompressionTestSuite(testRunner,
 		gzipControllerWithLevel(gzip.NoCompression),
 		gzipControllerWithLevel(gzip.BestSpeed),
 		gzipControllerWithLevel(gzip.BestCompression),
@@ -56,11 +71,11 @@ func (gc *gzipController) String() string {
 }
 
 // TestStream tests the passed estargz blob contains the specified list of streams.
-func (gc *gzipController) TestStreams(t *testing.T, b []byte, streams []int64) {
+func (gc *gzipController) TestStreams(t TestingT, b []byte, streams []int64) {
 	CheckGzipHasStreams(t, b, streams)
 }
 
-func (gc *gzipController) DiffIDOf(t *testing.T, b []byte) string {
+func (gc *gzipController) DiffIDOf(t TestingT, b []byte) string {
 	return GzipDiffIDOf(t, b)
 }
 
