@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	containerd "github.com/containerd/containerd/v2/client"
@@ -44,6 +45,24 @@ import (
 )
 
 const netnsMountDir = "/var/run/netns"
+
+func parseGPUs(gpuStr string) ([]int, bool) {
+	if gpuStr == "" {
+		return nil, false
+	}
+	if gpuStr == "all" {
+		return nil, true
+	}
+	parts := strings.Split(gpuStr, ",")
+	var devices []int
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if device, err := strconv.Atoi(part); err == nil {
+			devices = append(devices, device)
+		}
+	}
+	return devices, false
+}
 
 var samplerFlags = []cli.Flag{
 	&cli.BoolFlag{
@@ -116,9 +135,9 @@ var samplerFlags = []cli.Flag{
 		Name:  "cni-plugin-dir",
 		Usage: "path to the CNI plugins binary directory",
 	},
-	&cli.IntSliceFlag{
+	&cli.StringFlag{
 		Name:  "gpus",
-		Usage: "add gpus to the container",
+		Usage: "add gpus to the container (comma-separated list of indices or 'all')",
 	},
 	&cli.BoolFlag{
 		Name:  "net-host",
@@ -213,7 +232,12 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 			if runtime.GOOS == "windows" {
 				log.L.Warn("option --gpus is not supported on Windows")
 			} else {
-				opts = append(opts, nvidia.WithGPUs(nvidia.WithDevices(clicontext.IntSlice("gpus")...), nvidia.WithAllCapabilities))
+				devices, useAll := parseGPUs(clicontext.String("gpus"))
+				if useAll {
+					opts = append(opts, nvidia.WithGPUs(nvidia.WithAllCapabilities))
+				} else if len(devices) > 0 {
+					opts = append(opts, nvidia.WithGPUs(nvidia.WithDevices(devices...), nvidia.WithAllCapabilities))
+				}
 			}
 		}
 
