@@ -74,10 +74,11 @@ You can enable host networking for the container using the `net-host` flag.
 # ctr-remote i optimize -t -i --oci --entrypoint='[ "/bin/bash", "-c" ]' --net-host --args='[ "ip a && curl example.com" ]' ghcr.io/stargz-containers/centos:8-test registry2:5000/centos:8-test-esgz
 ```
 
-You can optimize GPU-based images using the `gpu` flag. The flag expects a comma separated list of integers.
+You can optimize GPU-based images using the `gpu` flag. The flag expects a comma separated list of integers or 'all'.
 
 ```console
 # ctr-remote i optimize --oci --gpus "0" <src> <target>
+# ctr-remote i optimize --oci --gpus "all" <src> <target>
 ```
 
 `--oci` option is highly recommended to add when you create eStargz image.
