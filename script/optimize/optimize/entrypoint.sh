@@ -25,6 +25,7 @@ NOOPT_IMAGE_TAG="${REGISTRY_HOST}/test/test:noopt$(date '+%M%S')"
 TOC_JSON_DIGEST_ANNOTATION="containerd.io/snapshot/stargz/toc.digest"
 UNCOMPRESSED_SIZE_ANNOTATION="io.containers.estargz.uncompressed-size"
 REMOTE_SNAPSHOTTER_SOCKET=/run/containerd-stargz-grpc/containerd-stargz-grpc.sock
+TESTSERVER_HOST=testserver.test
 
 ## Image for doing network-related tests
 #
@@ -269,7 +270,7 @@ check_optimization "${NOOPT_IMAGE_TAG}" \
 # c.f. https://github.com/moby/moby/issues/26824
 update-alternatives --set iptables /usr/sbin/iptables-legacy
 
-# Try to connect to the internet from the container
+# Check network connectivity
 # CNI-related files are installed to irregular paths (see Dockerfile for more details).
 # Check if these files are recognized through flags.
 TESTDIR=$(mktemp -d)
@@ -279,15 +280,13 @@ TESTDIR=$(mktemp -d)
                     --cni-plugin-conf-dir='/etc/tmp/cni/net.d' \
                     --cni-plugin-dir='/opt/tmp/cni/bin' \
                     --add-hosts='testhost:1.2.3.4,test2:5.6.7.8' \
-                    --dns-nameservers='8.8.8.8' \
                     --mount="type=bind,src=${TESTDIR},dst=/mnt,options=bind" \
                     --entrypoint='[ "/bin/bash", "-c" ]' \
-                    --args='[ "curl example.com > /mnt/result_page && ip a show dev eth0 ; echo -n $? > /mnt/if_exists && ip a > /mnt/if_info && cat /etc/hosts > /mnt/hosts" ]' \
+                    --args='[ "curl -fv http://'"$(dig +short ${TESTSERVER_HOST})"' ; echo -n $? > /mnt/accessed && ip a show dev eth0 ; echo -n $? > /mnt/if_exists && ip a > /mnt/if_info && cat /etc/hosts > /mnt/hosts" ]' \
                     "${NETWORK_MOUNT_TEST_ORG_IMAGE_TAG}" "${REGISTRY_HOST}/test:1"
 
 # Check if all contents are successfuly passed
 if ! [ -f "${TESTDIR}/if_exists" ] || \
-        ! [ -f "${TESTDIR}/result_page" ] || \
         ! [ -f "${TESTDIR}/if_info" ] || \
         ! [ -f "${TESTDIR}/hosts" ]; then
     echo "the result files not found; bind-mount might not work"
@@ -315,24 +314,9 @@ fi
 echo "Interface created:"
 cat "${TESTDIR}/if_info"
 
-# Check if the contents are downloaded from the internet
-SAMPLE_PAGE=$(mktemp)
-curl example.com > "${SAMPLE_PAGE}"
-if ! [ -s "${SAMPLE_PAGE}" ] ; then
-    echo "sample page file is empty; failed to get the contents of example.com; check the internet connection"
+# Check if the request succeeded
+if [ "$(cat ${TESTDIR}/accessed)" != "0" ] ; then
     exit 1
 fi
-echo "sample contents of example.com"
-cat "${SAMPLE_PAGE}"
-SAMPLE_PAGE_SHA256=$(cat "${SAMPLE_PAGE}" | sha256sum | sed -E 's/([^ ]*).*/sha256:\1/g')
-RESULT_PAGE_SHA256=$(cat "${TESTDIR}/result_page" | sha256sum | sed -E 's/([^ ]*).*/sha256:\1/g')
-if [ "${SAMPLE_PAGE_SHA256}" != "${RESULT_PAGE_SHA256}" ] ; then
-    echo "failed to get expected contents from the internet, inside the container: ${SAMPLE_PAGE_SHA256} != ${RESULT_PAGE_SHA256}"
-    echo "got contetns:"
-    cat "${TESTDIR}/result_page"
-    exit 1
-fi
-echo "expected contents successfly downloaded from the internet, in the container. contents:"
-cat "${TESTDIR}/result_page"
 
 exit 0
