@@ -13,7 +13,7 @@ require (
 	github.com/containerd/stargz-snapshotter v0.15.2-0.20240622031358-6405f362966d
 	github.com/containerd/stargz-snapshotter/estargz v0.17.0
 	github.com/containerd/stargz-snapshotter/ipfs v0.15.2-0.20240622031358-6405f362966d
-	github.com/coreos/go-systemd/v22 v22.5.0
+	github.com/coreos/go-systemd/v22 v22.6.0
 	github.com/docker/go-metrics v0.0.1
 	github.com/goccy/go-json v0.10.5
 	github.com/klauspost/compress v1.18.0
@@ -23,7 +23,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.6.0
 	github.com/urfave/cli/v2 v2.27.7
-	go.etcd.io/bbolt v1.4.2
+	go.etcd.io/bbolt v1.4.3
 	golang.org/x/sync v0.16.0
 	golang.org/x/sys v0.35.0
 	google.golang.org/grpc v1.74.2
