@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -25,6 +26,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
@@ -35,6 +37,7 @@ import (
 	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/analyzer"
+	analyzerrecorder "github.com/containerd/stargz-snapshotter/analyzer/recorder"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
@@ -117,6 +120,10 @@ var OptimizeCommand = &cli.Command{
 			Usage: "zstd:chunked compression level",
 			Value: 3, // SpeedDefault; see also https://pkg.go.dev/github.com/klauspost/compress/zstd#EncoderLevel
 		},
+		&cli.StringFlag{
+			Name:  "prefetch-list",
+			Usage: "path to a text file containing list of files to prefetch (one file path per line)",
+		},
 	}, samplerFlags...),
 	Action: func(clicontext *cli.Context) error {
 		convertOpts := []converter.Opt{}
@@ -124,6 +131,10 @@ var OptimizeCommand = &cli.Command{
 		targetRef := clicontext.Args().Get(1)
 		if srcRef == "" || targetRef == "" {
 			return errors.New("src and target image need to be specified")
+		}
+
+		if clicontext.Bool("no-optimize") && clicontext.String("prefetch-list") != "" {
+			return errors.New("--no-optimize and --prefetch-list cannot be used together")
 		}
 
 		var platformMC platforms.MatchComparer
@@ -248,9 +259,119 @@ func writeContentFile(ctx context.Context, client *containerd.Client, dgst diges
 	return err
 }
 
+func readPrefetchList(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open prefetch list file: %w", err)
+	}
+	defer file.Close()
+
+	var paths []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			paths = append(paths, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read prefetch list file: %w", err)
+	}
+
+	return paths, nil
+}
+
+func analyzePrefetchList(ctx context.Context, client *containerd.Client, srcRef string, prefetchPaths []string) (digest.Digest, map[digest.Digest][]estargz.Option, func(converter.ConvertFunc) converter.ConvertFunc, error) {
+	cs := client.ContentStore()
+	is := client.ImageService()
+
+	srcImg, err := is.Get(ctx, srcRef)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	manifestDesc, err := containerdutil.ManifestDesc(ctx, cs, srcImg.Target, platforms.DefaultStrict())
+	if err != nil {
+		return "", nil, nil, err
+	}
+	p, err := content.ReadBlob(ctx, cs, manifestDesc)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(p, &manifest); err != nil {
+		return "", nil, nil, err
+	}
+
+	rc, err := analyzerrecorder.NewImageRecorder(ctx, cs, srcImg, platforms.DefaultStrict())
+	if err != nil {
+		return "", nil, nil, err
+	}
+	defer rc.Close()
+
+	for _, filePath := range prefetchPaths {
+		if err := rc.Record(filePath); err != nil {
+			log.G(ctx).WithError(err).Debugf("failed to record %q", filePath)
+		}
+	}
+
+	recordOut, err := rc.Commit(ctx)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	layerLogs := make(map[digest.Digest][]string, len(manifest.Layers))
+	ra, err := cs.ReaderAt(ctx, ocispec.Descriptor{Digest: recordOut})
+	if err != nil {
+		return "", nil, nil, err
+	}
+	defer ra.Close()
+	dec := json.NewDecoder(io.NewSectionReader(ra, 0, ra.Size()))
+	added := make(map[digest.Digest]map[string]struct{}, len(manifest.Layers))
+	for dec.More() {
+		var e recorder.Entry
+		if err := dec.Decode(&e); err != nil {
+			return "", nil, nil, err
+		}
+		if *e.LayerIndex < len(manifest.Layers) &&
+			e.ManifestDigest == manifestDesc.Digest.String() {
+			dgst := manifest.Layers[*e.LayerIndex].Digest
+			if added[dgst] == nil {
+				added[dgst] = map[string]struct{}{}
+			}
+			if _, ok := added[dgst][e.Path]; !ok {
+				added[dgst][e.Path] = struct{}{}
+				layerLogs[dgst] = append(layerLogs[dgst], e.Path)
+			}
+		}
+	}
+
+	layerOpts := make(map[digest.Digest][]estargz.Option, len(manifest.Layers))
+	for _, desc := range manifest.Layers {
+		if layerLog, ok := layerLogs[desc.Digest]; ok && len(layerLog) > 0 {
+			layerOpts[desc.Digest] = []estargz.Option{estargz.WithPrioritizedFiles(layerLog)}
+		}
+	}
+
+	return recordOut, layerOpts, nil, nil
+}
+
 func analyze(ctx context.Context, clicontext *cli.Context, client *containerd.Client, srcRef string) (digest.Digest, map[digest.Digest][]estargz.Option, func(converter.ConvertFunc) converter.ConvertFunc, error) {
 	if clicontext.Bool("no-optimize") {
 		return "", nil, nil, nil
+	}
+
+	if prefetchListPath := clicontext.String("prefetch-list"); prefetchListPath != "" {
+		log.G(ctx).Infof("using prefetch list from %s", prefetchListPath)
+		prefetchPaths, err := readPrefetchList(prefetchListPath)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("failed to read prefetch list: %w", err)
+		}
+		if len(prefetchPaths) == 0 {
+			log.G(ctx).Warnf("prefetch list is empty")
+			return "", nil, nil, nil
+		}
+		return analyzePrefetchList(ctx, client, srcRef, prefetchPaths)
 	}
 
 	// Do analysis only when the target platforms contain the current platform
