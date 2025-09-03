@@ -55,6 +55,7 @@ type ImageRecorder struct {
 	manifestDigest digest.Digest
 	recordW        content.Writer
 	recordWMu      sync.Mutex
+	recorded       map[string]struct{}
 }
 
 func NewImageRecorder(ctx context.Context, cs content.Store, img images.Image, platformMC platforms.MatchComparer) (*ImageRecorder, error) {
@@ -126,6 +127,7 @@ func imageRecorderFromManifest(ctx context.Context, cs content.Store, manifestDe
 		index:          filesMap,
 		recordW:        recordW,
 		manifestDigest: manifestDesc.Digest,
+		recorded:       make(map[string]struct{}),
 	}, nil
 }
 
@@ -137,6 +139,11 @@ func (r *ImageRecorder) Record(name string) error {
 	defer r.recordWMu.Unlock()
 
 	name = cleanEntryName(name)
+
+	if _, ok := r.recorded[name]; ok {
+		return nil
+	}
+
 	index := -1
 	for i := len(r.index) - 1; i >= 0; i-- {
 		if _, ok := r.index[i][name]; ok {
@@ -157,6 +164,8 @@ func (r *ImageRecorder) Record(name string) error {
 	if index < 0 {
 		return fmt.Errorf("file %q not found in index", name)
 	}
+
+	r.recorded[name] = struct{}{}
 	return r.r.Record(&recorder.Entry{
 		Path:           name,
 		ManifestDigest: r.manifestDigest.String(),
