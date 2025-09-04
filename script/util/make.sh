@@ -34,7 +34,7 @@ trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM golang:${GOBASE_VERSION}
-RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3
+RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3 gzip pigz
 EOF
 MAKECMD="make ${@} PREFIX=/tmp/out/"
 docker build -t "${IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
