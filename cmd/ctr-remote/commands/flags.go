@@ -234,7 +234,7 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 			} else {
 				devices, useAll := parseGPUs(clicontext.String("gpus"))
 				if useAll {
-					opts = append(opts, nvidia.WithGPUs(nvidia.WithAllCapabilities))
+					opts = append(opts, nvidia.WithGPUs(nvidia.WithAllDevices, nvidia.WithAllCapabilities))
 				} else if len(devices) > 0 {
 					opts = append(opts, nvidia.WithGPUs(nvidia.WithDevices(devices...), nvidia.WithAllCapabilities))
 				}
