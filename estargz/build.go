@@ -660,6 +660,22 @@ func decompressBlob(org *io.SectionReader, tmp *tempFiles) (*io.SectionReader, e
 	var dR io.Reader
 	if bytes.Equal([]byte{0x1F, 0x8B, 0x08}, src[:3]) {
 		// gzip
+		// Attempt decompression using commands in priority order: pigz > igzip > gzip
+		cmdPath := getDecompressCmdPath()
+		if cmdPath != "" {
+			b, err := tmp.TempFile("", "uncompresseddata")
+			if err != nil {
+				return nil, err
+			}
+			err = runCmdDecompress(
+				cmdPath,
+				io.NewSectionReader(org, 0, org.Size()),
+				b)
+			if err != nil {
+				return nil, err
+			}
+			return fileSectionReader(b)
+		}
 		dgR, err := gzip.NewReader(io.NewSectionReader(org, 0, org.Size()))
 		if err != nil {
 			return nil, err
