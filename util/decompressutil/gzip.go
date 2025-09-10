@@ -20,13 +20,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
-	"github.com/containerd/stargz-snapshotter/estargz"
 	"io"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/containerd/stargz-snapshotter/estargz"
 )
 
 const disablePrefix = "ESGZ_DISABLE_"
@@ -67,7 +68,7 @@ func getCmdGzipHelperFunc(cmdPath string) estargz.GzipHelperFunc {
 
 		go func() {
 			if err := cmd.Wait(); err != nil {
-				writer.CloseWithError(fmt.Errorf("%s: %s", err, errBuf.String()))
+				writer.CloseWithError(fmt.Errorf("gzip helper failed, %s: %s", err, errBuf.String()))
 			}
 			writer.Close()
 		}()
