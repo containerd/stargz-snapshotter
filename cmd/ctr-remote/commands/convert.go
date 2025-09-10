@@ -91,7 +91,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		&cli.StringFlag{
 			Name:    "estargz-gzip-helper",
 			Aliases: []string{"GH"},
-			Usage:   "Helper command to decompress the layer. This is used when the layer is compressed with gzip",
+			Usage:   "Helper command for decompressing layers compressed with gzip. Options: pigz, igzip, or gzip.",
 			Value:   "", // see also https://github.com/containerd/stargz-snapshotter/pull/2117
 		},
 		// zstd:chunked flags
