@@ -21,22 +21,14 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
 )
 
-const disablePrefix = "ESGZ_DISABLE_"
-
-type lookuper func(cmd string) (string, error)
-
 var (
 	findCmdOnce sync.Once
-	printOnce   sync.Once
 	gzipPath    string
 	pigzPath    string
 	igzipPath   string
@@ -104,39 +96,17 @@ func GetGzipHelperFunc(gzipHelper string) (estargz.GzipHelperFunc, error) {
 	}
 
 	if cmdPath == "" {
-		printOnce.Do(func() {
-			fmt.Printf("Warning: Gzip helper '%s' not found or disabled by environment variable. "+
-				"Falling back to Go standard library implementation.\n", gzipHelper)
-		})
+		fmt.Printf("Warning: Gzip helper '%s' not found "+
+			"Falling back to Go standard library implementation.\n", gzipHelper)
 		return getGoGzipHelperFunc(), nil
 	}
 	return getCmdGzipHelperFunc(cmdPath), nil
 }
 
 func findCmdPath(cmd string) string {
-	return findCmdPathWithLookuper(cmd, exec.LookPath)
-}
-
-func findCmdPathWithLookuper(cmd string, lookuper lookuper) string {
-	path, err := lookuper(cmd)
+	path, err := exec.LookPath(cmd)
 	if err != nil {
 		return ""
 	}
-
-	// Check if cmd disabled via env variable
-	value := os.Getenv(disablePrefix + strings.ToUpper(cmd))
-	if value == "" {
-		return path
-	}
-
-	disable, err := strconv.ParseBool(value)
-	if err != nil {
-		return path
-	}
-
-	if disable {
-		return ""
-	}
-
 	return path
 }
