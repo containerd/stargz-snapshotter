@@ -37,6 +37,7 @@ import (
 	esgzexternaltocconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz/externaltoc"
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
+	"github.com/containerd/stargz-snapshotter/util/decompressutil"
 	"github.com/klauspost/compress/zstd"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli/v2"
@@ -86,6 +87,12 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		&cli.BoolFlag{
 			Name:  "estargz-keep-diff-id",
 			Usage: "convert to esgz without changing diffID (cannot be used in conjunction with '--estargz-record-in'. must be specified with '--estargz-external-toc')",
+		},
+		&cli.StringFlag{
+			Name:    "estargz-gzip-helper",
+			Aliases: []string{"GH"},
+			Usage:   "Helper command for decompressing layers compressed with gzip. Options: pigz, igzip, or gzip.",
+			Value:   "", // see also https://github.com/containerd/stargz-snapshotter/pull/2117
 		},
 		// zstd:chunked flags
 		&cli.BoolFlag{
@@ -280,6 +287,13 @@ func getESGZConvertOpts(context *cli.Context) ([]estargz.Option, error) {
 		esgzOpts = append(esgzOpts, estargz.WithPrioritizedFiles(paths))
 		var ignored []string
 		esgzOpts = append(esgzOpts, estargz.WithAllowPrioritizeNotFound(&ignored))
+	}
+	if estargzGzipHelper := context.String("estargz-gzip-helper"); estargzGzipHelper != "" {
+		gzipHelperFunc, err := decompressutil.GetGzipHelperFunc(estargzGzipHelper)
+		if err != nil {
+			return nil, err
+		}
+		esgzOpts = append(esgzOpts, estargz.WithGzipHelperFunc(gzipHelperFunc))
 	}
 	return esgzOpts, nil
 }
