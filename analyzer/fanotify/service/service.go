@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/conn"
@@ -91,6 +92,123 @@ func Serve(target string, r io.Reader, w io.Writer) error {
 		}
 
 		continue
+	}
+
+	return nil
+}
+
+type PreContainerMonitor struct {
+	targetDir string
+	file      *os.File
+	paths     map[string]struct{}
+	mu        sync.RWMutex
+	done      chan struct{}
+	closed    bool
+	closeMu   sync.Mutex
+}
+
+func NewPreContainerMonitor(targetDir string) *PreContainerMonitor {
+	return &PreContainerMonitor{
+		targetDir: targetDir,
+		paths:     make(map[string]struct{}),
+		done:      make(chan struct{}),
+	}
+}
+
+func (m *PreContainerMonitor) Start() error {
+	fd, err := unix.FanotifyInit(unix.FAN_CLASS_NOTIF, unix.O_RDONLY)
+	if err != nil {
+		return fmt.Errorf("fanotify_init: %w", err)
+	}
+	m.file = os.NewFile(uintptr(fd), "fanotify")
+
+	if err := unix.FanotifyMark(fd,
+		unix.FAN_MARK_ADD|unix.FAN_MARK_FILESYSTEM,
+		unix.FAN_ACCESS|unix.FAN_OPEN,
+		unix.AT_FDCWD,
+		m.targetDir,
+	); err != nil {
+		m.file.Close()
+		return fmt.Errorf("fanotify_mark: %w", err)
+	}
+
+	return nil
+}
+
+func (m *PreContainerMonitor) Monitor() error {
+	if m.file == nil {
+		return fmt.Errorf("monitor not started")
+	}
+
+	nr := bufio.NewReader(m.file)
+
+	for {
+		event := &unix.FanotifyEventMetadata{}
+		if err := binary.Read(nr, binary.LittleEndian, event); err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			select {
+			case <-m.done:
+				return nil
+			default:
+			}
+			return fmt.Errorf("read fanotify fd: %w", err)
+		}
+
+		if event.Vers != unix.FANOTIFY_METADATA_VERSION {
+			return fmt.Errorf("fanotify version mismatch %d(got) != %d(want)",
+				event.Vers, unix.FANOTIFY_METADATA_VERSION)
+		}
+
+		if event.Fd < 0 {
+			fmt.Fprintf(os.Stderr, "Warn: queue overflow")
+			continue
+		}
+
+		path, err := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", event.Fd))
+		if err != nil {
+			unix.Close(int(event.Fd))
+			continue
+		}
+
+		m.mu.Lock()
+		m.paths[path] = struct{}{}
+		m.mu.Unlock()
+
+		if err := unix.Close(int(event.Fd)); err != nil {
+			fmt.Fprintf(os.Stderr, "Warn: failed to close fd %d: %v", event.Fd, err)
+		}
+	}
+}
+
+func (m *PreContainerMonitor) GetPaths() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	paths := make([]string, 0, len(m.paths))
+	for path := range m.paths {
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func (m *PreContainerMonitor) Close() error {
+	m.closeMu.Lock()
+	defer m.closeMu.Unlock()
+
+	if m.closed {
+		return nil
+	}
+	m.closed = true
+
+	close(m.done)
+
+	if m.file != nil {
+		if err := m.file.Close(); err != nil {
+			return fmt.Errorf("failed to close fanotify fd: %w", err)
+		}
+		m.file = nil
 	}
 
 	return nil

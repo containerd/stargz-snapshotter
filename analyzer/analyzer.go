@@ -41,6 +41,7 @@ import (
 	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 	"github.com/containerd/stargz-snapshotter/analyzer/fanotify"
+	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/service"
 	"github.com/containerd/stargz-snapshotter/analyzer/recorder"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
@@ -95,6 +96,26 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 		return "", err
 	}
 	defer cleanup()
+
+	var preMonitorEnabled bool
+	var preMonitor *service.PreContainerMonitor
+	if aOpts.preMonitor {
+		preMonitor = service.NewPreContainerMonitor(target)
+		if err := preMonitor.Start(); err != nil {
+			return "", fmt.Errorf("failed to start pre-container monitor: %w", err)
+		}
+		preMonitorEnabled = true
+		defer func() {
+			if err := preMonitor.Close(); err != nil {
+				log.G(ctx).WithError(err).Warnf("failed to close pre-container monitor")
+			}
+		}()
+		go func() {
+			if err := preMonitor.Monitor(); err != nil {
+				log.G(ctx).WithError(err).Warnf("pre-container monitor failed")
+			}
+		}()
+	}
 
 	// Spawn a fanotifier process in a new mount namespace and setup recorder.
 	fanotifier, err := fanotify.SpawnFanotifier("/proc/self/exe")
@@ -195,6 +216,21 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 		return "", err
 	}
 	defer rc.Close()
+
+	if preMonitorEnabled {
+		prePaths := preMonitor.GetPaths()
+		for _, path := range prePaths {
+			cleanPath := path
+			if strings.HasPrefix(path, target) {
+				cleanPath = strings.TrimPrefix(path, target)
+			}
+			if err := rc.Record(cleanPath); err != nil {
+				log.G(ctx).WithError(err).Debugf("failed to record pre-container path %q", cleanPath)
+			}
+		}
+		log.G(ctx).Infof("recorded %d paths from pre-container monitor", len(prePaths))
+	}
+
 	if err := fanotifier.Start(); err != nil {
 		return "", fmt.Errorf("failed to start fanotifier: %w", err)
 	}
