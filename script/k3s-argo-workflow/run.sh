@@ -19,7 +19,7 @@ set -euo pipefail
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
 
-K3S_VERSION=master
+K3S_VERSION=release-1.33
 K3S_REPO=https://github.com/k3s-io/k3s
 K3S_CONTAINERD_REPO=https://github.com/k3s-io/containerd
 ARGO_VERSION=v3.6.4
