@@ -58,6 +58,14 @@ ctr-remote image push --plain-http registry2:5000/golang:1.15.3-esgz
 When you run `ctr-remote image optimize`, this runs the source image (`ghcr.io/stargz-containers/golang:1.15.3-buster-org`) as a container and profiles all file accesses during the execution.
 Then these accessed files are marked as "prioritized" files and will be prefetched on runtime.
 
+You can specify the `--estargz-gzip-helper` flag to specify a command-line helper tool for gzip decompression during optimization. Using command-line tools can speed up the decompression of the original image, thereby accelerating the overall optimization process. Even using the gzip command corresponding to the Go gzip library can achieve approximately 32% speed improvement. For more details, see: [Using decompression commands to improve the layer decompression speed of gzip-formatted images](https://github.com/containerd/stargz-snapshotter/pull/2117). Currently, `--estargz-gzip-helper` only supports `pigz`, `igzip`, and `gzip`.
+
+The following example uses the `pigz` command to accelerate the optimization process:
+
+```console
+# ctr-remote image optimize --oci --estargz-gzip-helper pigz ghcr.io/stargz-containers/golang:1.15.3-buster-org registry2:5000/golang:1.15.3-esgz
+```
+
 You can specify the GZIP compression level the converter should use using the `--estargz-compression-level` flag. The values range from 1-9. If the flag isn't provided, the compression level will default to 9.
 
 A value of 9 indicates the archive will be gzipped with max compression. This will reduce the bytes transferred over the network but increase the CPU cycles required to decompress the payload. Whereas gzip compression value 1 indicates archive will be gzipped with least compression. This will increase the bytes transferred over the network but decreases the CPU cycles required to decompress the payload. This value should be chosen based on the workload and host characteristics.
