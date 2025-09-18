@@ -189,21 +189,22 @@ var OptimizeCommand = &cli.Command{
 		if clicontext.Bool("zstdchunked") {
 			f = zstdchunkedconvert.LayerConvertWithLayerOptsFuncWithCompressionLevel(
 				zstd.EncoderLevelFromZstd(clicontext.Int("zstdchunked-compression-level")), esgzOptsPerLayer)
-		} else if !clicontext.Bool("estargz-external-toc") {
-			f = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer,
-				estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")),
-				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
-				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")))
 		} else {
-			if clicontext.Bool("reuse") {
+			esgzOpts := []estargz.Option{
+				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
+				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")),
+			}
+			if !clicontext.Bool("estargz-external-toc") {
+				esgzOpts = append(esgzOpts, estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")))
+				f = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, esgzOpts...)
+			} else if clicontext.Bool("reuse") {
 				// We require that the layer conversion is triggerd for each layer
 				// to make sure that "finalize" function has the information of all layers.
 				return fmt.Errorf("\"estargz-external-toc\" can't be used with \"reuse\" flag")
+			} else {
+				f, finalize = esgzexternaltocconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, esgzOpts,
+					clicontext.Int("estargz-compression-level"))
 			}
-			f, finalize = esgzexternaltocconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, []estargz.Option{
-				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
-				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")),
-			}, clicontext.Int("estargz-compression-level"))
 		}
 		if wrapper != nil {
 			f = wrapper(f)
