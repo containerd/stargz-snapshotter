@@ -66,8 +66,13 @@ func LayerConvertFunc(esgzOpts []estargz.Option, compressionLevel int) (convertF
 // LayerConvertFunc for more details. The difference between this function and
 // LayerConvertFunc is that this allows to specify additional eStargz options per layer.
 func LayerConvertWithLayerAndCommonOptsFunc(opts map[digest.Digest][]estargz.Option, commonOpts []estargz.Option, compressionLevel int) (convertFunc converter.ConvertFunc, finalize func(ctx context.Context, cs content.Store, ref string, desc *ocispec.Descriptor) (*images.Image, error)) {
+	// explicitly copy the incoming commonOpts parameter to
+	// avoid the data race problem, see also https://github.com/containerd/stargz-snapshotter/issues/2132
+	copiedCommonOpts := make([]estargz.Option, len(commonOpts))
+	copy(copiedCommonOpts, commonOpts)
+
 	return layerConvert(func(c estargz.Compression) converter.ConvertFunc {
-		return estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(opts, append(commonOpts,
+		return estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(opts, append(copiedCommonOpts,
 			estargz.WithCompression(c),
 		)...)
 	}, compressionLevel)
