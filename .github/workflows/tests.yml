@@ -36,7 +36,7 @@ jobs:
     - uses: actions/checkout@v5
       with:
         fetch-depth: '0'
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v6
       with:
         go-version: '1.24.x'
     - name: golangci-lint
@@ -239,7 +239,7 @@ jobs:
     runs-on: ubuntu-24.04
     name: K3S
     steps:
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v6
       with:
         go-version: '1.24.x'
     - name: Install k3d
@@ -269,7 +269,7 @@ jobs:
     env:
       RESULT_DIR: ${{ github.workspace }}/argo-workflow/
     steps:
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v6
       with:
         go-version: '1.24.x'
     - name: Install k3d
@@ -314,7 +314,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.24.x'
       - uses: actions/checkout@v5
