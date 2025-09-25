@@ -52,7 +52,7 @@ func parseFlags() {
 	flag.StringVar(&fuseStoreAddr, "fusestore-path", "/var/lib/containerd-stargz-grpc/fusestore.db", "address for the fusemanager's store")
 	flag.StringVar(&address, "address", "/run/containerd-stargz-grpc/fuse-manager.sock", "address for the fusemanager's gRPC socket")
 	flag.StringVar(&logLevel, "log-level", logrus.InfoLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
-	flag.StringVar(&logPath, "log-path", "", "path to fusemanager's logs, no log recorded if empty")
+	flag.StringVar(&logPath, "log-path", "", "path to fusemanager's logs, logs to stderr by default, pass --log-level=panic to disable logging")
 
 	flag.Parse()
 }
@@ -113,7 +113,10 @@ func startNew(ctx context.Context, logPath, address, fusestore, logLevel string)
 		Setpgid: true,
 	}
 
-	if logPath != "" {
+	if logPath == "" {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
 		err := os.Remove(logPath)
 		if err != nil && !os.IsNotExist(err) {
 			return err
