@@ -38,7 +38,6 @@ import (
 )
 
 var (
-	debugFlag     bool
 	versionFlag   bool
 	fuseStoreAddr string
 	address       string
@@ -48,7 +47,6 @@ var (
 )
 
 func parseFlags() {
-	flag.BoolVar(&debugFlag, "debug", false, "enable debug output in logs")
 	flag.BoolVar(&versionFlag, "v", false, "show the fusemanager version and exit")
 	flag.StringVar(&action, "action", "", "action of fusemanager")
 	flag.StringVar(&fuseStoreAddr, "fusestore-path", "/var/lib/containerd-stargz-grpc/fusestore.db", "address for the fusemanager's store")
