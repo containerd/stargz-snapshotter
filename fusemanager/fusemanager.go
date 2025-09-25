@@ -117,10 +117,6 @@ func startNew(ctx context.Context, logPath, address, fusestore, logLevel string)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	} else {
-		err := os.Remove(logPath)
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
 		file, err := os.Create(logPath)
 		if err != nil {
 			return err
