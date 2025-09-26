@@ -45,6 +45,7 @@ import (
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
+	"github.com/containerd/stargz-snapshotter/util/decompressutil"
 	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -110,6 +111,12 @@ var OptimizeCommand = &cli.Command{
 			Name:  "estargz-min-chunk-size",
 			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand (not applied to zstd:chunked)",
 			Value: 0,
+		},
+		&cli.StringFlag{
+			Name:    "estargz-gzip-helper",
+			Aliases: []string{"GH"},
+			Usage:   "Helper command for decompressing layers compressed with gzip. Options: pigz, igzip, or gzip.",
+			Value:   "", // see also https://github.com/containerd/stargz-snapshotter/pull/2117
 		},
 		&cli.BoolFlag{
 			Name:  "zstdchunked",
@@ -189,21 +196,35 @@ var OptimizeCommand = &cli.Command{
 		if clicontext.Bool("zstdchunked") {
 			f = zstdchunkedconvert.LayerConvertWithLayerOptsFuncWithCompressionLevel(
 				zstd.EncoderLevelFromZstd(clicontext.Int("zstdchunked-compression-level")), esgzOptsPerLayer)
-		} else if !clicontext.Bool("estargz-external-toc") {
-			f = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer,
-				estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")),
-				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
-				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")))
 		} else {
-			if clicontext.Bool("reuse") {
+			esgzBaseOpts := []estargz.Option{
+				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
+				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")),
+			}
+			if estargzGzipHelper := clicontext.String("estargz-gzip-helper"); estargzGzipHelper != "" {
+				gzipHelperFunc, err := decompressutil.GetGzipHelperFunc(estargzGzipHelper)
+				if err != nil {
+					return err
+				}
+				esgzBaseOpts = append(esgzBaseOpts, estargz.WithGzipHelperFunc(gzipHelperFunc))
+			}
+			if !clicontext.Bool("estargz-external-toc") {
+				// copy esgzBaseOpts to esgzOpts to avoid data race
+				esgzOpts := make([]estargz.Option, len(esgzBaseOpts)+1)
+				copy(esgzOpts, esgzBaseOpts)
+				esgzOpts[len(esgzBaseOpts)] = estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level"))
+				f = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, esgzOpts...)
+			} else if clicontext.Bool("reuse") {
 				// We require that the layer conversion is triggerd for each layer
 				// to make sure that "finalize" function has the information of all layers.
 				return fmt.Errorf("\"estargz-external-toc\" can't be used with \"reuse\" flag")
+			} else {
+				// copy esgzBaseOpts to esgzOpts to avoid data race
+				esgzOpts := make([]estargz.Option, len(esgzBaseOpts))
+				copy(esgzOpts, esgzBaseOpts)
+				f, finalize = esgzexternaltocconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, esgzOpts,
+					clicontext.Int("estargz-compression-level"))
 			}
-			f, finalize = esgzexternaltocconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, []estargz.Option{
-				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
-				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")),
-			}, clicontext.Int("estargz-compression-level"))
 		}
 		if wrapper != nil {
 			f = wrapper(f)
