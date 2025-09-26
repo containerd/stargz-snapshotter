@@ -55,6 +55,8 @@ func NewCRIKeychain(ctx context.Context, connectCRI func() (runtime.ImageService
 }
 
 type instrumentedService struct {
+	runtime.UnimplementedImageServiceServer
+
 	cri   runtime.ImageServiceClient
 	criMu sync.Mutex
 
