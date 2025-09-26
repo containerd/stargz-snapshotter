@@ -38,7 +38,6 @@ import (
 )
 
 var (
-	debugFlag     bool
 	versionFlag   bool
 	fuseStoreAddr string
 	address       string
@@ -48,13 +47,12 @@ var (
 )
 
 func parseFlags() {
-	flag.BoolVar(&debugFlag, "debug", false, "enable debug output in logs")
 	flag.BoolVar(&versionFlag, "v", false, "show the fusemanager version and exit")
 	flag.StringVar(&action, "action", "", "action of fusemanager")
 	flag.StringVar(&fuseStoreAddr, "fusestore-path", "/var/lib/containerd-stargz-grpc/fusestore.db", "address for the fusemanager's store")
 	flag.StringVar(&address, "address", "/run/containerd-stargz-grpc/fuse-manager.sock", "address for the fusemanager's gRPC socket")
 	flag.StringVar(&logLevel, "log-level", logrus.InfoLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
-	flag.StringVar(&logPath, "log-path", "", "path to fusemanager's logs, no log recorded if empty")
+	flag.StringVar(&logPath, "log-path", "", "path to fusemanager's logs, logs to stderr by default, pass --log-level=panic to disable logging")
 
 	flag.Parse()
 }
@@ -115,11 +113,10 @@ func startNew(ctx context.Context, logPath, address, fusestore, logLevel string)
 		Setpgid: true,
 	}
 
-	if logPath != "" {
-		err := os.Remove(logPath)
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
+	if logPath == "" {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
 		file, err := os.Create(logPath)
 		if err != nil {
 			return err
