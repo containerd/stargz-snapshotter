@@ -39,13 +39,18 @@ import (
 // LayerConvertFunc for more details. The difference between this function and
 // LayerConvertFunc is that this allows to specify additional eStargz options per layer.
 func LayerConvertWithLayerAndCommonOptsFunc(opts map[digest.Digest][]estargz.Option, commonOpts ...estargz.Option) converter.ConvertFunc {
+	// explicitly copy the incoming commonOpts parameter to
+	// avoid the data race problem, see also https://github.com/containerd/stargz-snapshotter/issues/2132
+	copiedCommonOpts := make([]estargz.Option, len(commonOpts))
+	copy(copiedCommonOpts, commonOpts)
+
 	if opts == nil {
-		return LayerConvertFunc(commonOpts...)
+		return LayerConvertFunc(copiedCommonOpts...)
 	}
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
 		// TODO: enable to speciy option per layer "index" because it's possible that there are
 		//       two layers having same digest in an image (but this should be rare case)
-		return LayerConvertFunc(append(commonOpts, opts[desc.Digest]...)...)(ctx, cs, desc)
+		return LayerConvertFunc(append(copiedCommonOpts, opts[desc.Digest]...)...)(ctx, cs, desc)
 	}
 }
 
