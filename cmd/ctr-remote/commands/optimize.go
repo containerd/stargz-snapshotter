@@ -45,6 +45,7 @@ import (
 	zstdchunkedconvert "github.com/containerd/stargz-snapshotter/nativeconverter/zstdchunked"
 	"github.com/containerd/stargz-snapshotter/recorder"
 	"github.com/containerd/stargz-snapshotter/util/containerdutil"
+	"github.com/containerd/stargz-snapshotter/util/decompressutil"
 	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -110,6 +111,12 @@ var OptimizeCommand = &cli.Command{
 			Name:  "estargz-min-chunk-size",
 			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand (not applied to zstd:chunked)",
 			Value: 0,
+		},
+		&cli.StringFlag{
+			Name:    "estargz-gzip-helper",
+			Aliases: []string{"GH"},
+			Usage:   "Helper command for decompressing layers compressed with gzip. Options: pigz, igzip, or gzip.",
+			Value:   "", // see also https://github.com/containerd/stargz-snapshotter/pull/2117
 		},
 		&cli.BoolFlag{
 			Name:  "zstdchunked",
@@ -193,6 +200,13 @@ var OptimizeCommand = &cli.Command{
 			esgzOpts := []estargz.Option{
 				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
 				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")),
+			}
+			if estargzGzipHelper := clicontext.String("estargz-gzip-helper"); estargzGzipHelper != "" {
+				gzipHelperFunc, err := decompressutil.GetGzipHelperFunc(estargzGzipHelper)
+				if err != nil {
+					return err
+				}
+				esgzOpts = append(esgzOpts, estargz.WithGzipHelperFunc(gzipHelperFunc))
 			}
 			if !clicontext.Bool("estargz-external-toc") {
 				esgzOpts = append(esgzOpts, estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")))
