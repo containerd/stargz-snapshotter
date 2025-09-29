@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-K3S_VERSION=master
+K3S_VERSION=main
 K3S_REPO=https://github.com/k3s-io/k3s
 K3S_CONTAINERD_REPO=https://github.com/k3s-io/containerd
 
