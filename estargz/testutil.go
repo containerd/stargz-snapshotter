@@ -1560,6 +1560,9 @@ func testWriteAndOpen(t *TestRunner, controllers ...TestingControllerFactory) {
 							if err != nil {
 								t.Fatalf("stargz.Open: %v", err)
 							}
+							if _, ok := r.Lookup(""); !ok {
+								t.Fatalf("failed to lookup rootdir: %v", err)
+							}
 							wantTOCVersion := 1
 							if tt.wantTOCVersion > 0 {
 								wantTOCVersion = tt.wantTOCVersion
