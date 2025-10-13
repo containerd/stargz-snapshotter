@@ -25,11 +25,9 @@ import (
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/images/converter"
 	"github.com/containerd/containerd/v2/core/images/converter/uncompress"
-	"github.com/containerd/containerd/v2/pkg/archive/compression"
 	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/stargz-snapshotter/estargz"
-	"github.com/containerd/stargz-snapshotter/util/ioutils"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -101,35 +99,13 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			return nil, err
 		}
 
-		// Copy and count the contents
-		pr, pw := io.Pipe()
-		c := new(ioutils.CountWriter)
-		doneCount := make(chan struct{})
-		go func() {
-			defer close(doneCount)
-			defer pr.Close()
-			decompressR, err := compression.DecompressStream(pr)
-			if err != nil {
-				pr.CloseWithError(err)
-				return
-			}
-			defer decompressR.Close()
-			if _, err := io.Copy(c, decompressR); err != nil {
-				pr.CloseWithError(err)
-				return
-			}
-		}()
-		n, err := io.Copy(w, io.TeeReader(blob, pw))
+		n, err := io.Copy(w, blob)
 		if err != nil {
 			return nil, err
 		}
 		if err := blob.Close(); err != nil {
 			return nil, err
 		}
-		if err := pw.Close(); err != nil {
-			return nil, err
-		}
-		<-doneCount
 
 		// update diffID label
 		labelz[labels.LabelUncompressed] = blob.DiffID().String()
@@ -153,7 +129,11 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			newDesc.Annotations = make(map[string]string, 1)
 		}
 		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = blob.TOCDigest().String()
-		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", c.Size())
+		uncompressedSize, err := blob.UncompressedSize()
+		if err != nil {
+			return nil, err
+		}
+		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", uncompressedSize)
 		return &newDesc, nil
 	}
 }

@@ -35,6 +35,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/containerd/stargz-snapshotter/estargz/errorutil"
 	"github.com/klauspost/compress/zstd"
@@ -145,8 +146,10 @@ func WithGzipHelperFunc(gzipHelperFunc GzipHelperFunc) Option {
 // Blob is an eStargz blob.
 type Blob struct {
 	io.ReadCloser
-	diffID    digest.Digester
-	tocDigest digest.Digest
+	diffID           digest.Digester
+	tocDigest        digest.Digest
+	readCompleted    *atomic.Bool
+	uncompressedSize *atomic.Int64
 }
 
 // DiffID returns the digest of uncompressed blob.
@@ -158,6 +161,19 @@ func (b *Blob) DiffID() digest.Digest {
 // TOCDigest returns the digest of uncompressed TOC JSON.
 func (b *Blob) TOCDigest() digest.Digest {
 	return b.tocDigest
+}
+
+// UncompressedSize returns the size of uncompressed blob.
+// UncompressedSize should only be called after the blob has been fully read.
+func (b *Blob) UncompressedSize() (int64, error) {
+	switch {
+	case b.uncompressedSize == nil || b.readCompleted == nil:
+		return -1, fmt.Errorf("readCompleted or uncompressedSize is not initialized")
+	case !b.readCompleted.Load():
+		return -1, fmt.Errorf("called UncompressedSize before the blob has been fully read")
+	default:
+		return b.uncompressedSize.Load(), nil
+	}
 }
 
 // Build builds an eStargz blob which is an extended version of stargz, from a blob (gzip, zstd
@@ -267,17 +283,28 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 	}
 	diffID := digest.Canonical.Digester()
 	pr, pw := io.Pipe()
+	readCompleted := new(atomic.Bool)
+	uncompressedSize := new(atomic.Int64)
 	go func() {
-		r, err := opts.compression.Reader(io.TeeReader(io.MultiReader(append(rs, tocAndFooter)...), pw))
+		var size int64
+		var decompressFunc func(io.Reader) (io.ReadCloser, error)
+		if _, ok := opts.compression.(*gzipCompression); ok && opts.gzipHelperFunc != nil {
+			decompressFunc = opts.gzipHelperFunc
+		} else {
+			decompressFunc = opts.compression.Reader
+		}
+		decompressR, err := decompressFunc(io.TeeReader(io.MultiReader(append(rs, tocAndFooter)...), pw))
 		if err != nil {
 			pw.CloseWithError(err)
 			return
 		}
-		defer r.Close()
-		if _, err := io.Copy(diffID.Hash(), r); err != nil {
+		defer decompressR.Close()
+		if size, err = io.Copy(diffID.Hash(), decompressR); err != nil {
 			pw.CloseWithError(err)
 			return
 		}
+		uncompressedSize.Store(size)
+		readCompleted.Store(true)
 		pw.Close()
 	}()
 	return &Blob{
@@ -285,8 +312,10 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 			Reader:    pr,
 			closeFunc: layerFiles.CleanupAll,
 		},
-		tocDigest: tocDgst,
-		diffID:    diffID,
+		tocDigest:        tocDgst,
+		diffID:           diffID,
+		readCompleted:    readCompleted,
+		uncompressedSize: uncompressedSize,
 	}, nil
 }
 
