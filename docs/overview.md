@@ -111,8 +111,12 @@ To avoid this, we use a fuse daemon called the fuse manager to handle filesystem
 You can enable the fuse manager by adding the following configuration.
 
 ```toml
-[fusem_anager]
+[fuse_manager]
 enable = true
+# address must be an absolute path; default is "/run/containerd-stargz-grpc/fuse-manager.sock"
+address = "/run/containerd-stargz-grpc/fuse-manager.sock"
+# set a custom binary path if the executable is not in PATH
+path = "/usr/local/bin/stargz-fuse-manager"
 ```
 
 ## Killing and restarting Stargz Snapshotter
