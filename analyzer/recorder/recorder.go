@@ -56,6 +56,8 @@ type ImageRecorder struct {
 	recordW        content.Writer
 	recordWMu      sync.Mutex
 	recorded       map[string]struct{}
+	allPaths       map[string]struct{}
+	allPathsOnce   sync.Once
 }
 
 func NewImageRecorder(ctx context.Context, cs content.Store, img images.Image, platformMC platforms.MatchComparer) (*ImageRecorder, error) {
@@ -170,6 +172,46 @@ func (r *ImageRecorder) Record(name string) error {
 		Path:           name,
 		ManifestDigest: r.manifestDigest.String(),
 		LayerIndex:     &index,
+	})
+}
+
+// RecordGlob records all files matching the given glob pattern.
+// Pattern semantics follow path.Match and paths are normalized via cleanEntryName.
+func (r *ImageRecorder) RecordGlob(pattern string, matcher func(string, string) (bool, error)) (int, error) {
+	if pattern == "" {
+		return 0, nil
+	}
+
+	pattern = cleanEntryName(pattern)
+	r.ensureAllPaths()
+
+	var matchedCount int
+	for name := range r.allPaths {
+		matched, err := matcher(pattern, name)
+		if err != nil {
+			return matchedCount, err
+		}
+		if !matched {
+			continue
+		}
+		if err := r.Record(name); err != nil {
+			continue
+		}
+		matchedCount++
+	}
+
+	return matchedCount, nil
+}
+
+func (r *ImageRecorder) ensureAllPaths() {
+	r.allPathsOnce.Do(func() {
+		paths := make(map[string]struct{})
+		for i := range r.index {
+			for name := range r.index[i] {
+				paths[name] = struct{}{}
+			}
+		}
+		r.allPaths = paths
 	})
 }
 

@@ -132,6 +132,28 @@ Other options are also available for configuring the workload.
 |`-t`or`--terminal`|Attach terminal to the container. This flag must be specified with `-i`|
 |`-i`|Attach stdin to the container|
 
+### Prefetch list glob patterns
+
+`ctr-remote image optimize` supports specifying a prefetch list file via `--prefetch-list`. Each line can be a path or a glob pattern. Supported patterns:
+
+- `*` matches any sequence except `/` (single directory level)
+- `?` matches a single character except `/`
+- `[]` character class, e.g. `[ab]`, `[a-z]`
+- `**` recursive wildcard that can match across `/` (multiple directory levels)
+
+Examples:
+
+```
+/usr/bin/*
+/usr/lib/**/*.so
+/var/log/**/app.*.log
+/opt/data/img_[ab].png
+```
+
+Notes:
+- Empty lines and lines starting with `#` are ignored.
+- Paths are normalized internally; both `/foo/bar` and `foo/bar` are accepted.
+
 ## Mounting files from the host
 
 There are several cases where sharing files from host to the container during optimization is useful.

@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/cmd/ctr/commands"
 	"github.com/containerd/containerd/v2/core/content"
@@ -129,7 +130,7 @@ var OptimizeCommand = &cli.Command{
 		},
 		&cli.StringFlag{
 			Name:  "prefetch-list",
-			Usage: "path to a text file containing list of files to prefetch (one file path per line)",
+			Usage: "path to a text file listing files/patterns to prefetch (one per line; supports glob *, ?, [], and **)",
 		},
 	}, samplerFlags...),
 	Action: func(clicontext *cli.Context) error {
@@ -384,6 +385,17 @@ func analyzePrefetchList(
 	defer rc.Close()
 
 	for _, filePath := range prefetchPaths {
+		if strings.ContainsAny(filePath, "*?[") {
+			n, err := rc.RecordGlob(filePath, doublestar.Match)
+			if err != nil {
+				log.G(ctx).WithError(err).Debugf("failed to record by glob %q", filePath)
+				continue
+			}
+			if n == 0 {
+				log.G(ctx).Warnf("glob pattern %q matched no files", filePath)
+			}
+			continue
+		}
 		if err := rc.Record(filePath); err != nil {
 			log.G(ctx).WithError(err).Debugf("failed to record %q", filePath)
 		}
