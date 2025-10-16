@@ -31,6 +31,7 @@ type analyzerOpts struct {
 	terminal     bool
 	stdin        bool
 	waitLineOut  string
+	preMonitor   bool
 }
 
 // Option is runtime configuration of analyzer container
@@ -86,5 +87,12 @@ func WithSnapshotter(snapshotter string) Option {
 func WithWaitLineOut(s string) Option {
 	return func(opts *analyzerOpts) {
 		opts.waitLineOut = s
+	}
+}
+
+// WithPreMonitor enables pre-container monitoring phase.
+func WithPreMonitor() Option {
+	return func(opts *analyzerOpts) {
+		opts.preMonitor = true
 	}
 }

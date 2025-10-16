@@ -441,6 +441,9 @@ func analyze(ctx context.Context, clicontext *cli.Context, client *containerd.Cl
 
 	// Analyze layers and get prioritized files
 	aOpts := []analyzer.Option{analyzer.WithSpecOpts(getSpecOpts(clicontext))}
+	if clicontext.IsSet("gpus") {
+		aOpts = append(aOpts, analyzer.WithPreMonitor())
+	}
 	if clicontext.Bool("wait-on-signal") && clicontext.Bool("terminal") {
 		return "", nil, nil, fmt.Errorf("wait-on-signal can't be used with terminal flag")
 	}
