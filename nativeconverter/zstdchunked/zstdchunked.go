@@ -25,13 +25,11 @@ import (
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/images/converter"
 	"github.com/containerd/containerd/v2/core/images/converter/uncompress"
-	"github.com/containerd/containerd/v2/pkg/archive/compression"
 	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
-	"github.com/containerd/stargz-snapshotter/util/ioutils"
 	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -154,25 +152,7 @@ func LayerConvertFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, op
 			return nil, err
 		}
 
-		// Copy and count the contents
-		pr, pw := io.Pipe()
-		c := new(ioutils.CountWriter)
-		doneCount := make(chan struct{})
-		go func() {
-			defer close(doneCount)
-			defer pr.Close()
-			decompressR, err := compression.DecompressStream(pr)
-			if err != nil {
-				pr.CloseWithError(err)
-				return
-			}
-			defer decompressR.Close()
-			if _, err := io.Copy(c, decompressR); err != nil {
-				pr.CloseWithError(err)
-				return
-			}
-		}()
-		n, err := io.Copy(w, io.TeeReader(blob, pw))
+		n, err := io.Copy(w, blob)
 		if err != nil {
 			return nil, err
 		}
@@ -199,7 +179,11 @@ func LayerConvertFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, op
 		}
 		tocDgst := blob.TOCDigest().String()
 		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = tocDgst
-		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", c.Size())
+		uncompressedSize, err := blob.UncompressedSize()
+		if err != nil {
+			return nil, err
+		}
+		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", uncompressedSize)
 		if p, ok := metadata[zstdchunked.ManifestChecksumAnnotation]; ok {
 			newDesc.Annotations[zstdchunked.ManifestChecksumAnnotation] = p
 		}
