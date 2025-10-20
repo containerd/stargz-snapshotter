@@ -17,7 +17,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.6.0
 	github.com/docker/go-metrics v0.0.1
 	github.com/goccy/go-json v0.10.5
-	github.com/klauspost/compress v1.18.0
+	github.com/klauspost/compress v1.18.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.2.1
