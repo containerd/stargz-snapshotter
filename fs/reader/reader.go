@@ -202,7 +202,7 @@ func (vr *VerifiableReader) cacheWithReader(ctx context.Context, currentDepth in
 
 		var nr int64
 		for nr < e.Size {
-			chunkOffset, chunkSize, chunkDigestStr, ok := fr.ChunkEntryForOffset(nr)
+			chunkOffset, chunkSize, chunkDigestStr, _, ok := fr.ChunkEntryForOffset(nr)
 			if !ok {
 				break
 			}
@@ -238,7 +238,7 @@ func (vr *VerifiableReader) readAndCache(id uint32, fr io.Reader, chunkOffset, c
 
 	// Check if it already exists in the cache
 	cacheID := genID(id, chunkOffset, chunkSize)
-	if r, err := gr.cache.Get(cacheID); err == nil {
+	if r, err := gr.cache.Get(cacheID, cache.ChunkDigest(chunkDigest)); err == nil {
 		r.Close()
 		return nil
 	}
@@ -248,6 +248,7 @@ func (vr *VerifiableReader) readAndCache(id uint32, fr io.Reader, chunkOffset, c
 	if _, err := br.Peek(int(chunkSize)); err != nil {
 		return fmt.Errorf("cacheWithReader.peek: %v", err)
 	}
+	opts = append(opts, cache.ChunkDigest(chunkDigest))
 	w, err := gr.cache.Add(cacheID, opts...)
 	if err != nil {
 		return err
@@ -431,7 +432,7 @@ type file struct {
 func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 	nr := 0
 	for nr < len(p) {
-		chunkOffset, chunkSize, chunkDigestStr, ok := sf.fr.ChunkEntryForOffset(offset + int64(nr))
+		chunkOffset, chunkSize, chunkDigestStr, _, ok := sf.fr.ChunkEntryForOffset(offset + int64(nr))
 		if !ok {
 			break
 		}
@@ -443,7 +444,7 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 		)
 
 		// Check if the content exists in the cache
-		if r, err := sf.gr.cache.Get(id); err == nil {
+		if r, err := sf.gr.cache.Get(id, cache.ChunkDigest(chunkDigestStr)); err == nil {
 			n, err := r.ReadAt(p[nr:int64(nr)+expectedSize], lowerDiscard)
 			if (err == nil || err == io.EOF) && int64(n) == expectedSize {
 				nr += n
@@ -505,20 +506,25 @@ type chunkData struct {
 
 func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (uintptr, error) {
 	var (
-		offset        int64
-		totalSize     int64
-		hasLargeChunk bool
+		offset           int64
+		firstChunkOffset int64
+		totalSize        int64
+		hasLargeChunk    bool
+		fileDigest       string
 	)
 
 	var chunks []chunkData
 	for {
-		chunkOffset, chunkSize, digestStr, ok := sf.fr.ChunkEntryForOffset(offset)
+		chunkOffset, chunkSize, digestStr, digest, ok := sf.fr.ChunkEntryForOffset(offset)
 		if !ok {
 			break
 		}
 		// Check if any chunk size exceeds merge buffer size to avoid bounds out of range
 		if chunkSize > mergeBufferSize {
 			hasLargeChunk = true
+		}
+		if firstChunkOffset == 0 {
+			fileDigest = digest
 		}
 		chunks = append(chunks, chunkData{
 			offset:    chunkOffset,
@@ -532,20 +538,20 @@ func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (u
 	id := genID(sf.id, 0, totalSize)
 
 	// cache.PassThrough() is necessary to take over files
-	r, err := sf.gr.cache.Get(id, cache.PassThrough())
+	r, err := sf.gr.cache.Get(id, cache.PassThrough(), cache.ChunkDigest(fileDigest))
 	if err != nil {
 		if hasLargeChunk {
 			if err := sf.prefetchEntireFileSequential(id); err != nil {
 				return 0, err
 			}
 		} else {
-			if err := sf.prefetchEntireFile(id, chunks, totalSize, mergeBufferSize, mergeWorkerCount); err != nil {
+			if err := sf.prefetchEntireFile(id, chunks, totalSize, mergeBufferSize, mergeWorkerCount, fileDigest); err != nil {
 				return 0, err
 			}
 		}
 
 		// just retry once to avoid exception stuck
-		r, err = sf.gr.cache.Get(id, cache.PassThrough())
+		r, err = sf.gr.cache.Get(id, cache.PassThrough(), cache.ChunkDigest(fileDigest))
 		if err != nil {
 			return 0, err
 		}
@@ -575,7 +581,7 @@ func (sf *file) prefetchEntireFileSequential(entireCacheID string) error {
 	var offset int64
 
 	for {
-		chunkOffset, chunkSize, chunkDigestStr, ok := sf.fr.ChunkEntryForOffset(offset)
+		chunkOffset, chunkSize, chunkDigestStr, _, ok := sf.fr.ChunkEntryForOffset(offset)
 		if !ok {
 			break
 		}
@@ -633,9 +639,9 @@ type batchWorkerArgs struct {
 	readInfos   []chunkReadInfo
 }
 
-func (sf *file) prefetchEntireFile(entireCacheID string, chunks []chunkData, totalSize int64, bufferSize int64, workerCount int) error {
+func (sf *file) prefetchEntireFile(entireCacheID string, chunks []chunkData, totalSize int64, bufferSize int64, workerCount int, fileDigest string) error {
 
-	w, err := sf.gr.cache.Add(entireCacheID)
+	w, err := sf.gr.cache.Add(entireCacheID, cache.ChunkDigest(fileDigest))
 	if err != nil {
 		return fmt.Errorf("failed to create cache writer: %w", err)
 	}
@@ -804,8 +810,8 @@ func (gr *reader) verifyOneChunk(entryID uint32, ip []byte, chunkDigestStr strin
 	return nil
 }
 
-func (gr *reader) cacheData(ip []byte, cacheID string) {
-	if w, err := gr.cache.Add(cacheID); err == nil {
+func (gr *reader) cacheData(ip []byte, cacheID string, chunkDigestStr string) {
+	if w, err := gr.cache.Add(cacheID, cache.ChunkDigest(chunkDigestStr)); err == nil {
 		if cn, err := w.Write(ip); err != nil || cn != len(ip) {
 			w.Abort()
 		} else {
@@ -819,7 +825,7 @@ func (gr *reader) verifyAndCache(entryID uint32, ip []byte, chunkDigestStr strin
 	if err := gr.verifyOneChunk(entryID, ip, chunkDigestStr); err != nil {
 		return err
 	}
-	gr.cacheData(ip, cacheID)
+	gr.cacheData(ip, cacheID, chunkDigestStr)
 	return nil
 }
 

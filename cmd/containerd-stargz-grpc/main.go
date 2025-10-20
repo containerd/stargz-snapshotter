@@ -37,6 +37,7 @@ import (
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/fsopts"
 	"github.com/containerd/stargz-snapshotter/fusemanager"
+	"github.com/containerd/stargz-snapshotter/hardlink"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
@@ -134,6 +135,13 @@ func main() {
 	if err := service.Supported(*rootDir); err != nil {
 		log.G(ctx).WithError(err).Fatalf("snapshotter is not supported")
 	}
+
+	// Initialize global HardlinkManager using snapshotter root
+	hlm, err := hardlink.NewHardlinkManager()
+	if err != nil {
+		log.G(ctx).WithError(err).Fatalf("failed to init hardlink manager")
+	}
+	hardlink.SetGlobalManager(hlm)
 
 	// Create a gRPC server
 	rpc := grpc.NewServer()
