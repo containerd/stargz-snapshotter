@@ -410,8 +410,9 @@ func sortEntries(in io.ReaderAt, prioritized []string, missedPrioritized *[]stri
 
 	// Sort the tar file respecting to the prioritized files list.
 	sorted := &tarFile{}
+	picked := make(map[string]struct{})
 	for _, l := range prioritized {
-		if err := moveRec(l, intar, sorted); err != nil {
+		if err := moveRec(l, intar, sorted, picked); err != nil {
 			if errors.Is(err, errNotFound) && missedPrioritized != nil {
 				*missedPrioritized = append(*missedPrioritized, l)
 				continue // allow not found
@@ -439,8 +440,8 @@ func sortEntries(in io.ReaderAt, prioritized []string, missedPrioritized *[]stri
 		})
 	}
 
-	// Dump all entry and concatinate them.
-	return append(sorted.dump(), intar.dump()...), nil
+	// Dump prioritized entries followed by the rest entries while skipping picked ones.
+	return append(sorted.dump(nil), intar.dump(picked)...), nil
 }
 
 // readerFromEntries returns a reader of tar archive that contains entries passed
@@ -502,36 +503,42 @@ func importTar(in io.ReaderAt) (*tarFile, error) {
 	return tf, nil
 }
 
-func moveRec(name string, in *tarFile, out *tarFile) error {
+func moveRec(name string, in *tarFile, out *tarFile, picked map[string]struct{}) error {
 	name = cleanEntryName(name)
 	if name == "" { // root directory. stop recursion.
 		if e, ok := in.get(name); ok {
 			// entry of the root directory exists. we should move it as well.
 			// this case will occur if tar entries are prefixed with "./", "/", etc.
-			out.add(e)
-			in.remove(name)
+			if _, done := picked[name]; !done {
+				out.add(e)
+				picked[name] = struct{}{}
+			}
 		}
 		return nil
 	}
 
 	_, okIn := in.get(name)
 	_, okOut := out.get(name)
-	if !okIn && !okOut {
+	_, okPicked := picked[name]
+	if !okIn && !okOut && !okPicked {
 		return fmt.Errorf("file: %q: %w", name, errNotFound)
 	}
 
 	parent, _ := path.Split(strings.TrimSuffix(name, "/"))
-	if err := moveRec(parent, in, out); err != nil {
+	if err := moveRec(parent, in, out, picked); err != nil {
 		return err
 	}
 	if e, ok := in.get(name); ok && e.header.Typeflag == tar.TypeLink {
-		if err := moveRec(e.header.Linkname, in, out); err != nil {
+		if err := moveRec(e.header.Linkname, in, out, picked); err != nil {
 			return err
 		}
 	}
+	if _, done := picked[name]; done {
+		return nil
+	}
 	if e, ok := in.get(name); ok {
 		out.add(e)
-		in.remove(name)
+		picked[name] = struct{}{}
 	}
 	return nil
 }
@@ -577,8 +584,18 @@ func (f *tarFile) get(name string) (e *entry, ok bool) {
 	return
 }
 
-func (f *tarFile) dump() []*entry {
-	return f.stream
+func (f *tarFile) dump(skip map[string]struct{}) []*entry {
+	if len(skip) == 0 {
+		return f.stream
+	}
+	var out []*entry
+	for _, e := range f.stream {
+		if _, ok := skip[cleanEntryName(e.header.Name)]; ok {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 type readCloser struct {
