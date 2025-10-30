@@ -142,6 +142,9 @@ type DirectoryCacheConfig struct {
 
 	// FadvDontNeed forcefully clean fscache pagecache for saving memory. Default is false.
 	FadvDontNeed bool `toml:"fadv_dontneed" json:"fadv_dontneed"`
+
+	// EnableHardlink enables hardlinking of cache files to reduce memory usage
+	EnableHardlink bool `toml:"enable_hardlink" json:"enable_hardlink"`
 }
 
 // FuseConfig is configuration for FUSE fs.
