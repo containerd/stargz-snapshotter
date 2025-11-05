@@ -323,7 +323,7 @@ func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, 
 	if pdir := clicontext.String("cni-plugin-dir"); pdir != "" {
 		cniopts = append(cniopts, gocni.WithPluginDir([]string{pdir}))
 	}
-	// The first-found configration file will be effective
+	// The first-found configuration file will be effective
 	// TODO: Should we make the number of reading files configurable?
 	cniopts = append(cniopts, gocni.WithDefaultConf)
 	network, err := gocni.New(cniopts...)
