@@ -10,7 +10,7 @@ require (
 	github.com/containerd/continuity v0.4.5
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/log v0.1.0
-	github.com/containerd/platforms v1.0.0-rc.1
+	github.com/containerd/platforms v1.0.0-rc.2
 	github.com/containerd/plugin v1.0.0
 	github.com/containerd/stargz-snapshotter/estargz v0.18.0
 	github.com/distribution/reference v0.6.0
@@ -44,7 +44,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/cgroups/v3 v3.0.5 // indirect
-	github.com/containerd/containerd/api v1.9.0 // indirect
+	github.com/containerd/containerd/api v1.10.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/go-cni v1.1.13 // indirect
