@@ -7,7 +7,7 @@ toolchain go1.24.2
 require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/containerd/containerd/api v1.9.0
-	github.com/containerd/containerd/v2 v2.1.4
+	github.com/containerd/containerd/v2 v2.1.5
 	github.com/containerd/go-cni v1.1.13
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v1.0.0-rc.1

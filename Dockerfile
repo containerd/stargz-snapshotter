@@ -12,8 +12,8 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-ARG CONTAINERD_VERSION=v2.1.4
-ARG RUNC_VERSION=v1.3.2
+ARG CONTAINERD_VERSION=v2.1.5
+ARG RUNC_VERSION=v1.3.3
 ARG CNI_PLUGINS_VERSION=v1.8.0
 ARG NERDCTL_VERSION=2.1.6
 
