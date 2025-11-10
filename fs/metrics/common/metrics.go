@@ -71,6 +71,11 @@ const (
 	BackgroundFetchDownload   = "background_fetch_download"
 	BackgroundFetchDecompress = "background_fetch_decompress"
 	PrefetchSize              = "prefetch_size"
+
+	// prefetch metrics (bytes)
+	PrefetchDecompressedBytes      = "prefetch_decompressed_bytes"
+	ReadBytesServedFromPrefetch    = "read_bytes_served_from_prefetch"
+	ReadBytesServedNotFromPrefetch = "read_bytes_served_not_from_prefetch"
 )
 
 var (

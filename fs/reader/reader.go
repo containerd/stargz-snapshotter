@@ -283,7 +283,13 @@ func (vr *VerifiableReader) readAndCache(id uint32, fr io.Reader, chunkOffset, c
 		vr.prohibitVerifyFailureMu.RUnlock()
 	}
 
-	return w.Commit()
+	if err := w.Commit(); err != nil {
+		return err
+	}
+
+	commonmetrics.AddBytesCount(commonmetrics.PrefetchDecompressedBytes, gr.layerSha, chunkSize)
+	gr.markPrefetchedCacheKey(cacheID)
+	return nil
 }
 
 func (vr *VerifiableReader) Close() error {
@@ -336,6 +342,8 @@ type reader struct {
 
 	verify   bool
 	verifier func(uint32, string) (digest.Verifier, error)
+
+	prefetchIDSet sync.Map
 }
 
 func (gr *reader) Metadata() metadata.Reader {
@@ -420,6 +428,15 @@ func (gr *reader) putBuffer(b *bytes.Buffer) {
 	gr.bufPool.Put(b)
 }
 
+func (gr *reader) isPrefetchedCacheKey(key string) bool {
+	_, ok := gr.prefetchIDSet.Load(key)
+	return ok
+}
+
+func (gr *reader) markPrefetchedCacheKey(key string) {
+	gr.prefetchIDSet.Store(key, struct{}{})
+}
+
 type file struct {
 	id uint32
 	fr metadata.File
@@ -447,6 +464,11 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 			n, err := r.ReadAt(p[nr:int64(nr)+expectedSize], lowerDiscard)
 			if (err == nil || err == io.EOF) && int64(n) == expectedSize {
 				nr += n
+				if sf.gr.isPrefetchedCacheKey(id) {
+					commonmetrics.AddBytesCount(commonmetrics.ReadBytesServedFromPrefetch, sf.gr.layerSha, int64(n))
+				} else {
+					commonmetrics.AddBytesCount(commonmetrics.ReadBytesServedNotFromPrefetch, sf.gr.layerSha, int64(n))
+				}
 				r.Close()
 				continue
 			}
@@ -467,6 +489,7 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 				return 0, err
 			}
 			nr += n
+			commonmetrics.AddBytesCount(commonmetrics.ReadBytesServedNotFromPrefetch, sf.gr.layerSha, int64(n))
 			continue
 		}
 
@@ -488,6 +511,7 @@ func (sf *file) ReadAt(p []byte, offset int64) (int, error) {
 		if int64(n) != expectedSize {
 			return 0, fmt.Errorf("unexpected final data size %d; want %d", n, expectedSize)
 		}
+		commonmetrics.AddBytesCount(commonmetrics.ReadBytesServedNotFromPrefetch, sf.gr.layerSha, int64(n))
 		nr += n
 	}
 
