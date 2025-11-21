@@ -77,6 +77,18 @@ var (
 	metricsCtr *layermetrics.Controller
 )
 
+func applyDefaults(cfg *config.Config) {
+	if cfg.MaxConcurrency == 0 {
+		cfg.MaxConcurrency = defaultMaxConcurrency
+	}
+	if cfg.AttrTimeout == 0 {
+		cfg.AttrTimeout = int64(defaultFuseTimeout.Seconds())
+	}
+	if cfg.EntryTimeout == 0 {
+		cfg.EntryTimeout = int64(defaultFuseTimeout.Seconds())
+	}
+}
+
 type Option func(*options)
 
 type options struct {
@@ -132,20 +144,11 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 	for _, o := range opts {
 		o(&fsOpts)
 	}
+	applyDefaults(&cfg)
+
 	maxConcurrency := cfg.MaxConcurrency
-	if maxConcurrency == 0 {
-		maxConcurrency = defaultMaxConcurrency
-	}
-
 	attrTimeout := time.Duration(cfg.AttrTimeout) * time.Second
-	if attrTimeout == 0 {
-		attrTimeout = defaultFuseTimeout
-	}
-
 	entryTimeout := time.Duration(cfg.EntryTimeout) * time.Second
-	if entryTimeout == 0 {
-		entryTimeout = defaultFuseTimeout
-	}
 
 	metadataStore := fsOpts.metadataStore
 	if metadataStore == nil {
@@ -205,6 +208,7 @@ type filesystem struct {
 	debug                 bool
 	layer                 map[string]layer.Layer
 	layerMu               sync.Mutex
+	configMu              sync.RWMutex
 	backgroundTaskManager *task.BackgroundTaskManager
 	allowNoVerification   bool
 	disableVerification   bool
@@ -212,6 +216,23 @@ type filesystem struct {
 	metricsController     *layermetrics.Controller
 	attrTimeout           time.Duration
 	entryTimeout          time.Duration
+}
+
+func (fs *filesystem) UpdateConfig(ctx context.Context, cfg config.Config) error {
+	applyDefaults(&cfg)
+	fs.configMu.Lock()
+	fs.prefetchSize = cfg.PrefetchSize
+	fs.noprefetch = cfg.NoPrefetch
+	fs.noBackgroundFetch = cfg.NoBackgroundFetch
+	fs.debug = cfg.Debug
+	fs.allowNoVerification = cfg.AllowNoVerification
+	fs.disableVerification = cfg.DisableVerification
+	fs.attrTimeout = time.Duration(cfg.AttrTimeout) * time.Second
+	fs.entryTimeout = time.Duration(cfg.EntryTimeout) * time.Second
+	fs.configMu.Unlock()
+
+	fs.resolver.UpdateConfig(ctx, cfg)
+	return nil
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) (retErr error) {
@@ -233,7 +254,9 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		return fmt.Errorf("source must be passed")
 	}
 
+	fs.configMu.RLock()
 	defaultPrefetchSize := fs.prefetchSize
+	fs.configMu.RUnlock()
 	if psStr, ok := labels[config.TargetPrefetchSizeLabel]; ok {
 		if ps, err := strconv.ParseInt(psStr, 10, 64); err == nil {
 			defaultPrefetchSize = ps
@@ -297,7 +320,15 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	}()
 
 	// Verify layer's content
-	if fs.disableVerification {
+	fs.configMu.RLock()
+	disableVerification := fs.disableVerification
+	allowNoVerification := fs.allowNoVerification
+	attrTimeout := fs.attrTimeout
+	entryTimeout := fs.entryTimeout
+	debug := fs.debug
+	fs.configMu.RUnlock()
+
+	if disableVerification {
 		// Skip if verification is disabled completely
 		l.SkipVerify()
 		log.G(ctx).Infof("Verification forcefully skipped")
@@ -313,7 +344,7 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 			return fmt.Errorf("invalid stargz layer: %w", err)
 		}
 		log.G(ctx).Debugf("verified")
-	} else if _, ok := labels[config.TargetSkipVerifyLabel]; ok && fs.allowNoVerification {
+	} else if _, ok := labels[config.TargetSkipVerifyLabel]; ok && allowNoVerification {
 		// If unverified layer is allowed, use it with warning.
 		// This mode is for legacy stargz archives which don't contain digests
 		// necessary for layer verification.
@@ -342,14 +373,14 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 	// mount the node to the specified mountpoint
 	// TODO: bind mount the state directory as a read-only fs on snapshotter's side
 	rawFS := fusefs.NewNodeFS(node, &fusefs.Options{
-		AttrTimeout:     &fs.attrTimeout,
-		EntryTimeout:    &fs.entryTimeout,
+		AttrTimeout:     &attrTimeout,
+		EntryTimeout:    &entryTimeout,
 		NullPermissions: true,
 	})
 	mountOpts := &fuse.MountOptions{
 		AllowOther:  true,     // allow users other than root&mounter to access fs
 		FsName:      "stargz", // name this filesystem as "stargz"
-		Debug:       fs.debug,
+		Debug:       debug,
 		DirectMount: true,
 	}
 	server, err := fuse.NewServer(rawFS, mountpoint, mountOpts)
@@ -391,7 +422,10 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string, labels map[s
 	}
 
 	// Wait for prefetch compeletion
-	if !fs.noprefetch {
+	fs.configMu.RLock()
+	noprefetch := fs.noprefetch
+	fs.configMu.RUnlock()
+	if !noprefetch {
 		if err := l.WaitForPrefetchCompletion(); err != nil {
 			log.G(ctx).WithError(err).Warn("failed to sync with prefetch completion")
 		}
@@ -473,12 +507,17 @@ func unmount(target string, flags int) error {
 
 func (fs *filesystem) prefetch(ctx context.Context, l layer.Layer, defaultPrefetchSize int64, start time.Time) {
 	// Prefetch a layer. The first Check() for this layer waits for the prefetch completion.
-	if !fs.noprefetch {
+	fs.configMu.RLock()
+	noprefetch := fs.noprefetch
+	noBackgroundFetch := fs.noBackgroundFetch
+	fs.configMu.RUnlock()
+
+	if !noprefetch {
 		go l.Prefetch(defaultPrefetchSize)
 	}
 
 	// Fetch whole layer aggressively in background.
-	if !fs.noBackgroundFetch {
+	if !noBackgroundFetch {
 		go func() {
 			if err := l.BackgroundFetch(); err == nil {
 				// write log record for the latency between mount start and last on demand fetch
