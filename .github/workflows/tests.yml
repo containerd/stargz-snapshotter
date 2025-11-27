@@ -244,7 +244,7 @@ jobs:
         go-version: '1.24.x'
     - name: Install k3d
       run: |
-        wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.6.3/install.sh | bash
+        wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.8.3/install.sh | bash
     - name: Install htpasswd for setting up private registry
       run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
     - name: Install yq
@@ -274,7 +274,7 @@ jobs:
         go-version: '1.24.x'
     - name: Install k3d
       run: |
-        wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.6.3/install.sh | bash
+        wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.8.3/install.sh | bash
     - name: Install argo worklflow
       run: |
         wget -q https://github.com/argoproj/argo-workflows/releases/download/v3.0.10/argo-linux-amd64.gz
