@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/continuity/fs"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
+	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/moby/sys/mountinfo"
 	"golang.org/x/sync/errgroup"
 )
@@ -164,6 +165,17 @@ func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts 
 	}
 
 	return o, nil
+}
+
+type configUpdater interface {
+	UpdateConfig(ctx context.Context, config config.Config) error
+}
+
+func (o *snapshotter) UpdateConfig(ctx context.Context, config config.Config) error {
+	if updater, ok := o.fs.(configUpdater); ok {
+		return updater.UpdateConfig(ctx, config)
+	}
+	return nil
 }
 
 // Stat returns the info for an active or committed snapshot by name or
