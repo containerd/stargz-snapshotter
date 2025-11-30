@@ -66,8 +66,9 @@ func parseGPUs(gpuStr string) ([]int, bool) {
 
 var samplerFlags = []cli.Flag{
 	&cli.BoolFlag{
-		Name:  "terminal,t",
-		Usage: "enable terminal for sample container. must be specified with i option",
+		Name:    "terminal",
+		Aliases: []string{"t"},
+		Usage:   "enable terminal for sample container. must be specified with i option",
 	},
 	&cli.BoolFlag{
 		Name:  "i",
