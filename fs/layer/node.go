@@ -185,6 +185,11 @@ func (n *node) readdir() ([]fuse.DirEntry, syscall.Errno) {
 	var lastErr error
 	if err := n.fs.r.Metadata().ForeachChild(n.id, func(name string, id uint32, mode os.FileMode) bool {
 
+		// "." and ".." will be added later.
+		if name == "." || name == ".." {
+			return true
+		}
+
 		// We don't want to show prefetch landmarks in "/".
 		if isRoot && (name == estargz.PrefetchLandmark || name == estargz.NoPrefetchLandmark) {
 			return true
@@ -217,6 +222,11 @@ func (n *node) readdir() ([]fuse.DirEntry, syscall.Errno) {
 		n.fs.s.report(fmt.Errorf("node.Readdir: err = %v; lastErr = %v", err, lastErr))
 		return nil, syscall.EIO
 	}
+
+	// Append "." and ".." directories
+	ents = append(ents,
+		fuse.DirEntry{Mode: fuse.S_IFDIR, Name: "."},
+		fuse.DirEntry{Mode: fuse.S_IFDIR, Name: ".."})
 
 	// Append whiteouts if no entry replaces the target entry in the lower layer.
 	for w, id := range whiteouts {
