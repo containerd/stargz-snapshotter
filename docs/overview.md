@@ -260,6 +260,13 @@ insecure = true
 
 The config file can be passed to stargz snapshotter using `containerd-stargz-grpc`'s `--config` option.
 
+## Configuration hot reload
+
+[Fs configurations](/fs/config/config.go) supports hot reloading. When the configuration file is modified, the snapshotter detects the change and applies the new configuration without restarting the process.
+
+Note that other configurations (e.g. `proxy_plugins`, `fuse_manager`, `resolver`, `mount_options`) require a restart to take effect.
+Also, some specific fields in `[stargz]` section (e.g. `no_prometheus`) do not support hot reloading and changes to them will be ignored until restart.
+
 ## Make your remote snapshotter
 
 It isn't difficult for you to implement your remote snapshotter using [our general snapshotter package](/snapshot) without considering the protocol between that and containerd.
