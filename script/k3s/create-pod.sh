@@ -49,6 +49,7 @@ for (( ; ; )) ; do
     STATUS=$(KUBECONFIG="${K3S_KUBECONFIG}" kubectl get pods "${TEST_POD_NAME}" --namespace="${TEST_POD_NS}" -o 'jsonpath={..status.containerStatuses[0].state.running.startedAt}${..status.containerStatuses[0].state.waiting.reason}')
     echo "Status: ${STATUS}"
     KUBECONFIG="${K3S_KUBECONFIG}" kubectl get pods "${TEST_POD_NAME}" --namespace="${TEST_POD_NS}"
+    KUBECONFIG="${K3S_KUBECONFIG}" kubectl describe pod "${TEST_POD_NAME}" --namespace="${TEST_POD_NS}"
     STARTEDAT=$(echo "${STATUS}" | cut -f 1 -d '$')
     if [ "${STARTEDAT}" != "" ] ; then
         echo "Pod created"
