@@ -50,6 +50,8 @@ for (( ; ; )) ; do
     echo "Status: ${STATUS}"
     KUBECONFIG="${K3S_KUBECONFIG}" kubectl get pods "${TEST_POD_NAME}" --namespace="${TEST_POD_NS}"
     KUBECONFIG="${K3S_KUBECONFIG}" kubectl describe pod "${TEST_POD_NAME}" --namespace="${TEST_POD_NS}"
+    docker logs k3d-k3s-stargz-snapshotter-server-0
+    KUBECONFIG="${K3S_KUBECONFIG}" kubectl get nodes
     STARTEDAT=$(echo "${STATUS}" | cut -f 1 -d '$')
     if [ "${STARTEDAT}" != "" ] ; then
         echo "Pod created"
