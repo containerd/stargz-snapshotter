@@ -142,6 +142,12 @@ type DirectoryCacheConfig struct {
 
 	// FadvDontNeed forcefully clean fscache pagecache for saving memory. Default is false.
 	FadvDontNeed bool `toml:"fadv_dontneed" json:"fadv_dontneed"`
+
+	// HardlinkRoot specifies the root directory for storing canonical hardlink files.
+	// When set, hardlinking will be enabled to reduce disk usage by sharing identical chunks.
+	// The hardlink manager will create a "hardlinks" subdirectory under this root.
+	// Leave empty to disable hardlinking.
+	HardlinkRoot string `toml:"hardlink_root" json:"hardlink_root"`
 }
 
 // FuseConfig is configuration for FUSE fs.
