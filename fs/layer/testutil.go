@@ -286,6 +286,7 @@ func testPrefetch(t *TestRunner, factory metadata.Store, lc layerConfig) {
 					&blobRef{blob, func(bool) {}},
 					vr,
 					lc.passThroughConfig,
+					false,
 				)
 				if err := l.Verify(dgst); err != nil {
 					t.Errorf("failed to verify reader: %v", err)
@@ -824,7 +825,7 @@ func getRootNode(t TestingT, r metadata.Reader, opaque OverlayOpaqueType, tocDgs
 	if err != nil {
 		t.Fatalf("failed to verify reader: %v", err)
 	}
-	rootNode, err := newNode(testStateLayerDigest, rr, &testBlobState{10, 5}, 100, opaque, lc.passThroughConfig)
+	rootNode, err := newNode(testStateLayerDigest, rr, &testBlobState{10, 5}, 100, opaque, lc.passThroughConfig, false)
 	if err != nil {
 		t.Fatalf("failed to get root node: %v", err)
 	}

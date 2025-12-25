@@ -75,6 +75,9 @@ type Config struct {
 	// NoPrometheus disables exposing filesystem-related metrics. Default is false.
 	NoPrometheus bool `toml:"no_prometheus" json:"no_prometheus"`
 
+	// LogFileAccess enables logging information on first access to each file. Default is false.
+	LogFileAccess bool `toml:"log_file_access" json:"log_file_access"`
+
 	// BlobConfig is config for layer blob management.
 	BlobConfig `toml:"blob" json:"blob"`
 

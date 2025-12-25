@@ -30,9 +30,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -76,7 +78,7 @@ var opaqueXattrs = map[OverlayOpaqueType][]string{
 	OverlayOpaqueUser:    {"user.overlay.opaque"},
 }
 
-func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType, pth passThroughConfig) (fusefs.InodeEmbedder, error) {
+func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType, pth passThroughConfig, logFileAccess bool) (fusefs.InodeEmbedder, error) {
 	rootID := r.Metadata().RootID()
 	rootAttr, err := r.Metadata().GetAttr(rootID)
 	if err != nil {
@@ -87,12 +89,13 @@ func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseIno
 		return nil, fmt.Errorf("unknown overlay opaque type")
 	}
 	ffs := &fs{
-		r:            r,
-		layerDigest:  layerDgst,
-		baseInode:    baseInode,
-		rootID:       rootID,
-		opaqueXattrs: opq,
-		passThrough:  pth,
+		r:             r,
+		layerDigest:   layerDgst,
+		baseInode:     baseInode,
+		rootID:        rootID,
+		opaqueXattrs:  opq,
+		passThrough:   pth,
+		logFileAccess: logFileAccess,
 	}
 	ffs.s = ffs.newState(layerDgst, blob)
 	return &node{
@@ -104,17 +107,33 @@ func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseIno
 
 // fs contains global metadata used by nodes
 type fs struct {
-	r            reader.Reader
-	s            *state
-	layerDigest  digest.Digest
-	baseInode    uint32
-	rootID       uint32
-	opaqueXattrs []string
-	passThrough  passThroughConfig
+	r             reader.Reader
+	s             *state
+	layerDigest   digest.Digest
+	baseInode     uint32
+	rootID        uint32
+	opaqueXattrs  []string
+	passThrough   passThroughConfig
+	logFileAccess bool
 }
 
 func (fs *fs) inodeOfState() uint64 {
 	return (uint64(fs.baseInode) << 32) | 1 // reserved
+}
+
+func (n *node) logAccessOnce(ctx context.Context) {
+	if n == nil || n.fs == nil || !n.fs.logFileAccess {
+		return
+	}
+	if !atomic.CompareAndSwapUint32(&n.accessed, 0, 1) {
+		return
+	}
+
+	log.G(ctx).WithFields(log.Fields{
+		"layer": n.fs.layerDigest.String(),
+		"size":  n.attr.Size,
+		"mode":  fmt.Sprintf("%#o", n.attr.Mode.Perm()),
+	}).Debugf("file accessed: %s", path.Join("/", n.Path(nil)))
 }
 
 func (fs *fs) inodeOfStatFile() uint64 {
@@ -132,9 +151,10 @@ func (fs *fs) inodeOfID(id uint32) (uint64, error) {
 // node is a filesystem inode abstraction.
 type node struct {
 	fusefs.Inode
-	fs   *fs
-	id   uint32
-	attr metadata.Attr
+	fs       *fs
+	id       uint32
+	accessed uint32
+	attr     metadata.Attr
 
 	ents       []fuse.DirEntry
 	entsCached bool
@@ -357,6 +377,8 @@ func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fu
 		return nil, 0, syscall.EIO
 	}
 
+	n.logAccessOnce(ctx)
+
 	f := &file{
 		n:  n,
 		ra: ra,
@@ -437,6 +459,7 @@ func (n *node) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errn
 var _ = (fusefs.NodeReadlinker)((*node)(nil))
 
 func (n *node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	n.logAccessOnce(ctx)
 	ent := n.attr
 	return []byte(ent.LinkName), 0
 }
