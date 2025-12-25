@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -104,17 +105,33 @@ func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseIno
 
 // fs contains global metadata used by nodes
 type fs struct {
-	r            reader.Reader
-	s            *state
-	layerDigest  digest.Digest
-	baseInode    uint32
-	rootID       uint32
-	opaqueXattrs []string
-	passThrough  passThroughConfig
+	r             reader.Reader
+	s             *state
+	layerDigest   digest.Digest
+	baseInode     uint32
+	rootID        uint32
+	opaqueXattrs  []string
+	passThrough   passThroughConfig
+	accessedPaths sync.Map
 }
 
 func (fs *fs) inodeOfState() uint64 {
 	return (uint64(fs.baseInode) << 32) | 1 // reserved
+}
+
+func (fs *fs) logAccessOnce(ctx context.Context, n *node) {
+	if fs == nil || n == nil {
+		return
+	}
+	if _, loaded := fs.accessedPaths.LoadOrStore(n.id, struct{}{}); loaded {
+		return
+	}
+
+	log.G(ctx).WithFields(log.Fields{
+		"layer": fs.layerDigest.String(),
+		"size":  n.attr.Size,
+		"mode":  fmt.Sprintf("%#o", n.attr.Mode.Perm()),
+	}).Debugf("file accessed: %s", path.Join("/", n.Path(nil)))
 }
 
 func (fs *fs) inodeOfStatFile() uint64 {
@@ -357,6 +374,8 @@ func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fu
 		return nil, 0, syscall.EIO
 	}
 
+	n.fs.logAccessOnce(ctx, n)
+
 	f := &file{
 		n:  n,
 		ra: ra,
@@ -437,6 +456,7 @@ func (n *node) Listxattr(ctx context.Context, dest []byte) (uint32, syscall.Errn
 var _ = (fusefs.NodeReadlinker)((*node)(nil))
 
 func (n *node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
+	n.fs.logAccessOnce(ctx, n)
 	ent := n.attr
 	return []byte(ent.LinkName), 0
 }
