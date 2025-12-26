@@ -325,27 +325,29 @@ func buildLayerOptsFromRecord(
 
 	// TODO: this should be indexed by layer "index" (not "digest")
 	layerLogs := make(map[digest.Digest][]string, len(manifest.Layers))
-	ra, err := cs.ReaderAt(ctx, ocispec.Descriptor{Digest: recordOut})
-	if err != nil {
-		return nil, nil, err
-	}
-	defer ra.Close()
-	dec := json.NewDecoder(io.NewSectionReader(ra, 0, ra.Size()))
-	added := make(map[digest.Digest]map[string]struct{}, len(manifest.Layers))
-	for dec.More() {
-		var e recorder.Entry
-		if err := dec.Decode(&e); err != nil {
+	if recordOut != "" {
+		ra, err := cs.ReaderAt(ctx, ocispec.Descriptor{Digest: recordOut})
+		if err != nil {
 			return nil, nil, err
 		}
-		if *e.LayerIndex < len(manifest.Layers) &&
-			e.ManifestDigest == manifestDesc.Digest.String() {
-			dgst := manifest.Layers[*e.LayerIndex].Digest
-			if added[dgst] == nil {
-				added[dgst] = map[string]struct{}{}
+		defer ra.Close()
+		dec := json.NewDecoder(io.NewSectionReader(ra, 0, ra.Size()))
+		added := make(map[digest.Digest]map[string]struct{}, len(manifest.Layers))
+		for dec.More() {
+			var e recorder.Entry
+			if err := dec.Decode(&e); err != nil {
+				return nil, nil, err
 			}
-			if _, ok := added[dgst][e.Path]; !ok {
-				added[dgst][e.Path] = struct{}{}
-				layerLogs[dgst] = append(layerLogs[dgst], e.Path)
+			if *e.LayerIndex < len(manifest.Layers) &&
+				e.ManifestDigest == manifestDesc.Digest.String() {
+				dgst := manifest.Layers[*e.LayerIndex].Digest
+				if added[dgst] == nil {
+					added[dgst] = map[string]struct{}{}
+				}
+				if _, ok := added[dgst][e.Path]; !ok {
+					added[dgst][e.Path] = struct{}{}
+					layerLogs[dgst] = append(layerLogs[dgst], e.Path)
+				}
 			}
 		}
 	}
@@ -416,6 +418,10 @@ func analyzePrefetchList(
 
 func analyze(ctx context.Context, clicontext *cli.Context, client *containerd.Client, srcRef string) (digest.Digest, map[digest.Digest][]estargz.Option, func(converter.ConvertFunc) converter.ConvertFunc, error) {
 	if clicontext.Bool("no-optimize") {
+		if clicontext.Bool("reuse") {
+			layerOpts, wrapper, err := buildLayerOptsFromRecord(ctx, clicontext, client, srcRef, "")
+			return "", layerOpts, wrapper, err
+		}
 		return "", nil, nil, nil
 	}
 
