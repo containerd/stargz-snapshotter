@@ -23,7 +23,7 @@ K3S_CONTAINERD_REPO=https://github.com/k3s-io/containerd
 REGISTRY_HOST=k3s-private-registry
 K3S_NODE_REPO=ghcr.io/stargz-containers
 K3S_NODE_IMAGE_NAME=k3s
-K3S_NODE_TAG=v1.34.2-k3s1
+K3S_NODE_TAG=v1.35.0-k3s1
 K3S_NODE_IMAGE="${K3S_NODE_REPO}/${K3S_NODE_IMAGE_NAME}:${K3S_NODE_TAG}"
 
 # Arguments
@@ -39,7 +39,6 @@ TMP_CONTEXT=$(mktemp -d)
 SN_KUBECONFIG=$(mktemp)
 TMP_K3S_REPO=$(mktemp -d)
 TMP_K3S_CONTAINERD_REPO=$(mktemp -d)
-TMP_GOLANGCI=$(mktemp)
 function cleanup {
     local ORG_EXIT_CODE="${1}"
     rm "${SN_KUBECONFIG}"
@@ -47,7 +46,6 @@ function cleanup {
     rm -rf "${TMP_BUILTIN_CONF}"
     rm -rf "${TMP_K3S_REPO}"
     rm -rf "${TMP_K3S_CONTAINERD_REPO}"
-    rm "${TMP_GOLANGCI}"
     exit "${ORG_EXIT_CODE}"
 }
 trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
@@ -68,15 +66,15 @@ sed -i -E 's|DAPPER_RUN_ARGS="([^"]*)"|DAPPER_RUN_ARGS="\1 -v '"$(realpath ${REP
 sed -i -E 's|DAPPER_ENV="([^"]*)"|DAPPER_ENV="\1 DOCKER_BUILDKIT"|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 (
     cd "${TMP_K3S_REPO}" && \
+        export GOTOOLCHAIN=auto && \
         git config user.email "dummy@example.com" && \
         git config user.name "dummy" && \
-        cat ./.golangci.json | jq '.run.deadline|="10m"' > "${TMP_GOLANGCI}" && \
-        cp "${TMP_GOLANGCI}" ./.golangci.json &&  \
+        sed -i 's/timeout:.*$/timeout: 10m/' ./.golangci.yml && \
         go mod tidy && \
         make deps && \
         git add . && \
         git commit -m tmp && \
-        REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${K3S_NODE_TAG}" SKIP_VALIDATE=1 make
+        SKIP_AIRGAP=1 REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${K3S_NODE_TAG}" SKIP_VALIDATE=1 make
 )
 cat <<EOF > "${TMP_BUILTIN_CONF}"
 mirrors:

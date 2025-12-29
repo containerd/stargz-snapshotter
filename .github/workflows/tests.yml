@@ -324,6 +324,7 @@ jobs:
       - uses: containerd/project-checks@v1.2.2
         with:
           working-directory: src/github.com/containerd/stargz-snapshotter
+          repo-access-token: ${{ secrets.GITHUB_TOKEN }}
           # go-licenses-ignore is set because go-licenses cannot correctly detect the license of the following packages:
           # * estargz packages: Apache-2.0 and BSD-3-Clause dual license
           #   (https://github.com/containerd/stargz-snapshotter/blob/main/NOTICE.md)
