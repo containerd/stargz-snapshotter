@@ -298,7 +298,7 @@ jobs:
       env:
         RESULT: ${{ env.RESULT_DIR }}/result.json
       run: make test-k3s-argo-workflow
-    - uses: actions/upload-artifact@v5
+    - uses: actions/upload-artifact@v6
       with:
         name: k3s-argo-workflow
         path: ${{ env.RESULT_DIR }}
