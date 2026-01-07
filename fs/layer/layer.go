@@ -524,6 +524,16 @@ func (l *layer) prefetch(ctx context.Context, prefetchSize int64) error {
 		prefetchSize = l.blob.Size()
 	}
 
+	threshold := l.resolver.config.PrefetchAsyncSize
+	if threshold > 0 && prefetchSize > threshold {
+		log.G(ctx).Infof(
+			"prefetch size %d > threshold %d; allow container run while prefetching in background",
+			prefetchSize,
+			threshold,
+		)
+		l.prefetchWaiter.done()
+	}
+
 	// Fetch the target range
 	downloadStart := time.Now()
 	err := l.blob.Cache(0, prefetchSize)
