@@ -175,8 +175,27 @@ rules:
 EOF
 
 echo "Installing kubeconfig for stargz snapshotter on node...."
+function wait_for_data() {
+    DATAPATH="${1}"
+    MAX=30
+    I=0
+    while [ $(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/stargz-snapshotter-sercret -o jsonpath="${DATAPATH}" | wc -c) -eq 0 ] ; do
+        echo "failed to get secret, retrying..."
+        if [ $I -gt $MAX ] ; then
+            echo "cannot get the specified data"
+            exit 1;
+        fi
+        ((I+=1))
+        sleep 1
+    done
+}
 APISERVER_PORT=$(docker exec -i "${KIND_NODENAME}" ps axww \
                      | grep kube-apiserver | sed -n -E 's/.*--secure-port=([0-9]*).*/\1/p')
+
+# Ensure the secret is available
+wait_for_data '{.data.ca\.crt}'
+wait_for_data '{.data.token}'
+
 CA=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/stargz-snapshotter-sercret -o jsonpath='{.data.ca\.crt}')
 TOKEN=$(KUBECONFIG="${KIND_USER_KUBECONFIG}" kubectl get secret/stargz-snapshotter-sercret -o jsonpath='{.data.token}' \
             | base64 --decode)
