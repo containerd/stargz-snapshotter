@@ -230,9 +230,9 @@ And this doesn't work if kubelet retrieve creds from somewhere not API server (e
 
 ### Registry mirrors and insecure connection
 
-You can also configure mirrored registries and insecure connection.
 The hostname used as a mirror host can be specified using `host` option.
 If an optional field `insecure` is `true`, snapshotter tries to connect to the registry using plain HTTP instead of HTTPS.
+`request_timeout_sec` can also be specified for each mirror to override the global setting.
 
 ```toml
 # Use `mirrorhost.io` as a mirrored host of `exampleregistry.io` and
@@ -240,6 +240,7 @@ If an optional field `insecure` is `true`, snapshotter tries to connect to the r
 [[resolver.host."exampleregistry.io".mirrors]]
 host = "mirrorhost.io"
 insecure = true
+request_timeout_sec = 60
 
 # Use plain HTTP for connecting to `exampleregistry.io`.
 [[resolver.host."exampleregistry.io".mirrors]]
@@ -257,6 +258,16 @@ insecure = true
 ```
 
 > NOTE: Headers aren't passed to the redirected location.
+
+### Request timeout
+
+You can configure the default timeout for each request to the registry.
+The global `request_timeout_sec` field under `[resolver]` sets the default timeout (in seconds). If not specified, the default value is 30 seconds.
+
+```toml
+[resolver]
+request_timeout_sec = 300
+```
 
 The config file can be passed to stargz snapshotter using `containerd-stargz-grpc`'s `--config` option.
 
