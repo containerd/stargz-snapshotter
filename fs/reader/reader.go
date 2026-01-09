@@ -559,7 +559,6 @@ func (sf *file) GetPassthroughFd(mergeBufferSize int64, mergeWorkerCount int) (u
 	}
 
 	fd := file.Fd()
-	r.Close()
 	return fd, nil
 }
 
