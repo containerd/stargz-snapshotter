@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/containerd/stargz-snapshotter/util/cacheutil"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
@@ -65,6 +66,10 @@ type DirectoryCacheConfig struct {
 
 	// FadvDontNeed forcefully clean fscache pagecache for saving memory.
 	FadvDontNeed bool
+
+	// EntryTTL enables TTL-based cleanup for cached blob files.
+	// When zero or negative, TTL-based cleanup is disabled.
+	EntryTTL time.Duration
 }
 
 // TODO: contents validation.
@@ -178,8 +183,12 @@ func NewDirectoryCache(directory string, config DirectoryCacheConfig) (BlobCache
 		bufPool:      bufPool,
 		direct:       config.Direct,
 		fadvDontNeed: config.FadvDontNeed,
+		entryTTL:     config.EntryTTL,
 	}
 	dc.syncAdd = config.SyncAdd
+
+	dc.startCleanupIfNeeded()
+
 	return dc, nil
 }
 
@@ -197,8 +206,11 @@ type directoryCache struct {
 	direct       bool
 	fadvDontNeed bool
 
-	closed   bool
-	closedMu sync.Mutex
+	closed        bool
+	closedMu      sync.Mutex
+	entryTTL      time.Duration
+	cleanupStopCh chan struct{}
+	cleanupWg     sync.WaitGroup
 }
 
 func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
@@ -384,11 +396,19 @@ func (dc *directoryCache) putBuffer(b *bytes.Buffer) {
 
 func (dc *directoryCache) Close() error {
 	dc.closedMu.Lock()
-	defer dc.closedMu.Unlock()
 	if dc.closed {
+		dc.closedMu.Unlock()
 		return nil
 	}
 	dc.closed = true
+	stopCh := dc.cleanupStopCh
+	dc.cleanupStopCh = nil
+	dc.closedMu.Unlock()
+
+	if stopCh != nil {
+		close(stopCh)
+		dc.cleanupWg.Wait()
+	}
 	return os.RemoveAll(dc.directory)
 }
 
