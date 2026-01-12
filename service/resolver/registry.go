@@ -32,6 +32,10 @@ const defaultRequestTimeoutSec = 30
 // Config is config for resolving registries.
 type Config struct {
 	Host map[string]HostConfig `toml:"host" json:"host"`
+
+	// RequestTimeoutSec is the global default timeout (in seconds) for each request to the registry.
+	// This is used when a specific host's request_timeout_sec is not set.
+	RequestTimeoutSec int `toml:"request_timeout_sec" json:"request_timeout_sec"`
 }
 
 type HostConfig struct {
@@ -68,7 +72,11 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.Regist
 			client.Logger = nil // disable logging every request
 			if h.RequestTimeoutSec >= 0 {
 				if h.RequestTimeoutSec == 0 {
-					client.HTTPClient.Timeout = defaultRequestTimeoutSec * time.Second
+					timeout := defaultRequestTimeoutSec
+					if cfg.RequestTimeoutSec > 0 {
+						timeout = cfg.RequestTimeoutSec
+					}
+					client.HTTPClient.Timeout = time.Duration(timeout) * time.Second
 				} else {
 					client.HTTPClient.Timeout = time.Duration(h.RequestTimeoutSec) * time.Second
 				}
