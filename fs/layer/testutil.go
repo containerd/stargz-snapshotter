@@ -824,7 +824,21 @@ func getRootNode(t TestingT, r metadata.Reader, opaque OverlayOpaqueType, tocDgs
 	if err != nil {
 		t.Fatalf("failed to verify reader: %v", err)
 	}
-	rootNode, err := newNode(testStateLayerDigest, rr, &testBlobState{10, 5}, 100, opaque, lc.passThroughConfig)
+	l := &layer{
+		resolver: &Resolver{
+			overlayOpaqueType: opaque,
+		},
+		desc: ocispec.Descriptor{
+			Digest: testStateLayerDigest,
+		},
+		blob: &blobRef{
+			Blob: &testBlobState{10, 5},
+			done: func(bool) {},
+		},
+		r:           rr,
+		passThrough: lc.passThroughConfig,
+	}
+	rootNode, err := newNode(l, 100)
 	if err != nil {
 		t.Fatalf("failed to get root node: %v", err)
 	}

@@ -76,25 +76,26 @@ var opaqueXattrs = map[OverlayOpaqueType][]string{
 	OverlayOpaqueUser:    {"user.overlay.opaque"},
 }
 
-func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType, pth passThroughConfig) (fusefs.InodeEmbedder, error) {
+func newNode(l *layer, baseInode uint32) (fusefs.InodeEmbedder, error) {
+	r := l.r
 	rootID := r.Metadata().RootID()
 	rootAttr, err := r.Metadata().GetAttr(rootID)
 	if err != nil {
 		return nil, err
 	}
-	opq, ok := opaqueXattrs[opaque]
+	opq, ok := opaqueXattrs[l.resolver.overlayOpaqueType]
 	if !ok {
 		return nil, fmt.Errorf("unknown overlay opaque type")
 	}
 	ffs := &fs{
-		r:            r,
-		layerDigest:  layerDgst,
+		r:            l.r,
+		layerDigest:  l.desc.Digest,
 		baseInode:    baseInode,
 		rootID:       rootID,
 		opaqueXattrs: opq,
-		passThrough:  pth,
+		passThrough:  l.passThrough,
 	}
-	ffs.s = ffs.newState(layerDgst, blob)
+	ffs.s = ffs.newState(l.desc.Digest, l.blob)
 	return &node{
 		id:   rootID,
 		attr: rootAttr,
