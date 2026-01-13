@@ -79,9 +79,23 @@ func newKeychain(ctx context.Context, kubeconfigPath string) *keychain {
 		config: make(map[string]*dcfile.ConfigFile),
 	}
 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("kubeconfig", kubeconfigPath))
+	needsToWaitForKubeConfig := false
+	if kubeconfigPath != "" {
+		if _, err := os.Stat(kubeconfigPath); err != nil {
+			needsToWaitForKubeConfig = true
+		}
+	}
+
+	if !needsToWaitForKubeConfig {
+		kc.initialize(ctx, kubeconfigPath)
+		return kc
+	}
+
+	// The specified kubeconfig file hasn't been provided yet. Wait for that file
+	// in background and start the keychain once it is provided.
 	go func() {
 		if kubeconfigPath != "" {
-			log.G(ctx).Debugf("Waiting for kubeconfig being installed...")
+			log.G(ctx).Infof("Kubeconfig doesn't exist; Asynchronously waiting for the kubeconfig being installed...")
 			for {
 				if _, err := os.Stat(kubeconfigPath); err == nil {
 					break
@@ -93,36 +107,39 @@ func newKeychain(ctx context.Context, kubeconfigPath string) *keychain {
 				time.Sleep(10 * time.Second)
 			}
 		}
-
-		// default loader for KUBECONFIG or `~/.kube/config`
-		// if no explicit path provided, KUBECONFIG will be used.
-		// if KUBECONFIG doesn't contain paths, `~/.kube/config` will be used.
-		loadingRule := clientcmd.NewDefaultClientConfigLoadingRules()
-
-		// explicitly provide path for kubeconfig.
-		// if path isn't "", this path will be respected.
-		loadingRule.ExplicitPath = kubeconfigPath
-
-		// load and merge config files
-		clientcfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			loadingRule,                  // loader for config files
-			&clientcmd.ConfigOverrides{}, // no overrides for config
-		).ClientConfig()
-		if err != nil {
-			log.G(ctx).WithError(err).Warnf("failed to load config; Disabling syncing")
-			return
-		}
-
-		client, err := kubernetes.NewForConfig(clientcfg)
-		if err != nil {
-			log.G(ctx).WithError(err).Warnf("failed to prepare client; Disabling syncing")
-			return
-		}
-		if err := kc.startSyncSecrets(ctx, client); err != nil {
-			log.G(ctx).WithError(err).Warnf("failed to sync secrets")
-		}
+		kc.initialize(ctx, kubeconfigPath)
 	}()
 	return kc
+}
+
+func (kc *keychain) initialize(ctx context.Context, kubeconfigPath string) {
+	// default loader for KUBECONFIG or `~/.kube/config`
+	// if no explicit path provided, KUBECONFIG will be used.
+	// if KUBECONFIG doesn't contain paths, `~/.kube/config` will be used.
+	loadingRule := clientcmd.NewDefaultClientConfigLoadingRules()
+
+	// explicitly provide path for kubeconfig.
+	// if path isn't "", this path will be respected.
+	loadingRule.ExplicitPath = kubeconfigPath
+
+	// load and merge config files
+	clientcfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		loadingRule,                  // loader for config files
+		&clientcmd.ConfigOverrides{}, // no overrides for config
+	).ClientConfig()
+	if err != nil {
+		log.G(ctx).WithError(err).Warnf("failed to load config; Disabling syncing")
+		return
+	}
+
+	client, err := kubernetes.NewForConfig(clientcfg)
+	if err != nil {
+		log.G(ctx).WithError(err).Warnf("failed to prepare client; Disabling syncing")
+		return
+	}
+	if err := kc.startSyncSecrets(ctx, client); err != nil {
+		log.G(ctx).WithError(err).Warnf("failed to sync secrets")
+	}
 }
 
 type keychain struct {
@@ -154,7 +171,7 @@ func (kc *keychain) credentials(host string, refspec reference.Spec) (string, st
 	return "", "", nil
 }
 
-func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Interface) error {
+func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Interface) (err error) {
 
 	// don't let panics crash the process
 	defer utilruntime.HandleCrash()
@@ -181,7 +198,11 @@ func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Inte
 	// use workqueue because each task possibly takes long for parsing config,
 	// wating for lock, etc...
 	queue := workqueue.NewTyped[string]()
-	defer queue.ShutDown()
+	defer func() {
+		if err != nil {
+			queue.ShutDown()
+		}
+	}()
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
@@ -211,52 +232,58 @@ func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Inte
 	kc.informer = informer
 	kc.queue = queue
 
+	// Ensure the available secrets are synchronized.
+	for _, key := range informer.GetStore().ListKeys() {
+		kc.processItem(key)
+	}
+
 	// keep on syncing secrets
-	wait.Until(kc.runWorker, time.Second, ctx.Done())
+	go func() {
+		defer utilruntime.HandleCrash()
+		defer queue.ShutDown()
+		wait.Until(kc.runWorker, time.Second, ctx.Done())
+	}()
 
 	return nil
 }
 
 func (kc *keychain) runWorker() {
-	for kc.processNextItem() {
-		// continue looping
+	for {
+		key, quit := kc.queue.Get()
+		if quit {
+			return
+		}
+		kc.processItem(key)
+		kc.queue.Done(key)
 	}
 }
 
 // TODO: consider retrying?
-func (kc *keychain) processNextItem() bool {
-	key, quit := kc.queue.Get()
-	if quit {
-		return false
-	}
-	defer kc.queue.Done(key)
-
+func (kc *keychain) processItem(key string) {
 	obj, exists, err := kc.informer.GetIndexer().GetByKey(key)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("failed to get object; don't sync %q: %v", key, err))
-		return true
+		return
 	}
 	if !exists {
 		kc.configMu.Lock()
 		delete(kc.config, key)
 		kc.configMu.Unlock()
-		return true
+		return
 	}
 
 	// TODO: support legacy image secret `kubernetes.io/dockercfg`
 	data, ok := obj.(*corev1.Secret).Data[corev1.DockerConfigJsonKey]
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("no secret is provided; don't sync %q", key))
-		return true
+		return
 	}
 	configFile := dcfile.New("")
 	if err := configFile.LoadFromReader(bytes.NewReader(data)); err != nil {
 		utilruntime.HandleError(fmt.Errorf("broken data; don't sync %q: %v", key, err))
-		return true
+		return
 	}
 	kc.configMu.Lock()
 	kc.config[key] = configFile
 	kc.configMu.Unlock()
-
-	return true
 }

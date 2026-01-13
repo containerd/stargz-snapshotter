@@ -109,4 +109,11 @@ if [ ${LAYERSNUM} -eq 0 ] ; then
     exit 1
 fi
 
+if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then
+    # Check if stargz snapshotter can restart successfully
+    KUBECONFIG="${KIND_KUBECONFIG}" kubectl delete pod "${TEST_POD_NAME}" --namespace="${TEST_POD_NS}"
+    docker exec -i "${KIND_NODENAME}" systemctl restart stargz-snapshotter.service
+    docker exec -i "${KIND_NODENAME}" systemctl is-active stargz-snapshotter.service
+fi
+
 exit 0
