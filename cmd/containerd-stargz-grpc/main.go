@@ -260,6 +260,10 @@ func main() {
 		}
 	}
 
+	if err := WatchConfig(ctx, *configPath, rs, &config.Config.Config); err != nil {
+		log.G(ctx).WithError(err).Warn("failed to start config watcher")
+	}
+
 	cleanup, err := serve(ctx, rpc, *address, rs, config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to serve snapshotter")

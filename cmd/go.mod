@@ -14,6 +14,7 @@ require (
 	github.com/containerd/stargz-snapshotter/ipfs v0.18.1
 	github.com/coreos/go-systemd/v22 v22.6.0
 	github.com/docker/go-metrics v0.0.1
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/goccy/go-json v0.10.5
 	github.com/klauspost/compress v1.18.2
 	github.com/opencontainers/go-digest v1.0.0
@@ -56,7 +57,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

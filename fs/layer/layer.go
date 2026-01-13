@@ -59,6 +59,24 @@ const (
 	memoryCacheType                 = "memory"
 )
 
+func applyDefaults(cfg *config.Config) {
+	if cfg.ResolveResultEntryTTLSec == 0 {
+		cfg.ResolveResultEntryTTLSec = defaultResolveResultEntryTTLSec
+	}
+	if cfg.PrefetchTimeoutSec == 0 {
+		cfg.PrefetchTimeoutSec = defaultPrefetchTimeoutSec
+	}
+}
+
+func applyDirectoryCacheDefaults(dcc *config.DirectoryCacheConfig) {
+	if dcc.MaxLRUCacheEntry == 0 {
+		dcc.MaxLRUCacheEntry = defaultMaxLRUCacheEntry
+	}
+	if dcc.MaxCacheFds == 0 {
+		dcc.MaxCacheFds = defaultMaxCacheFds
+	}
+}
+
 // passThroughConfig contains configuration for FUSE passthrough mode
 type passThroughConfig struct {
 	// enable indicates whether to enable FUSE passthrough mode
@@ -138,6 +156,7 @@ type Resolver struct {
 	backgroundTaskManager   *task.BackgroundTaskManager
 	resolveLock             *namedmutex.NamedMutex
 	config                  config.Config
+	configMu                sync.RWMutex
 	metadataStore           metadata.Store
 	overlayOpaqueType       OverlayOpaqueType
 	additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor
@@ -145,14 +164,9 @@ type Resolver struct {
 
 // NewResolver returns a new layer resolver.
 func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager, cfg config.Config, resolveHandlers map[string]remote.Handler, metadataStore metadata.Store, overlayOpaqueType OverlayOpaqueType, additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor) (*Resolver, error) {
+	applyDefaults(&cfg)
 	resolveResultEntryTTL := time.Duration(cfg.ResolveResultEntryTTLSec) * time.Second
-	if resolveResultEntryTTL == 0 {
-		resolveResultEntryTTL = defaultResolveResultEntryTTLSec * time.Second
-	}
 	prefetchTimeout := time.Duration(cfg.PrefetchTimeoutSec) * time.Second
-	if prefetchTimeout == 0 {
-		prefetchTimeout = defaultPrefetchTimeoutSec * time.Second
-	}
 
 	// layerCache caches resolved layers for future use. This is useful in a use-case where
 	// the filesystem resolves and caches all layers in an image (not only queried one) in parallel,
@@ -196,20 +210,24 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	}, nil
 }
 
+func (r *Resolver) UpdateConfig(ctx context.Context, cfg config.Config) {
+	applyDefaults(&cfg)
+	r.configMu.Lock()
+	r.config = cfg
+	r.prefetchTimeout = time.Duration(cfg.PrefetchTimeoutSec) * time.Second
+	r.configMu.Unlock()
+	r.resolver.UpdateConfig(ctx, cfg.BlobConfig)
+}
+
 func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache, error) {
 	if cacheType == memoryCacheType {
 		return cache.NewMemoryCache(), nil
 	}
 
 	dcc := cfg.DirectoryCacheConfig
+	applyDirectoryCacheDefaults(&dcc)
 	maxDataEntry := dcc.MaxLRUCacheEntry
-	if maxDataEntry == 0 {
-		maxDataEntry = defaultMaxLRUCacheEntry
-	}
 	maxFdEntry := dcc.MaxCacheFds
-	if maxFdEntry == 0 {
-		maxFdEntry = defaultMaxCacheFds
-	}
 
 	bufPool := &sync.Pool{
 		New: func() interface{} {
@@ -285,7 +303,11 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		}
 	}()
 
-	fsCache, err := newCache(filepath.Join(r.rootDir, "fscache"), r.config.FSCacheType, r.config)
+	r.configMu.RLock()
+	cfg := r.config
+	r.configMu.RUnlock()
+
+	fsCache, err := newCache(filepath.Join(r.rootDir, "fscache"), cfg.FSCacheType, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fs cache: %w", err)
 	}
@@ -333,9 +355,9 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 
 	// Combine layer information together and cache it.
 	l := newLayer(r, desc, blobR, vr, passThroughConfig{
-		enable:           r.config.PassThrough,
-		mergeBufferSize:  r.config.MergeBufferSize,
-		mergeWorkerCount: r.config.MergeWorkerCount,
+		enable:           cfg.PassThrough,
+		mergeBufferSize:  cfg.MergeBufferSize,
+		mergeWorkerCount: cfg.MergeWorkerCount,
 	})
 	r.layerCacheMu.Lock()
 	cachedL, done2, added := r.layerCache.Add(name, l)
@@ -367,7 +389,11 @@ func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, 
 		r.blobCacheMu.Unlock()
 	}
 
-	httpCache, err := newCache(filepath.Join(r.rootDir, "httpcache"), r.config.HTTPCacheType, r.config)
+	r.configMu.RLock()
+	cfg := r.config
+	r.configMu.RUnlock()
+
+	httpCache, err := newCache(filepath.Join(r.rootDir, "httpcache"), cfg.HTTPCacheType, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http cache: %w", err)
 	}

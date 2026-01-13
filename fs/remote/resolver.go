@@ -62,7 +62,7 @@ const (
 	defaultMaxWaitMSec = 300000
 )
 
-func NewResolver(cfg config.BlobConfig, handlers map[string]Handler) *Resolver {
+func applyDefaults(cfg *config.BlobConfig) {
 	if cfg.ChunkSize == 0 { // zero means "use default chunk size"
 		cfg.ChunkSize = defaultChunkSize
 	}
@@ -84,7 +84,10 @@ func NewResolver(cfg config.BlobConfig, handlers map[string]Handler) *Resolver {
 	if cfg.MaxWaitMSec == 0 {
 		cfg.MaxWaitMSec = defaultMaxWaitMSec
 	}
+}
 
+func NewResolver(cfg config.BlobConfig, handlers map[string]Handler) *Resolver {
+	applyDefaults(&cfg)
 	return &Resolver{
 		blobConfig: cfg,
 		handlers:   handlers,
@@ -94,6 +97,14 @@ func NewResolver(cfg config.BlobConfig, handlers map[string]Handler) *Resolver {
 type Resolver struct {
 	blobConfig config.BlobConfig
 	handlers   map[string]Handler
+	mu         sync.RWMutex
+}
+
+func (r *Resolver) UpdateConfig(ctx context.Context, cfg config.BlobConfig) {
+	applyDefaults(&cfg)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.blobConfig = cfg
 }
 
 type fetcher interface {
@@ -107,7 +118,9 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	if err != nil {
 		return nil, err
 	}
-	blobConfig := &r.blobConfig
+	r.mu.RLock()
+	blobConfig := r.blobConfig
+	r.mu.RUnlock()
 	return makeBlob(f,
 		size,
 		blobConfig.ChunkSize,
@@ -120,7 +133,9 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 }
 
 func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (f fetcher, size int64, err error) {
-	blobConfig := &r.blobConfig
+	r.mu.RLock()
+	blobConfig := r.blobConfig
+	r.mu.RUnlock()
 	fc := &fetcherConfig{
 		hosts:      hosts,
 		refspec:    refspec,
