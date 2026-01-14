@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/containerd/log"
+	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	"github.com/containerd/stargz-snapshotter/fs/reader"
@@ -365,12 +366,13 @@ func (n *node) Open(ctx context.Context, flags uint32) (fh fusefs.FileHandle, fu
 
 	if n.fs.passThrough.enable {
 		if getter, ok := ra.(reader.PassthroughFdGetter); ok {
-			fd, err := getter.GetPassthroughFd(n.fs.passThrough.mergeBufferSize, n.fs.passThrough.mergeWorkerCount)
+			fd, cacheReader, err := getter.GetPassthroughFd(n.fs.passThrough.mergeBufferSize, n.fs.passThrough.mergeWorkerCount)
 			if err != nil {
 				n.fs.s.report(fmt.Errorf("passThrough model failed due to node.Open: %v", err))
 				n.fs.passThrough.enable = false
 			} else {
 				f.InitFd(int(fd))
+				f.cacheReader = cacheReader
 			}
 		}
 	}
@@ -450,9 +452,10 @@ func (n *node) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
 
 // file is a file abstraction which implements file handle in go-fuse.
 type file struct {
-	n  *node
-	ra io.ReaderAt
-	fd int
+	n           *node
+	ra          io.ReaderAt
+	fd          int
+	cacheReader cache.Reader
 }
 
 var _ = (fusefs.FileReader)((*file)(nil))
@@ -492,6 +495,19 @@ func (f *file) PassthroughFd() (int, bool) {
 
 func (f *file) InitFd(fd int) {
 	f.fd = fd
+}
+
+var _ = (fusefs.FileReleaser)((*file)(nil))
+
+func (f *file) Release(ctx context.Context) syscall.Errno {
+	if f.cacheReader != nil {
+		if err := f.cacheReader.Close(); err != nil {
+			f.n.fs.s.report(fmt.Errorf("file.Release: failed to close cache reader: %v", err))
+			return syscall.EIO
+		}
+		f.cacheReader = nil
+	}
+	return 0
 }
 
 // whiteout is a whiteout abstraction compliant to overlayfs.
