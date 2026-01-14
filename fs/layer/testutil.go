@@ -137,6 +137,7 @@ func TestSuiteLayer(t *TestRunner, store metadata.Store) {
 		testPrefetch(t, store, lc)
 		testNodeRead(t, store, lc)
 		testNodes(t, store, lc)
+		testStatfs(t, store, lc)
 	}
 }
 
@@ -824,12 +825,70 @@ func getRootNode(t TestingT, r metadata.Reader, opaque OverlayOpaqueType, tocDgs
 	if err != nil {
 		t.Fatalf("failed to verify reader: %v", err)
 	}
-	rootNode, err := newNode(testStateLayerDigest, rr, &testBlobState{10, 5}, 100, opaque, lc.passThroughConfig)
+	rootNode, err := newNode(testStateLayerDigest, rr, &testBlobState{10, 5}, 100, opaque, lc.passThroughConfig, "")
 	if err != nil {
 		t.Fatalf("failed to get root node: %v", err)
 	}
 	fusefs.NewNodeFS(rootNode, &fusefs.Options{}) // initializes root node
 	return rootNode.(*node)
+}
+
+func getRootNodeWithStatfsBase(t TestingT, r metadata.Reader, opaque OverlayOpaqueType, tocDgst digest.Digest, cc cache.BlobCache, lc layerConfig, statfsBase string) *node {
+	vr, err := reader.NewReader(r, cc, digest.FromString(""))
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+	rr, err := vr.VerifyTOC(tocDgst)
+	if err != nil {
+		t.Fatalf("failed to verify reader: %v", err)
+	}
+	rootNode, err := newNode(testStateLayerDigest, rr, &testBlobState{10, 5}, 100, opaque, lc.passThroughConfig, statfsBase)
+	if err != nil {
+		t.Fatalf("failed to get root node: %v", err)
+	}
+	fusefs.NewNodeFS(rootNode, &fusefs.Options{})
+	return rootNode.(*node)
+}
+
+func testStatfs(t *TestRunner, factory metadata.Store, lc layerConfig) {
+	// Build a minimal layer
+	sr, tocDgst, err := tutil.BuildEStargz(
+		[]tutil.TarEntry{tutil.File("foo.txt", sampleData1)},
+		tutil.WithEStargzOptions(estargz.WithCompression(tutil.ZstdCompressionWithLevel(zstd.SpeedFastest)())),
+	)
+	if err != nil {
+		t.Fatalf("failed to build eStargz: %v", err)
+	}
+	r, err := factory(sr, metadata.WithDecompressors(tutil.ZstdCompressionWithLevel(zstd.SpeedFastest)()))
+	if err != nil {
+		t.Fatalf("failed to create metadata reader: %v", err)
+	}
+	defer r.Close()
+	cc := cache.NewMemoryCache()
+
+	// Case1: empty statfsBase -> zero stats
+	rootEmpty := getRootNode(t, r, OverlayOpaqueAll, tocDgst, cc, lc)
+	var out fuse.StatfsOut
+	if errno := rootEmpty.Operations().(fusefs.NodeStatfser).Statfs(context.Background(), &out); errno != 0 {
+		t.Fatalf("Statfs failed: %v", errno)
+	}
+	if out.Blocks != 0 || out.Files != 0 {
+		t.Fatalf("expected zero stats for empty base, got Blocks=%d Files=%d", out.Blocks, out.Files)
+	}
+
+	// Case2: valid statfsBase -> non-zero stats
+	dir, err := os.MkdirTemp("", "statfsbase")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	rootWith := getRootNodeWithStatfsBase(t, r, OverlayOpaqueAll, tocDgst, cc, lc, dir)
+	var out2 fuse.StatfsOut
+	if errno := rootWith.Operations().(fusefs.NodeStatfser).Statfs(context.Background(), &out2); errno != 0 {
+		t.Fatalf("Statfs with base failed: %v", errno)
+	}
+	if out2.Blocks == 0 || out2.Bsize == 0 {
+		t.Fatalf("expected non-zero stats for valid base, got Blocks=%d Bsize=%d", out2.Blocks, out2.Bsize)
+	}
 }
 
 type testBlobState struct {

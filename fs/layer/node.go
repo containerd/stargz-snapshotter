@@ -76,7 +76,8 @@ var opaqueXattrs = map[OverlayOpaqueType][]string{
 	OverlayOpaqueUser:    {"user.overlay.opaque"},
 }
 
-func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType, pth passThroughConfig) (fusefs.InodeEmbedder, error) {
+func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseInode uint32, opaque OverlayOpaqueType,
+	pth passThroughConfig, statfsBase string) (fusefs.InodeEmbedder, error) {
 	rootID := r.Metadata().RootID()
 	rootAttr, err := r.Metadata().GetAttr(rootID)
 	if err != nil {
@@ -93,6 +94,7 @@ func newNode(layerDgst digest.Digest, r reader.Reader, blob remote.Blob, baseIno
 		rootID:       rootID,
 		opaqueXattrs: opq,
 		passThrough:  pth,
+		statfsBase:   statfsBase,
 	}
 	ffs.s = ffs.newState(layerDgst, blob)
 	return &node{
@@ -111,6 +113,7 @@ type fs struct {
 	rootID       uint32
 	opaqueXattrs []string
 	passThrough  passThroughConfig
+	statfsBase   string
 }
 
 func (fs *fs) inodeOfState() uint64 {
@@ -444,7 +447,7 @@ func (n *node) Readlink(ctx context.Context) ([]byte, syscall.Errno) {
 var _ = (fusefs.NodeStatfser)((*node)(nil))
 
 func (n *node) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	defaultStatfs(out)
+	n.fs.fillStatfs(out)
 	return 0
 }
 
@@ -517,7 +520,7 @@ func (w *whiteout) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.A
 var _ = (fusefs.NodeStatfser)((*whiteout)(nil))
 
 func (w *whiteout) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	defaultStatfs(out)
+	w.fs.fillStatfs(out)
 	return 0
 }
 
@@ -583,7 +586,7 @@ func (s *state) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.Attr
 var _ = (fusefs.NodeStatfser)((*state)(nil))
 
 func (s *state) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	defaultStatfs(out)
+	s.fs.fillStatfs(out)
 	return 0
 }
 
@@ -645,7 +648,7 @@ func (sf *statFile) Getattr(ctx context.Context, f fusefs.FileHandle, out *fuse.
 var _ = (fusefs.NodeStatfser)((*statFile)(nil))
 
 func (sf *statFile) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
-	defaultStatfs(out)
+	sf.fs.fillStatfs(out)
 	return 0
 }
 
@@ -846,4 +849,24 @@ func defaultStatfs(stat *fuse.StatfsOut) {
 	stat.Frsize = blockSize
 	stat.Padding = 0
 	stat.Spare = [6]uint32{}
+}
+
+func (fs *fs) fillStatfs(out *fuse.StatfsOut) {
+	if fs.statfsBase != "" {
+		var s unix.Statfs_t
+		if err := unix.Statfs(fs.statfsBase, &s); err == nil {
+			out.Blocks = s.Blocks
+			out.Bfree = s.Bfree
+			out.Bavail = s.Bavail
+			out.Files = s.Files
+			out.Ffree = s.Ffree
+			out.Bsize = uint32(s.Bsize)
+			out.Frsize = uint32(s.Frsize)
+			out.NameLen = 255
+			out.Padding = 0
+			out.Spare = [6]uint32{}
+			return
+		}
+	}
+	defaultStatfs(out)
 }
