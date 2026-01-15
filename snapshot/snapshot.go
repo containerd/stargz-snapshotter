@@ -40,6 +40,9 @@ const (
 	remoteLabel         = "containerd.io/snapshot/remote"
 	remoteLabelVal      = "remote snapshot"
 
+	targetStargzLayerDigestLabel = "containerd.io/snapshot/remote/stargz.digest"
+	targetCRILayerDigestLabel    = "containerd.io/snapshot/cri.layer-digest"
+
 	// remoteSnapshotLogKey is a key for log line, which indicates whether
 	// `Prepare` method successfully prepared targeting remote snapshot or not, as
 	// defined in the following:
@@ -66,6 +69,13 @@ type FileSystem interface {
 	Mount(ctx context.Context, mountpoint string, labels map[string]string) error
 	Check(ctx context.Context, mountpoint string, labels map[string]string) error
 	Unmount(ctx context.Context, mountpoint string) error
+}
+
+// MetadataPruner is an optional interface implemented by FileSystem.
+// Snapshotter calls this after snapshot removal/cleanup so the filesystem can
+// release persistent metadata for remote layers.
+type MetadataPruner interface {
+	PruneMetadata(ctx context.Context, keep map[string]struct{}) error
 }
 
 // SnapshotterConfig is used to configure the remote snapshotter instance
@@ -390,7 +400,11 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 
 	}
 
-	return t.Commit()
+	if err := t.Commit(); err != nil {
+		return err
+	}
+	o.pruneRemoteMetadata(ctx)
+	return nil
 }
 
 // Walk the snapshots.
@@ -406,7 +420,45 @@ func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...str
 // Cleanup cleans up disk resources from removed or abandoned snapshots
 func (o *snapshotter) Cleanup(ctx context.Context) error {
 	const cleanupCommitted = false
-	return o.cleanup(ctx, cleanupCommitted)
+	err := o.cleanup(ctx, cleanupCommitted)
+	if err == nil {
+		o.pruneRemoteMetadata(ctx)
+	}
+	return err
+}
+
+func (o *snapshotter) pruneRemoteMetadata(ctx context.Context) {
+	p, ok := o.fs.(MetadataPruner)
+	if !ok {
+		return
+	}
+	txCtx, t, err := o.ms.TransactionContext(ctx, false)
+	if err != nil {
+		log.G(ctx).WithError(err).Warn("failed to start metadata prune transaction")
+		return
+	}
+	defer t.Rollback()
+
+	keep := make(map[string]struct{})
+	if err := storage.WalkInfo(txCtx, func(ctx context.Context, info snapshots.Info) error {
+		if _, ok := info.Labels[remoteLabel]; !ok {
+			return nil
+		}
+		if dgst, ok := info.Labels[targetStargzLayerDigestLabel]; ok && dgst != "" {
+			keep[dgst] = struct{}{}
+		}
+		if dgst, ok := info.Labels[targetCRILayerDigestLabel]; ok && dgst != "" {
+			keep[dgst] = struct{}{}
+		}
+		return nil
+	}); err != nil {
+		log.G(ctx).WithError(err).Warn("failed to walk snapshots for metadata prune")
+		return
+	}
+
+	if err := p.PruneMetadata(ctx, keep); err != nil {
+		log.G(ctx).WithError(err).Warn("failed to prune metadata")
+	}
 }
 
 func (o *snapshotter) cleanup(ctx context.Context, cleanupCommitted bool) error {
