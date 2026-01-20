@@ -235,25 +235,26 @@ jobs:
     - name: Test Podman (rootless)
       run: make test-podman
 
-  test-k3s:
-    runs-on: ubuntu-24.04
-    name: K3S
-    steps:
-    - uses: actions/setup-go@v6
-      with:
-        go-version: '1.25.x'
-    - name: Install k3d
-      run: |
-        wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.8.3/install.sh | bash
-    - name: Install htpasswd for setting up private registry
-      run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
-    - name: Install yq
-      run: |
-        sudo wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.9.3/yq_linux_amd64
-        sudo chmod +x /usr/local/bin/yq
-    - uses: actions/checkout@v6
-    - name: Run test with k3s
-      run: make test-k3s
+  # TODO: restore it once containerd v2.2.1 becoming available in k3s
+  # test-k3s:
+  #   runs-on: ubuntu-24.04
+  #   name: K3S
+  #   steps:
+  #   - uses: actions/setup-go@v6
+  #     with:
+  #       go-version: '1.25.x'
+  #   - name: Install k3d
+  #     run: |
+  #       wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.8.3/install.sh | bash
+  #   - name: Install htpasswd for setting up private registry
+  #     run: sudo apt-get update -y && sudo apt-get --no-install-recommends install -y apache2-utils
+  #   - name: Install yq
+  #     run: |
+  #       sudo wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.9.3/yq_linux_amd64
+  #       sudo chmod +x /usr/local/bin/yq
+  #   - uses: actions/checkout@v6
+  #   - name: Run test with k3s
+  #     run: make test-k3s
 
   test-ipfs:
     runs-on: ubuntu-24.04
@@ -263,45 +264,46 @@ jobs:
     - name: Run test
       run: make test-ipfs
 
-  test-k3s-argo-workflow:
-    runs-on: ubuntu-24.04
-    name: K3SArgoWorkflow
-    env:
-      RESULT_DIR: ${{ github.workspace }}/argo-workflow/
-    steps:
-    - uses: actions/setup-go@v6
-      with:
-        go-version: '1.25.x'
-    - name: Install k3d
-      run: |
-        wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.8.3/install.sh | bash
-    - name: Install argo worklflow
-      run: |
-        wget -q https://github.com/argoproj/argo-workflows/releases/download/v3.0.10/argo-linux-amd64.gz
-        gunzip argo-linux-amd64.gz
-        sudo mv argo-linux-amd64 /usr/local/bin/argo
-        sudo chmod +x /usr/local/bin/argo
-    - name: Workaround for freeing up more disk space
-      # https://github.com/actions/runner-images/issues/2606
-      run: |
-        sudo rm -rf /usr/local/lib/android # will release about 10 GB if you don't need Android
-        sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
-    - uses: actions/checkout@v6
-    - name: Prepare directories
-      run: mkdir "${RESULT_DIR}"
-    - name: Get instance information
-      run: |
-          curl -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2019-11-01" | \
-          jq '{ location : .compute.location, vmSize : .compute.vmSize }' | \
-          tee ${{ env.RESULT_DIR }}/instance.json
-    - name: Run argo workflow
-      env:
-        RESULT: ${{ env.RESULT_DIR }}/result.json
-      run: make test-k3s-argo-workflow
-    - uses: actions/upload-artifact@v6
-      with:
-        name: k3s-argo-workflow
-        path: ${{ env.RESULT_DIR }}
+  # TODO: restore it once containerd v2.2.1 becoming available in k3s
+  # test-k3s-argo-workflow:
+  #   runs-on: ubuntu-24.04
+  #   name: K3SArgoWorkflow
+  #   env:
+  #     RESULT_DIR: ${{ github.workspace }}/argo-workflow/
+  #   steps:
+  #   - uses: actions/setup-go@v6
+  #     with:
+  #       go-version: '1.25.x'
+  #   - name: Install k3d
+  #     run: |
+  #       wget -q -O - https://raw.githubusercontent.com/rancher/k3d/v5.8.3/install.sh | bash
+  #   - name: Install argo worklflow
+  #     run: |
+  #       wget -q https://github.com/argoproj/argo-workflows/releases/download/v3.0.10/argo-linux-amd64.gz
+  #       gunzip argo-linux-amd64.gz
+  #       sudo mv argo-linux-amd64 /usr/local/bin/argo
+  #       sudo chmod +x /usr/local/bin/argo
+  #   - name: Workaround for freeing up more disk space
+  #     # https://github.com/actions/runner-images/issues/2606
+  #     run: |
+  #       sudo rm -rf /usr/local/lib/android # will release about 10 GB if you don't need Android
+  #       sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
+  #   - uses: actions/checkout@v6
+  #   - name: Prepare directories
+  #     run: mkdir "${RESULT_DIR}"
+  #   - name: Get instance information
+  #     run: |
+  #         curl -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2019-11-01" | \
+  #         jq '{ location : .compute.location, vmSize : .compute.vmSize }' | \
+  #         tee ${{ env.RESULT_DIR }}/instance.json
+  #   - name: Run argo workflow
+  #     env:
+  #       RESULT: ${{ env.RESULT_DIR }}/result.json
+  #     run: make test-k3s-argo-workflow
+  #   - uses: actions/upload-artifact@v6
+  #     with:
+  #       name: k3s-argo-workflow
+  #       path: ${{ env.RESULT_DIR }}
 
   #
   # Project checks
