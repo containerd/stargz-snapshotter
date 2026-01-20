@@ -55,11 +55,6 @@ git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
 sed -i "s|github.com/k3s-io/stargz-snapshotter .*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
 echo "replace github.com/containerd/stargz-snapshotter/estargz => $(realpath ${REPO})/estargz" >> "${TMP_K3S_REPO}/go.mod"
 
-# typeurl version stargz-snapshotter indirectly depends on is incompatible to the one github.com/k3s-io/containerd depends on.
-# We use older version of typeurl which the both of the above are compatible to.
-# We can remove this directive once k3s upgrades typeurl version to newer than v1.0.3-0.20220324183432-6193a0e03259.
-echo "replace github.com/containerd/typeurl => github.com/containerd/typeurl v1.0.2" >> "${TMP_K3S_REPO}/go.mod"
-
 cat "${TMP_K3S_REPO}/go.mod"
 
 sed -i -E 's|DAPPER_RUN_ARGS="([^"]*)"|DAPPER_RUN_ARGS="\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro"|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
