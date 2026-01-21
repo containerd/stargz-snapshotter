@@ -322,7 +322,13 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		additionalDecompressors = append(additionalDecompressors, r.additionalDecompressors(ctx, hosts, refspec, desc)...)
 	}
 	meta, err := r.metadataStore(sr,
-		append(esgzOpts, metadata.WithTelemetry(&telemetry), metadata.WithDecompressors(additionalDecompressors...))...)
+		append(
+			esgzOpts,
+			metadata.WithTelemetry(&telemetry),
+			metadata.WithDecompressors(additionalDecompressors...),
+			metadata.WithLayerDigest(desc.Digest),
+		)...,
+	)
 	if err != nil {
 		return nil, err
 	}

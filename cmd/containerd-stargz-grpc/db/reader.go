@@ -38,7 +38,6 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	"github.com/rs/xid"
 	bolt "go.etcd.io/bbolt"
-	errbolt "go.etcd.io/bbolt/errors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -90,6 +89,43 @@ func NewReader(db *bolt.DB, sr *io.SectionReader, opts ...metadata.Option) (meta
 		fetchSize = sr.Size() - maybeTocOffset
 	}
 
+	fsID := ""
+	if rOpts.LayerDigest != "" {
+		fsID = rOpts.LayerDigest.String()
+	}
+	if fsID != "" {
+		return withInitLock(fsID, func() (metadata.Reader, error) {
+			if info, err := loadPersisted(db, fsID); err != nil {
+				return nil, err
+			} else if info != nil {
+				d := findDecompressorByKey(decompressors, info.decompressorKey)
+				if d != nil {
+					return &reader{
+						sr:           sr,
+						db:           db,
+						fsID:         fsID,
+						rootID:       info.rootID,
+						tocDigest:    info.tocDigest,
+						initG:        new(errgroup.Group),
+						decompressor: d,
+					}, nil
+				}
+			}
+			return newReaderFromRemote(db, sr, fetchSize, decompressors, rOpts, fsID)
+		})
+	}
+
+	return newReaderFromRemote(db, sr, fetchSize, decompressors, rOpts, "")
+}
+
+func newReaderFromRemote(
+	db *bolt.DB,
+	sr *io.SectionReader,
+	fetchSize int64,
+	decompressors []metadata.Decompressor,
+	rOpts metadata.Options,
+	fsID string,
+) (metadata.Reader, error) {
 	start := time.Now() // before getting layer footer
 	footer := make([]byte, fetchSize)
 	if _, err := sr.ReadAt(footer, sr.Size()-fetchSize); err != nil {
@@ -135,7 +171,7 @@ func NewReader(db *bolt.DB, sr *io.SectionReader, opts ...metadata.Option) (meta
 	}
 	defer tocR.Close()
 	r := &reader{sr: sr, db: db, initG: new(errgroup.Group), decompressor: decompressor}
-	if err := r.init(tocR, rOpts); err != nil {
+	if err := r.initWithFSID(tocR, rOpts, fsID, decompressorKey(decompressor)); err != nil {
 		return nil, fmt.Errorf("failed to initialize matadata: %w", err)
 	}
 	return r, nil
@@ -217,23 +253,23 @@ func (r *reader) Clone(sr *io.SectionReader) (metadata.Reader, error) {
 }
 
 func (r *reader) init(decompressedR io.Reader, rOpts metadata.Options) (retErr error) {
+	return r.initWithFSID(decompressedR, rOpts, "", "")
+}
+
+func (r *reader) initWithFSID(
+	decompressedR io.Reader,
+	rOpts metadata.Options,
+	fsID string,
+	decompKey string,
+) (retErr error) {
 	start := time.Now() // before parsing TOC JSON
 
 	// Initialize root node
-	var ok bool
-	for i := 0; i < 100; i++ {
-		fsID := xid.New().String()
-		if err := r.initRootNode(fsID); err != nil {
-			if errors.Is(err, errbolt.ErrBucketExists) {
-				continue // try with another id
-			}
-			return fmt.Errorf("failed to initialize root node %q: %w", fsID, err)
-		}
-		ok = true
-		break
+	if fsID == "" {
+		fsID = xid.New().String()
 	}
-	if !ok {
-		return fmt.Errorf("failed to get a unique id for metadata reader")
+	if err := r.initRootNode(fsID); err != nil {
+		return fmt.Errorf("failed to initialize root node %q: %w", fsID, err)
 	}
 
 	f, err := os.CreateTemp("", "")
@@ -278,6 +314,11 @@ func (r *reader) init(decompressedR io.Reader, rOpts metadata.Options) (retErr e
 		if err := r.initNodes(f); err != nil {
 			return err
 		}
+		if r.fsID != "" && decompKey != "" {
+			if err := r.markReady(decompKey); err != nil {
+				return err
+			}
+		}
 		if rOpts.Telemetry != nil && rOpts.Telemetry.DeserializeTocLatency != nil {
 			rOpts.Telemetry.DeserializeTocLatency(start)
 		}
@@ -291,6 +332,26 @@ func (r *reader) initRootNode(fsID string) error {
 		filesystems, err := tx.CreateBucketIfNotExists(bucketKeyFilesystems)
 		if err != nil {
 			return err
+		}
+		if existing := filesystems.Bucket([]byte(fsID)); existing != nil {
+			if decodeBool(existing.Get(bucketKeyReady)) {
+				tocStr := string(existing.Get(bucketKeyTOCDigest))
+				decompKey := string(existing.Get(bucketKeyDecompressor))
+				rootU, _ := binary.Uvarint(existing.Get(bucketKeyRootID))
+				if tocStr != "" && decompKey != "" && rootU != 0 {
+					r.fsID = fsID
+					r.rootID = uint32(rootU)
+					tocD, err := digest.Parse(tocStr)
+					if err != nil {
+						return fmt.Errorf("invalid persisted TOC digest: %w", err)
+					}
+					r.tocDigest = tocD
+					return nil
+				}
+			}
+			if err := filesystems.DeleteBucket([]byte(fsID)); err != nil {
+				return err
+			}
 		}
 		lbkt, err := filesystems.CreateBucket([]byte(fsID))
 		if err != nil {
@@ -322,6 +383,20 @@ func (r *reader) initRootNode(fsID string) error {
 			return err
 		}
 		r.rootID = rootID
+		rootEnc, err := encodeUint(uint64(rootID))
+		if err != nil {
+			return err
+		}
+		if err := lbkt.Put(bucketKeyRootID, rootEnc); err != nil {
+			return err
+		}
+		zero, err := encodeUint(0)
+		if err != nil {
+			return err
+		}
+		if err := lbkt.Put(bucketKeyReady, zero); err != nil {
+			return err
+		}
 		return err
 	})
 }
@@ -636,24 +711,11 @@ func (r *reader) view(fn func(tx *bolt.Tx) error) error {
 	})
 }
 
-func (r *reader) update(fn func(tx *bolt.Tx) error) error {
-	if err := r.waitInit(); err != nil {
-		return err
-	}
-	return r.db.Batch(func(tx *bolt.Tx) error {
-		return fn(tx)
-	})
-}
-
-// Close closes this reader. This removes underlying filesystem metadata as well.
+// This reader is backed by a persistent metadata DB keyed by layer digest.
+// Metadata lifecycle is managed by snapshot removal/cleanup (Prune), so Close only
+// waits for initialization to finish to avoid leaving partially-initialized state.
 func (r *reader) Close() error {
-	return r.update(func(tx *bolt.Tx) (err error) {
-		filesystems := tx.Bucket(bucketKeyFilesystems)
-		if filesystems == nil {
-			return nil
-		}
-		return filesystems.DeleteBucket([]byte(r.fsID))
-	})
+	return r.waitInit()
 }
 
 // GetOffset returns an offset of a node.

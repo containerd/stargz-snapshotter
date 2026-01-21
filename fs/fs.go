@@ -83,6 +83,7 @@ type options struct {
 	getSources              source.GetSources
 	resolveHandlers         map[string]remote.Handler
 	metadataStore           metadata.Store
+	metadataPruneFunc       func(context.Context, map[string]struct{}) error
 	metricsLogLevel         *log.Level
 	overlayOpaqueType       layer.OverlayOpaqueType
 	additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor
@@ -106,6 +107,12 @@ func WithResolveHandler(name string, handler remote.Handler) Option {
 func WithMetadataStore(metadataStore metadata.Store) Option {
 	return func(opts *options) {
 		opts.metadataStore = metadataStore
+	}
+}
+
+func WithMetadataPruneFunc(fn func(context.Context, map[string]struct{}) error) Option {
+	return func(opts *options) {
+		opts.metadataPruneFunc = fn
 	}
 }
 
@@ -194,6 +201,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		metricsController:     metricsCtr,
 		attrTimeout:           attrTimeout,
 		entryTimeout:          entryTimeout,
+		metadataPruneFunc:     fsOpts.metadataPruneFunc,
 	}, nil
 }
 
@@ -212,6 +220,15 @@ type filesystem struct {
 	metricsController     *layermetrics.Controller
 	attrTimeout           time.Duration
 	entryTimeout          time.Duration
+	metadataPruneFunc     func(context.Context, map[string]struct{}) error
+}
+
+// PruneMetadata removes unused metadata from the underlying metadata store, if configured.
+func (fs *filesystem) PruneMetadata(ctx context.Context, keep map[string]struct{}) error {
+	if fs.metadataPruneFunc == nil {
+		return nil
+	}
+	return fs.metadataPruneFunc(ctx, keep)
 }
 
 func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) (retErr error) {

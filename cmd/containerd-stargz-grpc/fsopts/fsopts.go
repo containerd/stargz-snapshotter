@@ -49,32 +49,39 @@ func ConfigFsOpts(ctx context.Context, rootDir string, config *Config) ([]fs.Opt
 		fsOpts = append(fsOpts, fs.WithResolveHandler("ipfs", new(ipfs.ResolveHandler)))
 	}
 
-	mt, err := getMetadataStore(rootDir, config)
+	mt, pruneFn, err := getMetadataStore(rootDir, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure metadata store: %w", err)
 	}
 	fsOpts = append(fsOpts, fs.WithMetadataStore(mt))
+	if pruneFn != nil {
+		fsOpts = append(fsOpts, fs.WithMetadataPruneFunc(pruneFn))
+	}
 
 	return fsOpts, nil
 }
 
-func getMetadataStore(rootDir string, config *Config) (metadata.Store, error) {
+func getMetadataStore(rootDir string, config *Config) (metadata.Store, func(context.Context, map[string]struct{}) error, error) {
 	switch config.MetadataStore {
 	case "", memoryMetadataType:
-		return memorymetadata.NewReader, nil
+		return memorymetadata.NewReader, nil, nil
 	case dbMetadataType:
 		if config.OpenBoltDB == nil {
-			return nil, fmt.Errorf("bolt DB is not configured")
+			return nil, nil, fmt.Errorf("bolt DB is not configured")
 		}
 		db, err := config.OpenBoltDB(filepath.Join(rootDir, "metadata.db"))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
+		store := func(sr *io.SectionReader, opts ...metadata.Option) (metadata.Reader, error) {
 			return dbmetadata.NewReader(db, sr, opts...)
-		}, nil
+		}
+		pruneFn := func(ctx context.Context, keep map[string]struct{}) error {
+			return dbmetadata.Prune(ctx, db, keep)
+		}
+		return store, pruneFn, nil
 	default:
-		return nil, fmt.Errorf("unknown metadata store type: %v; must be %v or %v",
+		return nil, nil, fmt.Errorf("unknown metadata store type: %v; must be %v or %v",
 			config.MetadataStore, memoryMetadataType, dbMetadataType)
 	}
 }

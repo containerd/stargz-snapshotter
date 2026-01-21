@@ -97,6 +97,7 @@ type Options struct {
 	TOCOffset     int64
 	Telemetry     *Telemetry
 	Decompressors []Decompressor
+	LayerDigest   digest.Digest
 }
 
 // Option is an option to configure the behaviour of reader.
@@ -123,6 +124,15 @@ func WithTelemetry(telemetry *Telemetry) Option {
 func WithDecompressors(decompressors ...Decompressor) Option {
 	return func(o *Options) error {
 		o.Decompressors = decompressors
+		return nil
+	}
+}
+
+// WithLayerDigest specifies the target layer digest.
+// This can be used by metadata stores to implement persistent caching keyed by layer.
+func WithLayerDigest(dgst digest.Digest) Option {
+	return func(o *Options) error {
+		o.LayerDigest = dgst
 		return nil
 	}
 }
