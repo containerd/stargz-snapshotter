@@ -13,16 +13,16 @@
 #   limitations under the License.
 
 ARG CONTAINERD_VERSION=v2.1.5
-ARG RUNC_VERSION=v1.3.3
-ARG CNI_PLUGINS_VERSION=v1.8.0
-ARG NERDCTL_VERSION=2.1.6
+ARG RUNC_VERSION=v1.4.0
+ARG CNI_PLUGINS_VERSION=v1.9.0
+ARG NERDCTL_VERSION=2.2.1
 
-ARG PODMAN_VERSION=v5.6.2
-ARG CRIO_VERSION=v1.34.1
-ARG CONMON_VERSION=v2.1.13
+ARG PODMAN_VERSION=v5.7.1
+ARG CRIO_VERSION=v1.34.4
+ARG CONMON_VERSION=v2.2.0
 ARG COMMON_VERSION=v0.64.1
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=registry.k8s.io/pause:3.6
-ARG NETAVARK_VERSION=v1.16.1
+ARG NETAVARK_VERSION=v1.17.1
 
 ARG CONTAINERIZED_SYSTEMD_VERSION=v0.1.1
 ARG SLIRP4NETNS_VERSION=v1.3.3
@@ -128,7 +128,7 @@ RUN apt-get update -y && apt-get install -y gcc git libc6-dev libglib2.0-dev pkg
     git clone -b ${CONMON_VERSION} --depth 1 \
               https://github.com/containers/conmon $GOPATH/src/github.com/containers/conmon && \
     cd $GOPATH/src/github.com/containers/conmon && \
-    mkdir /out/ && make && make install PREFIX=/out/
+    mkdir /out/ && make bin/conmon && make install.bin PREFIX=/out/
 
 # Get seccomp.json for Podman/CRI-O
 FROM golang-base AS containers-common-dev
