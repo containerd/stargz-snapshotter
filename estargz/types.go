@@ -81,6 +81,10 @@ const (
 	// to the special annotation.
 	StoreUncompressedSizeAnnotation = "io.containers.estargz.uncompressed-size"
 
+	// FeatureAnnotation is an image layer annotation indicating advanced stargz features.
+	// This annotation is expected to be set in `.[]layers.annotations` of an OCI image manifest.
+	FeatureAnnotation = "containerd.io/snapshot/stargz/feature"
+
 	// PrefetchLandmark is a file entry which indicates the end position of
 	// prefetch in the stargz file.
 	PrefetchLandmark = ".prefetch.landmark"
