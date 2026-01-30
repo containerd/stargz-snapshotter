@@ -179,6 +179,9 @@ func LayerConvertFuncWithCompressionLevel(compressionLevel zstd.EncoderLevel, op
 		}
 		tocDgst := blob.TOCDigest().String()
 		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = tocDgst
+		if blob.PrefetchEnabled() {
+			newDesc.Annotations[estargz.FeatureAnnotation] = "prefetch"
+		}
 		uncompressedSize, err := blob.UncompressedSize()
 		if err != nil {
 			return nil, err
