@@ -54,6 +54,7 @@ type options struct {
 	ctx                    context.Context
 	minChunkSize           int
 	gzipHelperFunc         GzipHelperFunc
+	includeLandmarks       *bool
 }
 
 type Option func(o *options) error
@@ -143,6 +144,16 @@ func WithGzipHelperFunc(gzipHelperFunc GzipHelperFunc) Option {
 	}
 }
 
+// WithIncludeLandmarks option specifies whether to include prefetch landmark files
+// in the eStargz blob. By default, landmarks are included. Set to false to exclude
+// them from the output.
+func WithIncludeLandmarks(include bool) Option {
+	return func(o *options) error {
+		o.includeLandmarks = &include
+		return nil
+	}
+}
+
 // Blob is an eStargz blob.
 type Blob struct {
 	io.ReadCloser
@@ -221,7 +232,8 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 	if err != nil {
 		return nil, err
 	}
-	entries, err := sortEntries(tarBlob, opts.prioritizedFiles, opts.missedPrioritizedFiles)
+	includeLandmarks := opts.includeLandmarks == nil || *opts.includeLandmarks
+	entries, err := sortEntries(tarBlob, opts.prioritizedFiles, opts.missedPrioritizedFiles, includeLandmarks)
 	if err != nil {
 		return nil, err
 	}
@@ -248,11 +260,13 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 			sw := NewWriterWithCompressor(esgzFile, opts.compression)
 			sw.ChunkSize = opts.chunkSize
 			sw.MinChunkSize = opts.minChunkSize
-			if sw.needsOpenGzEntries == nil {
-				sw.needsOpenGzEntries = make(map[string]struct{})
-			}
-			for _, f := range []string{PrefetchLandmark, NoPrefetchLandmark} {
-				sw.needsOpenGzEntries[f] = struct{}{}
+			if includeLandmarks {
+				if sw.needsOpenGzEntries == nil {
+					sw.needsOpenGzEntries = make(map[string]struct{})
+				}
+				for _, f := range []string{PrefetchLandmark, NoPrefetchLandmark} {
+					sw.needsOpenGzEntries[f] = struct{}{}
+				}
 			}
 			if err := sw.AppendTar(readerFromEntries(parts...)); err != nil {
 				return err
@@ -400,7 +414,7 @@ var errNotFound = errors.New("not found")
 // sortEntries reads the specified tar blob and returns a list of tar entries.
 // If some of prioritized files are specified, the list starts from these
 // files with keeping the order specified by the argument.
-func sortEntries(in io.ReaderAt, prioritized []string, missedPrioritized *[]string) ([]*entry, error) {
+func sortEntries(in io.ReaderAt, prioritized []string, missedPrioritized *[]string, includeLandmarks bool) ([]*entry, error) {
 
 	// Import tar file.
 	intar, err := importTar(in)
@@ -420,24 +434,26 @@ func sortEntries(in io.ReaderAt, prioritized []string, missedPrioritized *[]stri
 			return nil, fmt.Errorf("failed to sort tar entries: %w", err)
 		}
 	}
-	if len(prioritized) == 0 {
-		sorted.add(&entry{
-			header: &tar.Header{
-				Name:     NoPrefetchLandmark,
-				Typeflag: tar.TypeReg,
-				Size:     int64(len([]byte{landmarkContents})),
-			},
-			payload: bytes.NewReader([]byte{landmarkContents}),
-		})
-	} else {
-		sorted.add(&entry{
-			header: &tar.Header{
-				Name:     PrefetchLandmark,
-				Typeflag: tar.TypeReg,
-				Size:     int64(len([]byte{landmarkContents})),
-			},
-			payload: bytes.NewReader([]byte{landmarkContents}),
-		})
+	if includeLandmarks {
+		if len(prioritized) == 0 {
+			sorted.add(&entry{
+				header: &tar.Header{
+					Name:     NoPrefetchLandmark,
+					Typeflag: tar.TypeReg,
+					Size:     int64(len([]byte{landmarkContents})),
+				},
+				payload: bytes.NewReader([]byte{landmarkContents}),
+			})
+		} else {
+			sorted.add(&entry{
+				header: &tar.Header{
+					Name:     PrefetchLandmark,
+					Typeflag: tar.TypeReg,
+					Size:     int64(len([]byte{landmarkContents})),
+				},
+				payload: bytes.NewReader([]byte{landmarkContents}),
+			})
+		}
 	}
 
 	// Dump prioritized entries followed by the rest entries while skipping picked ones.

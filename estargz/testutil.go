@@ -199,7 +199,7 @@ func testBuild(t *TestRunner, controllers ...TestingControllerFactory) {
 							t.Run(tt.name+"-"+fmt.Sprintf("compression=%v,prefix=%q,src=%d,format=%s,minChunkSize=%d", newCL(), prefix, srcCompression, srcTarFormat, minChunkSize), func(t *TestRunner) {
 								tarBlob := buildTar(t, tt.in, prefix, srcTarFormat)
 								// Test divideEntries()
-								entries, err := sortEntries(tarBlob, nil, nil) // identical order
+								entries, err := sortEntries(tarBlob, nil, nil, true) // identical order
 								if err != nil {
 									t.Fatalf("failed to parse tar: %v", err)
 								}
