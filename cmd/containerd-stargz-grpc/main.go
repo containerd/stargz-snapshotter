@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
@@ -87,6 +88,9 @@ type snapshotterConfig struct {
 
 	// FuseManagerConfig is configuration for fusemanager
 	FuseManagerConfig `toml:"fuse_manager" json:"fuse_manager"`
+
+	// MaxThreads sets Go runtime thread limit. 0 keeps the default limit.
+	MaxThreads int `toml:"max_threads" json:"max_threads"`
 }
 
 type FuseManagerConfig struct {
@@ -129,6 +133,11 @@ func main() {
 	}
 	if err := tree.Unmarshal(&config); err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to unmarshal config file %q", *configPath)
+	}
+
+	if config.MaxThreads > 0 {
+		previous := debug.SetMaxThreads(config.MaxThreads)
+		log.G(ctx).Infof("set Go max threads to %d (previous %d)", config.MaxThreads, previous)
 	}
 
 	if err := service.Supported(*rootDir); err != nil {
