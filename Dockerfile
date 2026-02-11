@@ -34,10 +34,10 @@ ARG CRI_TOOLS_VERSION=v1.30.1
 # Legacy builder that doesn't support TARGETARCH should set this explicitly using --build-arg.
 # If TARGETARCH isn't supported by the builder, the default value is "amd64".
 
-FROM golang:1.25-bookworm AS golang-base
+FROM golang:1.26-bookworm AS golang-base
 
 # Build containerd
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS containerd-dev
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS containerd-dev
 ARG CONTAINERD_VERSION
 ARG TARGETARCH
 RUN git clone -b ${CONTAINERD_VERSION} --depth 1 \
@@ -46,7 +46,7 @@ RUN git clone -b ${CONTAINERD_VERSION} --depth 1 \
     GOARCH=$TARGETARCH make && DESTDIR=/out/ PREFIX= make install
 
 # Build containerd with builtin stargz snapshotter
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS containerd-snapshotter-dev
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS containerd-snapshotter-dev
 ARG CONTAINERD_VERSION
 ARG TARGETARCH
 COPY . $GOPATH/src/github.com/containerd/stargz-snapshotter
@@ -69,7 +69,7 @@ RUN git clone -b ${CONTAINERD_VERSION} --depth 1 \
     make vendor && GOARCH=$TARGETARCH make && DESTDIR=/out/ PREFIX= make install
 
 # Build runc
-FROM golang:1.25-bookworm AS runc-dev
+FROM golang:1.26-bookworm AS runc-dev
 ARG RUNC_VERSION
 RUN apt-get update -y && apt-get install -y libseccomp-dev && \
     git clone -b ${RUNC_VERSION} --depth 1 \
@@ -78,7 +78,7 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev && \
     make && make install PREFIX=/out/
 
 # Build stargz snapshotter
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS snapshotter-dev
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS snapshotter-dev
 ARG TARGETARCH
 ARG GOARM
 ARG SNAPSHOTTER_BUILD_FLAGS
@@ -112,7 +112,7 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
 
 # Build CRI-O
 # FROM golang-base AS cri-o-dev
-FROM golang:1.25-bookworm AS cri-o-dev
+FROM golang:1.26-bookworm AS cri-o-dev
 ARG CRIO_VERSION
 RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
     git clone https://github.com/cri-o/cri-o $GOPATH/src/github.com/cri-o/cri-o && \
