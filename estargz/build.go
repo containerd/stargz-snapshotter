@@ -37,7 +37,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/containerd/stargz-snapshotter/estargz/errorutil"
 	"github.com/klauspost/compress/zstd"
 	digest "github.com/opencontainers/go-digest"
 	"golang.org/x/sync/errgroup"
@@ -656,7 +655,7 @@ func (tf *tempFiles) cleanupAll() error {
 		}
 	}
 	tf.files = nil
-	return errorutil.Aggregate(allErr)
+	return errors.Join(allErr...)
 }
 
 func newCountReadSeeker(r io.ReaderAt) (*countReadSeeker, error) {
