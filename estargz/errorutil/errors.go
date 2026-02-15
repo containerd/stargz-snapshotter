@@ -23,6 +23,8 @@ import (
 )
 
 // Aggregate combines a list of errors into a single new error.
+//
+// Deprecated: use [errors.Join] instead. This package will be removed in v0.19.0
 func Aggregate(errs []error) error {
 	switch len(errs) {
 	case 0:
