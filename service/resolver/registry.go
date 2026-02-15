@@ -56,7 +56,7 @@ type MirrorConfig struct {
 	RequestTimeoutSec int `toml:"request_timeout_sec" json:"request_timeout_sec"`
 
 	// Header are additional headers to send to the server
-	Header map[string]interface{} `toml:"header" json:"header"`
+	Header map[string]any `toml:"header" json:"header"`
 }
 
 type Credential func(string, reference.Spec) (string, string, error)
@@ -90,7 +90,7 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.Regist
 					switch value := ty.(type) {
 					case string:
 						header[key] = []string{value}
-					case []interface{}:
+					case []any:
 						header[key], err = makeStringSlice(value, nil)
 						if err != nil {
 							return nil, err
@@ -139,7 +139,7 @@ func multiCredsFuncs(ref reference.Spec, credsFuncs ...Credential) func(string) 
 // makeStringSlice is a helper func to convert from []interface{} to []string.
 // Additionally an optional cb func may be passed to perform string mapping.
 // NOTE: Ported from https://github.com/containerd/containerd/blob/v1.6.9/remotes/docker/config/hosts.go#L516-L533
-func makeStringSlice(slice []interface{}, cb func(string) string) ([]string, error) {
+func makeStringSlice(slice []any, cb func(string) string) ([]string, error) {
 	out := make([]string, len(slice))
 	for i, value := range slice {
 		str, ok := value.(string)

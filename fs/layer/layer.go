@@ -158,7 +158,7 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	// the filesystem resolves and caches all layers in an image (not only queried one) in parallel,
 	// before they are actually queried.
 	layerCache := cacheutil.NewTTLCache(resolveResultEntryTTL)
-	layerCache.OnEvicted = func(key string, value interface{}) {
+	layerCache.OnEvicted = func(key string, value any) {
 		if err := value.(*layer).close(); err != nil {
 			log.L.WithField("key", key).WithError(err).Warnf("failed to clean up layer")
 			return
@@ -169,7 +169,7 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	// blobCache caches resolved blobs for futural use. This is especially useful when a layer
 	// isn't eStargz/stargz (the *layer object won't be created/cached in this case).
 	blobCache := cacheutil.NewTTLCache(resolveResultEntryTTL)
-	blobCache.OnEvicted = func(key string, value interface{}) {
+	blobCache.OnEvicted = func(key string, value any) {
 		if err := value.(remote.Blob).Close(); err != nil {
 			log.L.WithField("key", key).WithError(err).Warnf("failed to clean up blob")
 			return
@@ -212,16 +212,16 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 	}
 
 	bufPool := &sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return new(bytes.Buffer)
 		},
 	}
 	dCache, fCache := cacheutil.NewLRUCache(maxDataEntry), cacheutil.NewLRUCache(maxFdEntry)
-	dCache.OnEvicted = func(key string, value interface{}) {
+	dCache.OnEvicted = func(key string, value any) {
 		value.(*bytes.Buffer).Reset()
 		bufPool.Put(value)
 	}
-	fCache.OnEvicted = func(key string, value interface{}) {
+	fCache.OnEvicted = func(key string, value any) {
 		value.(*os.File).Close()
 	}
 	// create a cache on an unique directory

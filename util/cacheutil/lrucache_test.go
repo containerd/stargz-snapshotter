@@ -65,7 +65,7 @@ func TestLRUGet(t *testing.T) {
 func TestLRURemove(t *testing.T) {
 	var evicted []string
 	c := NewLRUCache(2)
-	c.OnEvicted = func(key string, value interface{}) {
+	c.OnEvicted = func(key string, value any) {
 		evicted = append(evicted, key)
 	}
 	key1, value1 := "key1", "abcd1"
@@ -95,7 +95,7 @@ func TestLRURemove(t *testing.T) {
 func TestLRUEviction(t *testing.T) {
 	var evicted []string
 	c := NewLRUCache(2)
-	c.OnEvicted = func(key string, value interface{}) {
+	c.OnEvicted = func(key string, value any) {
 		evicted = append(evicted, key)
 	}
 	key1, value1 := "key1", "abcd1"
@@ -107,7 +107,7 @@ func TestLRUEviction(t *testing.T) {
 	if len(evicted) != 0 {
 		t.Fatalf("no content must be evicted after addition")
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		c.Add(fmt.Sprintf("key-add-%d", i), fmt.Sprintf("abcd-add-%d", i))
 	}
 	if len(evicted) != 0 {
