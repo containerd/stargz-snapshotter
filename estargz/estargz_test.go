@@ -101,10 +101,7 @@ func regularFileReader(name string, size int64, chunkSize int64) (*TOCEntry, *Re
 	var written int64
 	for written < size {
 		remain := size - written
-		cs := chunkSize
-		if remain < cs {
-			cs = remain
-		}
+		cs := min(remain, chunkSize)
 		ent.ChunkSize = cs
 		ent.ChunkOffset = written
 		chunks = append(chunks, ent)

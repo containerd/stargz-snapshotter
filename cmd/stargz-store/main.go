@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	golog "log"
+	"maps"
 	"math/rand"
 	"net"
 	"os"
@@ -250,9 +251,7 @@ func (sk *storeKeychain) add(data []byte) error {
 	if sk.config == nil {
 		sk.config = make(map[string]authConfig)
 	}
-	for k, c := range conf {
-		sk.config[k] = c
-	}
+	maps.Copy(sk.config, conf)
 	sk.configMu.Unlock()
 	return nil
 }

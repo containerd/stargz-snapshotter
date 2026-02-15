@@ -21,7 +21,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/containerd/stargz-snapshotter/estargz"
@@ -79,9 +79,7 @@ func (zc *zstdController) TestStreams(t estargz.TestingT, b []byte, streams []in
 
 	// We expect the last offset is footer offset.
 	// 8 is the size of the zstd skippable frame header + the frame size (see WriteTOCAndFooter)
-	sort.Slice(streams, func(i, j int) bool {
-		return streams[i] < streams[j]
-	})
+	slices.Sort(streams)
 	streams[len(streams)-1] = streams[len(streams)-1] - 8
 	wants := map[int64]struct{}{}
 	for _, s := range streams {
@@ -127,7 +125,7 @@ func (zc *zstdController) TestStreams(t estargz.TestingT, b []byte, streams []in
 }
 
 func nextIndex(s1, sub []byte) int {
-	for i := 0; i < len(s1); i++ {
+	for i := range s1 {
 		if len(s1)-i < len(sub) {
 			return -1
 		} else if bytes.Equal(s1[i:i+len(sub)], sub) {

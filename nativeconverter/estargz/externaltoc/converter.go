@@ -374,7 +374,7 @@ func createManifest(ctx context.Context, cs content.Store, config ocispec.ImageC
 		Size:      mfstSize,
 	}, nil
 }
-func writeJSON(ctx context.Context, cs content.Store, data interface{}, labels map[string]string) (digest.Digest, int64, error) {
+func writeJSON(ctx context.Context, cs content.Store, data any, labels map[string]string) (digest.Digest, int64, error) {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return "", 0, err

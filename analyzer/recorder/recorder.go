@@ -80,7 +80,6 @@ func imageRecorderFromManifest(ctx context.Context, cs content.Store, manifestDe
 	var eg errgroup.Group
 	filesMap := make([]map[string]struct{}, len(manifest.Layers))
 	for i, desc := range manifest.Layers {
-		i, desc := i, desc
 		filesMap[i] = make(map[string]struct{})
 
 		// Create the index from the layer blob.
