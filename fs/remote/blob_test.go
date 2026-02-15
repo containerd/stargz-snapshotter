@@ -512,7 +512,7 @@ func TestParallelDownloadingBehavior(t *testing.T) {
 		wg.Add(routines)
 		var contentBytes [3][]byte
 
-		for i := 0; i < routines; i++ {
+		for i := range routines {
 			p := make([]byte, len(tst.content))
 			contentBytes[i] = p
 			allData := make(map[region]io.Writer)
@@ -673,7 +673,7 @@ type bodyConverter func(r io.ReadCloser) io.ReadCloser
 type exceptChunks []region
 type allowMultiRange bool
 
-func multiRoundTripper(t *testing.T, contents []byte, opts ...interface{}) RoundTripFunc {
+func multiRoundTripper(t *testing.T, contents []byte, opts ...any) RoundTripFunc {
 	multiRangeEnable := true
 	doNotFetch := []region{}
 	convertBody := func(r io.ReadCloser) io.ReadCloser { return r }

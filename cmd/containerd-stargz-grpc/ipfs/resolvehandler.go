@@ -74,6 +74,6 @@ func (f *fetcher) Check() error {
 }
 
 func (f *fetcher) GenID(off int64, size int64) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.cid, off, size)))
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s-%d-%d", f.cid, off, size))
 	return fmt.Sprintf("%x", sum)
 }

@@ -168,12 +168,9 @@ func (r *LayerManager) getLayer(ctx context.Context, refspec reference.Spec, toc
 		return nil, fmt.Errorf("failed to get manifest and config: %w", err)
 	}
 	for _, l := range manifest.Layers {
-		l := l
 
 		// Resolve the layer
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// Avoids to get canceled by client.
 			ctx := context.Background()
 			if err := r.resolveLayer(ctx, refspec, l); err != nil {
@@ -189,7 +186,7 @@ func (r *LayerManager) getLayer(ctx context.Context, refspec reference.Spec, toc
 			// Log this as preparation success
 			log.G(ctx).WithField(remoteSnapshotLogKey, prepareSucceeded).Debugf("successfully resolved layer")
 			resultChan <- gotL
-		}()
+		})
 	}
 
 	allDone := make(chan struct{})

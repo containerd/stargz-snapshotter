@@ -217,7 +217,6 @@ func TestNodeIndex(t *testing.T) {
 	ctx := context.Background()
 	for _, tt := range tests {
 		for _, prefix := range allowedPrefix {
-			prefix := prefix
 			for mediatype, cWrapper := range compressWrappers {
 				t.Run(tt.name+":"+mediatype+",prefix="+prefix, func(t *testing.T) {
 					var layers []ocispec.Descriptor

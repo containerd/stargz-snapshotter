@@ -66,7 +66,7 @@ func TestTTLGet(t *testing.T) {
 func TestTTLRemove(t *testing.T) {
 	var evicted []string
 	c := NewTTLCache(time.Hour)
-	c.OnEvicted = func(key string, value interface{}) {
+	c.OnEvicted = func(key string, value any) {
 		evicted = append(evicted, key)
 	}
 	key1, value1 := "key1", "abcd1"
@@ -96,7 +96,7 @@ func TestTTLRemove(t *testing.T) {
 func TestTTLRemoveOverwritten(t *testing.T) {
 	var evicted []string
 	c := NewTTLCache(3 * time.Second)
-	c.OnEvicted = func(key string, value interface{}) {
+	c.OnEvicted = func(key string, value any) {
 		evicted = append(evicted, key)
 	}
 	key1, value1 := "key1", "abcd1"
@@ -135,7 +135,7 @@ func TestTTLEviction(t *testing.T) {
 		evictedMu sync.Mutex
 	)
 	c := NewTTLCache(time.Second)
-	c.OnEvicted = func(key string, value interface{}) {
+	c.OnEvicted = func(key string, value any) {
 		evictedMu.Lock()
 		evicted = append(evicted, key)
 		evictedMu.Unlock()
@@ -182,7 +182,7 @@ func TestTTLEviction(t *testing.T) {
 func TestTTLQuickDone(t *testing.T) {
 	var evicted []string
 	c := NewTTLCache(time.Hour)
-	c.OnEvicted = func(key string, value interface{}) {
+	c.OnEvicted = func(key string, value any) {
 		evicted = append(evicted, key)
 	}
 	key1, value1 := "key1", "abcd1"
