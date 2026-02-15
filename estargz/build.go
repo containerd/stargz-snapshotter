@@ -235,7 +235,6 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 	}
 	writers := make([]*Writer, len(tarParts))
 	payloads := make([]*os.File, len(tarParts))
-	var mu sync.Mutex
 	var eg errgroup.Group
 	for i, parts := range tarParts {
 		i, parts := i, parts
@@ -257,10 +256,8 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 			if err := sw.AppendTar(readerFromEntries(parts...)); err != nil {
 				return err
 			}
-			mu.Lock()
 			writers[i] = sw
 			payloads[i] = esgzFile
-			mu.Unlock()
 			return nil
 		})
 	}
