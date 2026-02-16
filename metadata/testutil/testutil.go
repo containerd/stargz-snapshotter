@@ -312,7 +312,6 @@ func TestReader(t *TestRunner, factory ReaderFactory) {
 	}
 	for _, tt := range tests {
 		for _, prefix := range allowedPrefix {
-			prefix := prefix
 			for srcCompresionName, srcCompression := range srcCompressions {
 				srcCompression := srcCompression()
 
@@ -458,11 +457,11 @@ func newCalledTelemetry() (telemetry *metadata.Telemetry, check func() error) {
 
 func dumpNodes(t TestingT, r TestableReader, id uint32, level int) {
 	if err := r.ForeachChild(id, func(name string, id uint32, mode os.FileMode) bool {
-		ind := ""
-		for i := 0; i < level; i++ {
-			ind += " "
+		var ind strings.Builder
+		for range level {
+			ind.WriteString(" ")
 		}
-		t.Logf("%v+- [%d] %q : %v", ind, id, name, mode)
+		t.Logf("%v+- [%d] %q : %v", ind.String(), id, name, mode)
 		dumpNodes(t, r, id, level+1)
 		return true
 	}); err != nil {

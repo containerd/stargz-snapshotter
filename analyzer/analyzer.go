@@ -157,7 +157,7 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 
 	// Create the container and the task
 	var container containerd.Container
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		id := xid.New().String()
 		var s runtimespec.Spec
 		container, err = client.NewContainer(ctx, id,
@@ -221,8 +221,8 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 		prePaths := preMonitor.GetPaths()
 		for _, path := range prePaths {
 			cleanPath := path
-			if strings.HasPrefix(path, target) {
-				cleanPath = strings.TrimPrefix(path, target)
+			if after, ok := strings.CutPrefix(path, target); ok {
+				cleanPath = after
 			}
 			if err := rc.Record(cleanPath); err != nil {
 				log.G(ctx).WithError(err).Debugf("failed to record pre-container path %q", cleanPath)

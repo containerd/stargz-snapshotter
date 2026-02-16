@@ -52,7 +52,7 @@ func newRefPool(ctx context.Context, root string, hosts source.RegistryHosts) (*
 		refcounter: make(map[string]*releaser),
 	}
 	p.cache = cacheutil.NewLRUCache(refCacheEntry)
-	p.cache.OnEvicted = func(key string, value interface{}) {
+	p.cache.OnEvicted = func(key string, value any) {
 		refspec := value.(reference.Spec)
 		if err := os.RemoveAll(p.metadataDir(refspec)); err != nil {
 			log.G(ctx).WithField("key", key).WithError(err).Warnf("failed to clean up ref")

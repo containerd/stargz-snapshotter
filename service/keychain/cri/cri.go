@@ -37,7 +37,7 @@ func NewCRIKeychain(ctx context.Context, connectCRI func() (runtime.ImageService
 	server := &instrumentedService{config: make(map[string]*runtime.AuthConfig)}
 	go func() {
 		log.G(ctx).Debugf("Waiting for CRI service is started...")
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			client, err := connectCRI()
 			if err == nil {
 				server.criMu.Lock()

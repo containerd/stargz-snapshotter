@@ -221,7 +221,7 @@ func (r *reader) init(decompressedR io.Reader, rOpts metadata.Options) (retErr e
 
 	// Initialize root node
 	var ok bool
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		fsID := xid.New().String()
 		if err := r.initRootNode(fsID); err != nil {
 			if errors.Is(err, errbolt.ErrBucketExists) {
@@ -930,10 +930,7 @@ func (fr *fileReader) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 
 	compressedBytesRemain := fr.nextOffset - ent.offset
-	bufSize := int(2 << 20)
-	if bufSize > int(compressedBytesRemain) {
-		bufSize = int(compressedBytesRemain)
-	}
+	bufSize := min(int(2<<20), int(compressedBytesRemain))
 
 	br := bufio.NewReaderSize(io.NewSectionReader(fr.r.sr, ent.offset, compressedBytesRemain), bufSize)
 	if _, err := br.Peek(bufSize); err != nil {

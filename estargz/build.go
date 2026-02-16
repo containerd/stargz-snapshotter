@@ -238,7 +238,6 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 	var mu sync.Mutex
 	var eg errgroup.Group
 	for i, parts := range tarParts {
-		i, parts := i, parts
 		// builds verifiable stargz sub-blobs
 		eg.Go(func() error {
 			esgzFile, err := layerFiles.TempFile("", "esgzdata")

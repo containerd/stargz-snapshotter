@@ -354,11 +354,8 @@ func TestSort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		for _, srcCompression := range srcCompressions {
-			srcCompression := srcCompression
 			for _, logprefix := range allowedPrefix {
-				logprefix := logprefix
 				for _, tarprefix := range allowedPrefix {
-					tarprefix := tarprefix
 					t.Run(fmt.Sprintf("%s-logprefix=%q-tarprefix=%q-src=%d", tt.name, logprefix, tarprefix, srcCompression), func(t *testing.T) {
 						// Sort tar file
 						var pfiles []string

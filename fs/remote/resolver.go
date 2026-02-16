@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"mime"
 	"mime/multipart"
@@ -333,9 +334,7 @@ func redirect(ctx context.Context, blobURL string, tr http.RoundTripper, timeout
 		return "", nil, fmt.Errorf("failed to make request to the registry: %w", err)
 	}
 	req.Header = http.Header{}
-	for k, v := range header {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, header)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := tr.RoundTrip(req)
@@ -372,9 +371,7 @@ func getSize(ctx context.Context, url string, tr http.RoundTripper, timeout time
 		return 0, err
 	}
 	req.Header = http.Header{}
-	for k, v := range header {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, header)
 	req.Close = false
 	res, err := tr.RoundTrip(req)
 	if err != nil {
@@ -394,9 +391,7 @@ func getSize(ctx context.Context, url string, tr http.RoundTripper, timeout time
 		return 0, fmt.Errorf("failed to make request to the registry: %w", err)
 	}
 	req.Header = http.Header{}
-	for k, v := range header {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, header)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err = tr.RoundTrip(req)
@@ -471,9 +466,7 @@ func (f *httpFetcher) fetch(ctx context.Context, rs []region, retry bool) (multi
 		return nil, err
 	}
 	req.Header = http.Header{}
-	for k, v := range f.header {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, f.header)
 	var ranges string
 	for _, reg := range requests {
 		ranges += fmt.Sprintf("%d-%d,", reg.b, reg.e)
@@ -546,9 +539,7 @@ func (f *httpFetcher) check() error {
 		return fmt.Errorf("check failed: failed to make request: %w", err)
 	}
 	req.Header = http.Header{}
-	for k, v := range f.header {
-		req.Header[k] = v
-	}
+	maps.Copy(req.Header, f.header)
 	req.Close = false
 	req.Header.Set("Range", "bytes=0-1")
 	res, err := f.tr.RoundTrip(req)
@@ -592,7 +583,7 @@ func (f *httpFetcher) refreshURL(ctx context.Context) error {
 }
 
 func (f *httpFetcher) genID(reg region) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", f.blobURL, reg.b, reg.e)))
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s-%d-%d", f.blobURL, reg.b, reg.e))
 	return fmt.Sprintf("%x", sum)
 }
 
