@@ -40,7 +40,6 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz/errorutil"
 	"github.com/klauspost/compress/zstd"
 	digest "github.com/opencontainers/go-digest"
-	"golang.org/x/sync/errgroup"
 )
 
 type GzipHelperFunc func(io.Reader) (io.ReadCloser, error)
@@ -235,14 +234,15 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 	}
 	writers := make([]*Writer, len(tarParts))
 	payloads := make([]*os.File, len(tarParts))
-	var mu sync.Mutex
-	var eg errgroup.Group
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(tarParts)) // buffered to avoid goroutine leaks
 	for i, parts := range tarParts {
 		// builds verifiable stargz sub-blobs
-		eg.Go(func() error {
+		wg.Go(func() {
 			esgzFile, err := layerFiles.TempFile("", "esgzdata")
 			if err != nil {
-				return err
+				errCh <- err
+				return
 			}
 			sw := NewWriterWithCompressor(esgzFile, opts.compression)
 			sw.ChunkSize = opts.chunkSize
@@ -254,18 +254,20 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 				sw.needsOpenGzEntries[f] = struct{}{}
 			}
 			if err := sw.AppendTar(readerFromEntries(parts...)); err != nil {
-				return err
+				errCh <- err
+				return
 			}
-			mu.Lock()
 			writers[i] = sw
 			payloads[i] = esgzFile
-			mu.Unlock()
-			return nil
 		})
 	}
-	if err := eg.Wait(); err != nil {
-		rErr = err
-		return nil, err
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			return nil, err
+		}
 	}
 	tocAndFooter, tocDgst, err := closeWithCombine(writers...)
 	if err != nil {
