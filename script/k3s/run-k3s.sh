@@ -23,7 +23,7 @@ K3S_CONTAINERD_REPO=https://github.com/k3s-io/containerd
 REGISTRY_HOST=k3s-private-registry
 K3S_NODE_REPO=ghcr.io/stargz-containers
 K3S_NODE_IMAGE_NAME=k3s
-K3S_NODE_TAG=v1.35.0-k3s1
+K3S_NODE_TAG=v1.35.1-k3s1
 K3S_NODE_IMAGE="${K3S_NODE_REPO}/${K3S_NODE_IMAGE_NAME}:${K3S_NODE_TAG}"
 
 # Arguments

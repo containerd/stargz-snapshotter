@@ -26,7 +26,7 @@ ARGO_VERSION=v3.6.4
 
 K3S_NODE_REPO=ghcr.io/stargz-containers
 K3S_NODE_IMAGE_NAME=k3s
-K3S_NODE_TAG=v1.35.0-k3s1
+K3S_NODE_TAG=v1.35.1-k3s1
 K3S_NODE_IMAGE="${K3S_NODE_REPO}/${K3S_NODE_IMAGE_NAME}:${K3S_NODE_TAG}"
 K3S_CLUSTER_NAME="k3s-demo-cluster-$(date +%s%N | shasum | base64 | fold -w 10 | head -1)"
 
