@@ -40,7 +40,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containerd/stargz-snapshotter/estargz/errorutil"
 	"github.com/klauspost/compress/zstd"
 	digest "github.com/opencontainers/go-digest"
 )
@@ -1637,7 +1636,7 @@ func newCalledTelemetry() (telemetry *Telemetry, check func(needsGetTOC bool) er
 			if !deserializeTocLatencyCalled {
 				allErr = append(allErr, fmt.Errorf("metrics DeserializeTocLatency isn't called"))
 			}
-			return errorutil.Aggregate(allErr)
+			return errors.Join(allErr...)
 		}
 }
 
