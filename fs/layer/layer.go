@@ -196,9 +196,9 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	}, nil
 }
 
-func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache, error) {
+func newCache(root string, cacheType string, cfg config.Config, entryTTL time.Duration) (cache.BlobCache, error) {
 	if cacheType == memoryCacheType {
-		return cache.NewMemoryCache(), nil
+		return cache.NewMemoryCacheWithTTL(entryTTL), nil
 	}
 
 	dcc := cfg.DirectoryCacheConfig
@@ -241,6 +241,7 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 			BufPool:      bufPool,
 			Direct:       dcc.Direct,
 			FadvDontNeed: dcc.FadvDontNeed,
+			EntryTTL:     entryTTL,
 		},
 	)
 }
@@ -285,7 +286,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		}
 	}()
 
-	fsCache, err := newCache(filepath.Join(r.rootDir, "fscache"), r.config.FSCacheType, r.config)
+	fsCache, err := newCache(filepath.Join(r.rootDir, "fscache"), r.config.FSCacheType, r.config, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fs cache: %w", err)
 	}
@@ -367,7 +368,12 @@ func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, 
 		r.blobCacheMu.Unlock()
 	}
 
-	httpCache, err := newCache(filepath.Join(r.rootDir, "httpcache"), r.config.HTTPCacheType, r.config)
+	ttlSec := r.config.HTTPCacheChunkTTLSec
+	var entryTTL time.Duration
+	if ttlSec > 0 {
+		entryTTL = time.Duration(ttlSec) * time.Second
+	}
+	httpCache, err := newCache(filepath.Join(r.rootDir, "httpcache"), r.config.HTTPCacheType, r.config, entryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http cache: %w", err)
 	}
