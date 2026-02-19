@@ -146,6 +146,7 @@ type Blob struct {
 	io.ReadCloser
 	diffID           digest.Digester
 	tocDigest        digest.Digest
+	prefetchEnabled  bool
 	readCompleted    *atomic.Bool
 	uncompressedSize *atomic.Int64
 }
@@ -159,6 +160,11 @@ func (b *Blob) DiffID() digest.Digest {
 // TOCDigest returns the digest of uncompressed TOC JSON.
 func (b *Blob) TOCDigest() digest.Digest {
 	return b.tocDigest
+}
+
+// PrefetchEnabled reports whether this blob enables prefetch via `.prefetch.landmark`.
+func (b *Blob) PrefetchEnabled() bool {
+	return b.prefetchEnabled
 }
 
 // UncompressedSize returns the size of uncompressed blob.
@@ -223,6 +229,7 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 	if err != nil {
 		return nil, err
 	}
+	prefetchEnabled := len(opts.prioritizedFiles) > 0
 	var tarParts [][]*entry
 	if opts.minChunkSize > 0 {
 		// Each entry needs to know the size of the current gzip stream so they
@@ -314,6 +321,7 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 		},
 		tocDigest:        tocDgst,
 		diffID:           diffID,
+		prefetchEnabled:  prefetchEnabled,
 		readCompleted:    readCompleted,
 		uncompressedSize: uncompressedSize,
 	}, nil
