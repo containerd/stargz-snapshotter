@@ -53,6 +53,7 @@ import (
 	layermetrics "github.com/containerd/stargz-snapshotter/fs/metrics/layer"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/hardlink"
 	"github.com/containerd/stargz-snapshotter/metadata"
 	memorymetadata "github.com/containerd/stargz-snapshotter/metadata/memory"
 	"github.com/containerd/stargz-snapshotter/snapshot"
@@ -86,6 +87,7 @@ type options struct {
 	metricsLogLevel         *log.Level
 	overlayOpaqueType       layer.OverlayOpaqueType
 	additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor
+	hlManager               *hardlink.Manager
 }
 
 func WithGetSources(s source.GetSources) Option {
@@ -127,6 +129,12 @@ func WithAdditionalDecompressors(d func(context.Context, source.RegistryHosts, r
 	}
 }
 
+func WithHardlinkManager(hlManager *hardlink.Manager) Option {
+	return func(opts *options) {
+		opts.hlManager = hlManager
+	}
+}
+
 func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.FileSystem, err error) {
 	var fsOpts options
 	for _, o := range opts {
@@ -159,7 +167,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		})
 	}
 	tm := task.NewBackgroundTaskManager(maxConcurrency, 5*time.Second)
-	r, err := layer.NewResolver(root, tm, cfg, fsOpts.resolveHandlers, metadataStore, fsOpts.overlayOpaqueType, fsOpts.additionalDecompressors)
+	r, err := layer.NewResolver(root, tm, cfg, fsOpts.resolveHandlers, metadataStore, fsOpts.overlayOpaqueType, fsOpts.additionalDecompressors, fsOpts.hlManager)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup resolver: %w", err)
 	}
