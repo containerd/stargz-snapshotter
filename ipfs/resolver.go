@@ -65,11 +65,15 @@ func NewResolver(options ResolverOptions) (remotes.Resolver, error) {
 	}, nil
 }
 
-// Resolve resolves the provided ref for IPFS. ref must be a CID.
-// TODO: Allow specifying IPFS path or URL. This requires to modify `reference` pkg because
-//
-//	it's incompatbile to the current reference specification.
+// Resolve resolves the provided ref for IPFS. ref can be either a CID (for backward compatibility) or
+// an image name (e.g. username/image).
 func (r *resolver) Resolve(ctx context.Context, ref string) (name string, desc ocispec.Descriptor, err error) {
+	if r.client.IsRef(ref) {
+		ref, err = r.client.Resolve(ref)
+		if err != nil {
+			return "", ocispec.Descriptor{}, err
+		}
+	}
 	rc, err := r.client.Get(path.Join("/", r.scheme, ref), nil, nil)
 	if err != nil {
 		return "", ocispec.Descriptor{}, err

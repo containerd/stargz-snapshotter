@@ -17,6 +17,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/containerd/stargz-snapshotter/ipfs/ipnskey"
 	"github.com/mitchellh/go-homedir"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
@@ -225,4 +227,244 @@ func GetIPFSAPIAddress(ipfsPath string, scheme string) (string, error) {
 		return "", err
 	}
 	return iurl, nil
+}
+
+// Resolve resolves the IPNS name to its corresponding CID.
+func (c *Client) Resolve(ref string) (string, error) {
+	if c.Address == "" {
+		return "", fmt.Errorf("specify IPFS API address")
+	}
+
+	peerID, err := c.importKey(ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to import key: %w", err)
+	}
+
+	client := c.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	ipfsAPINameResolve := c.Address + "/api/v0/name/resolve"
+	req, err := http.NewRequest("POST", ipfsAPINameResolve, nil)
+	if err != nil {
+		return "", err
+	}
+
+	q := req.URL.Query()
+	q.Add("arg", "/ipns/"+peerID)
+	q.Add("nocache", "true")
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+
+	if resp.StatusCode/100 != 2 {
+		return "", fmt.Errorf("failed to resolve name %v; status code: %v", peerID, resp.StatusCode)
+	}
+
+	// rs represents the information provided by "/api/v0/name/resolve" API of IPFS.
+	// Please see details at: https://docs.ipfs.tech/reference/kubo/rpc/#api-v0-name-resolve
+	var rs struct {
+		Path string `json:"Path"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rs); err != nil {
+		return "", err
+	}
+
+	parts := strings.Split(rs.Path, "/")
+	if len(parts) < 3 || parts[1] != "ipfs" {
+		return "", fmt.Errorf("invalid resolved path format: %s", rs.Path)
+	}
+
+	// This is compatible to IPFS behaviour: https://docs.ipfs.tech/concepts/ipns/#ipns-keys
+	return parts[2], nil
+}
+
+// Publish publishes the given CID to IPNS using the key associated with the given ref.
+// Please see details at: https://docs.ipfs.tech/reference/kubo/rpc/#api-v0-name-publish
+func (c *Client) Publish(ref string, cid string) error {
+	if c.Address == "" {
+		return fmt.Errorf("specify IPFS API address")
+	}
+
+	_, err := c.importKey(ref)
+	if err != nil {
+		return fmt.Errorf("failed to import key: %w", err)
+	}
+
+	client := c.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	ipfsAPINamePublish := c.Address + "/api/v0/name/publish"
+	req, err := http.NewRequest("POST", ipfsAPINamePublish, nil)
+	if err != nil {
+		return err
+	}
+
+	q := req.URL.Query()
+	q.Add("arg", "/ipfs/"+cid)
+	q.Add("key", ref)
+	q.Add("allow-offline", "true")
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("failed to publish; status code: %v, body: %s\n"+
+			"Request URL: %s", resp.StatusCode, string(respBody), ipfsAPINamePublish)
+	}
+
+	return nil
+}
+
+// importKey imports the key pair associated with the given ref into the local IPFS node.
+// The ref will be used as the key name in IPFS. If the key already exists, it will return nil.
+// Please see details at: https://docs.ipfs.tech/reference/kubo/rpc/#api-v0-key-import
+func (c *Client) importKey(ref string) (string, error) {
+	if c.Address == "" {
+		return "", fmt.Errorf("specify IPFS API address")
+	}
+
+	keyID, err := c.getKeyIDFromIPFS(ref)
+	if err == nil && keyID != "" {
+		return keyID, nil
+	}
+
+	keyData, err := ipnskey.GenerateKeyData(ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate key data: %w", err)
+	}
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	safeFilename := strings.ReplaceAll(ref, "/", "_")
+	safeFilename = strings.ReplaceAll(safeFilename, ":", "_")
+
+	part, err := writer.CreateFormFile("file", safeFilename+".pem")
+	if err != nil {
+		return "", fmt.Errorf("failed to create form file: %v", err)
+	}
+
+	_, err = part.Write(keyData)
+	if err != nil {
+		return "", fmt.Errorf("failed to write key data: %v", err)
+	}
+
+	err = writer.Close()
+	if err != nil {
+		return "", fmt.Errorf("failed to close multipart writer: %v", err)
+	}
+
+	encodedKeyname := url.QueryEscape(ref)
+	ipfsAPIKeyImport := fmt.Sprintf("%s/api/v0/key/import?arg=%s&format=pem-pkcs8-cleartext", c.Address, encodedKeyname)
+
+	req, err := http.NewRequest("POST", ipfsAPIKeyImport, body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	client := c.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("IPFS API returned error status: %d, body: %s\nRequest URL: %s", resp.StatusCode, string(respBody), ipfsAPIKeyImport)
+	}
+
+	return c.getKeyIDFromIPFS(ref)
+}
+
+// getKeyIDFromIPFS checks if a key with the given name already exists in IPFS
+func (c *Client) getKeyIDFromIPFS(name string) (string, error) {
+	client := c.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	ipfsAPIKeyList := c.Address + "/api/v0/key/list"
+	req, err := http.NewRequest("POST", ipfsAPIKeyList, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to get key list: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("IPFS API returned error status: %d, body: %s\nRequest URL: %s", resp.StatusCode, string(respBody), ipfsAPIKeyList)
+	}
+
+	var result struct {
+		Keys []struct {
+			Name string `json:"name"`
+			ID   string `json:"id"`
+		} `json:"Keys"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	for _, key := range result.Keys {
+		if key.Name == name {
+			return key.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("key not found: %s", name)
+}
+
+func (c *Client) IsRef(s string) bool {
+	parts := strings.Split(s, "/")
+	lastPart := parts[len(parts)-1]
+
+	if strings.Contains(lastPart, ":") || strings.Contains(lastPart, "@") {
+		return true
+	}
+
+	return len(parts) >= 2
 }
