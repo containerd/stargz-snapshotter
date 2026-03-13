@@ -64,6 +64,12 @@ cat "${TMP_K3S_REPO}/go.mod"
 
 sed -i -E 's|DAPPER_RUN_ARGS="([^"]*)"|DAPPER_RUN_ARGS="\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro"|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 sed -i -E 's|DAPPER_ENV="([^"]*)"|DAPPER_ENV="\1 DOCKER_BUILDKIT"|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
+
+# Patch trivy download URL in k3s Dockerfile.dapper to fix 404 error
+TRIVY_OLD_URL="https://github.com/aquasecurity/trivy/releases/download/v\\\$\{TRIVY_VERSION\}/trivy_\\\$\{TRIVY_VERSION\}_Linux-\\\$\{TRIVY_ARCH\}\.tar\.gz"
+TRIVY_NEW_URL="https://github.com/aquasecurity/trivy/archive/refs/tags/v\$\{TRIVY_VERSION\}.tar.gz"
+TRIVY_OUT_FILE="trivy_\$\{TRIVY_VERSION\}_Linux-\$\{TRIVY_ARCH\}.tar.gz"
+sed -i -E "s|wget --no-verbose \"${TRIVY_OLD_URL}\"|wget --no-verbose \"${TRIVY_NEW_URL}\" -O \"${TRIVY_OUT_FILE}\"|g" "${TMP_K3S_REPO}/Dockerfile.dapper"
 (
     cd "${TMP_K3S_REPO}" && \
         export GOTOOLCHAIN=auto && \
