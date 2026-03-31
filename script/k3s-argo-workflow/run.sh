@@ -26,7 +26,7 @@ ARGO_VERSION=v3.6.4
 
 K3S_NODE_REPO=ghcr.io/stargz-containers
 K3S_NODE_IMAGE_NAME=k3s
-K3S_NODE_TAG=v1.35.1-k3s1
+K3S_NODE_TAG=v1.35.3-k3s1
 K3S_NODE_IMAGE="${K3S_NODE_REPO}/${K3S_NODE_IMAGE_NAME}:${K3S_NODE_TAG}"
 K3S_CLUSTER_NAME="k3s-demo-cluster-$(date +%s%N | shasum | base64 | fold -w 10 | head -1)"
 
@@ -151,18 +151,15 @@ echo "result to ${RESULT_FILE}"
 wget -O "${ORG_ARGOYAML}" https://raw.githubusercontent.com/argoproj/argo-workflows/${ARGO_VERSION}/manifests/quick-start-minimal.yaml
 
 git clone -b ${K3S_VERSION} --depth 1 "${K3S_REPO}" "${TMP_K3S_REPO}"
-sed -i "s|github.com/k3s-io/stargz-snapshotter .*$|$(realpath ${REPO})|g" "${TMP_K3S_REPO}/go.mod"
-echo "replace github.com/containerd/stargz-snapshotter/estargz => $(realpath ${REPO})/estargz" >> "${TMP_K3S_REPO}/go.mod"
 
-# typeurl version stargz-snapshotter indirectly depends on is incompatible to the one github.com/k3s-io/containerd depends on.
-# We use older version of typeurl which the both of the above are compatible to.
-# We can remove this directive once k3s upgrades typeurl version to newer than v1.0.3-0.20220324183432-6193a0e03259.
-echo "replace github.com/containerd/typeurl => github.com/containerd/typeurl v1.0.2" >> "${TMP_K3S_REPO}/go.mod"
+mkdir -p "${TMP_K3S_REPO}/scripts/vendor.tmp/github.com/containerd/stargz-snapshotter"
+( cd "${REPO}" && git archive HEAD | tar -x -C "${TMP_K3S_REPO}/scripts/vendor.tmp/github.com/containerd/stargz-snapshotter" )
+
+echo "replace github.com/containerd/stargz-snapshotter => ./scripts/vendor.tmp/github.com/containerd/stargz-snapshotter" >> "${TMP_K3S_REPO}/go.mod"
+echo "replace github.com/containerd/stargz-snapshotter/estargz => ./scripts/vendor.tmp/github.com/containerd/stargz-snapshotter/estargz" >> "${TMP_K3S_REPO}/go.mod"
 
 cat "${TMP_K3S_REPO}/go.mod"
 
-sed -i -E 's|DAPPER_RUN_ARGS="([^"]*)"|DAPPER_RUN_ARGS="\1 -v '"$(realpath ${REPO})":"$(realpath ${REPO})"':ro"|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
-sed -i -E 's|DAPPER_ENV="([^"]*)"|DAPPER_ENV="\1 DOCKER_BUILDKIT"|g' "${TMP_K3S_REPO}/Dockerfile.dapper"
 (
     cd "${TMP_K3S_REPO}" && \
         export GOTOOLCHAIN=auto && \
@@ -173,7 +170,7 @@ sed -i -E 's|DAPPER_ENV="([^"]*)"|DAPPER_ENV="\1 DOCKER_BUILDKIT"|g' "${TMP_K3S_
         make deps && \
         git add . && \
         git commit -m tmp && \
-        SKIP_AIRGAP=1 REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${K3S_NODE_TAG}" SKIP_VALIDATE=1 make
+        SKIP_AIRGAP=1 REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${K3S_NODE_TAG}" SKIP_VALIDATE=1 make local-image
 )
 
 #1
