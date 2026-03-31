@@ -43,7 +43,7 @@ jobs:
       env:
         BENCHMARK_RUNTIME_MODE: ${{ matrix.runtime }}
       run: make benchmark
-    - uses: actions/upload-artifact@v6
+    - uses: actions/upload-artifact@v7
       if: ${{ always() }}
       with:
         name: benchmarking-result-${{ matrix.runtime }}
