@@ -271,6 +271,19 @@ request_timeout_sec = 300
 
 The config file can be passed to stargz snapshotter using `containerd-stargz-grpc`'s `--config` option.
 
+## Metadata store
+
+Stargz Snapshotter supports 2 wayss to store the filesystem's metadata (e.g. each file's type, size, mode, etc.).
+
+- `memory` (default): The metadata is stored in memory. The memory consumption increases as the number of images managed by Stargz Snapshotter increases. It has lower latency on container creation and metadata lookup.
+- `db`: The metadata is stored on disk. Lower memory consumption can be expected at the expence of disk overhead on storing and looking up of each file's metadata.
+
+If stargz-snapshotter's memory consumption is too large because of the `memroy` mode of the metadata store, consider enabling the `db` mode. For example, the following conifguration enables the `db` mode.
+
+```toml
+metadata_store = "db"
+```
+
 ## Make your remote snapshotter
 
 It isn't difficult for you to implement your remote snapshotter using [our general snapshotter package](/snapshot) without considering the protocol between that and containerd.
