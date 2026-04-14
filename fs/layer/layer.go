@@ -672,48 +672,27 @@ type layerRef struct {
 
 func newWaiter() *waiter {
 	return &waiter{
-		completionCond: sync.NewCond(&sync.Mutex{}),
+		doneCh: make(chan struct{}),
 	}
 }
 
 type waiter struct {
-	isDone         bool
-	isDoneMu       sync.Mutex
-	completionCond *sync.Cond
+	doneOnce sync.Once
+	doneCh   chan struct{}
 }
 
 func (w *waiter) done() {
-	w.isDoneMu.Lock()
-	w.isDone = true
-	w.isDoneMu.Unlock()
-	w.completionCond.Broadcast()
+	w.doneOnce.Do(func() {
+		close(w.doneCh)
+	})
 }
 
 func (w *waiter) wait(timeout time.Duration) error {
-	wait := func() <-chan struct{} {
-		ch := make(chan struct{})
-		go func() {
-			w.isDoneMu.Lock()
-			isDone := w.isDone
-			w.isDoneMu.Unlock()
-
-			w.completionCond.L.Lock()
-			if !isDone {
-				w.completionCond.Wait()
-			}
-			w.completionCond.L.Unlock()
-			ch <- struct{}{}
-		}()
-		return ch
-	}
 	select {
 	case <-time.After(timeout):
-		w.isDoneMu.Lock()
-		w.isDone = true
-		w.isDoneMu.Unlock()
-		w.completionCond.Broadcast()
+		w.done()
 		return fmt.Errorf("timeout(%v)", timeout)
-	case <-wait():
+	case <-w.doneCh:
 		return nil
 	}
 }
