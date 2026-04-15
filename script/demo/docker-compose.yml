@@ -11,11 +11,12 @@ services:
         http_proxy: "${http_proxy}"
         https_proxy: "${https_proxy}"
     container_name: containerd_demo
+    init: true
     privileged: true
     stdin_open: true
     tty: true
     working_dir: /go/src/github.com/containerd/stargz-snapshotter
-    entrypoint: /bin/bash
+    entrypoint: ./script/demo/init.sh
     environment:
     - NO_PROXY=127.0.0.1,localhost,registry2:5000
     - HTTP_PROXY=${HTTP_PROXY}
@@ -27,7 +28,7 @@ services:
     - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse
-    - "${GOPATH}/src/github.com/containerd/stargz-snapshotter:/go/src/github.com/containerd/stargz-snapshotter:ro"
+    - "../../:/go/src/github.com/containerd/stargz-snapshotter:ro"
     - "demo-containerd-data:/var/lib/containerd"
     - "demo-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
   registry2:
