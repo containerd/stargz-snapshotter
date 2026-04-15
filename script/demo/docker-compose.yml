@@ -11,6 +11,7 @@ services:
         http_proxy: "${http_proxy}"
         https_proxy: "${https_proxy}"
     container_name: containerd_demo
+    init: true
     privileged: true
     stdin_open: true
     tty: true
