@@ -244,7 +244,8 @@ RUN apt-get update && apt-get install -y iptables && \
     # c.f. https://github.com/moby/moby/issues/26824
     update-alternatives --set iptables /usr/sbin/iptables-legacy && \
     mkdir -p /opt/cni/bin && \
-    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin
+    curl -Ls https://github.com/containernetworking/plugins/releases/download/${CNI_PLUGINS_VERSION}/cni-plugins-linux-${TARGETARCH:-amd64}-${CNI_PLUGINS_VERSION}.tgz | tar xzv -C /opt/cni/bin && \
+    git config --global --add safe.directory /go/src/github.com/containerd/stargz-snapshotter
 
 # Image which can be used as a node image for KinD (containerd with builtin snapshotter)
 FROM kindest/node:v1.35.1 AS kind-builtin-snapshotter
