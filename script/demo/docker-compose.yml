@@ -28,7 +28,7 @@ services:
     - /tmp:exec,mode=777
     volumes:
     - /dev/fuse:/dev/fuse
-    - "${GOPATH}/src/github.com/containerd/stargz-snapshotter:/go/src/github.com/containerd/stargz-snapshotter:ro"
+    - "../../:/go/src/github.com/containerd/stargz-snapshotter:ro"
     - "demo-containerd-data:/var/lib/containerd"
     - "demo-containerd-stargz-grpc-data:/var/lib/containerd-stargz-grpc"
   registry2:
