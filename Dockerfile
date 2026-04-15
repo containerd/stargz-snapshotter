@@ -13,16 +13,16 @@
 #   limitations under the License.
 
 ARG CONTAINERD_VERSION=v2.2.2
-ARG RUNC_VERSION=v1.4.0
-ARG CNI_PLUGINS_VERSION=v1.9.0
-ARG NERDCTL_VERSION=2.2.1
+ARG RUNC_VERSION=v1.4.2
+ARG CNI_PLUGINS_VERSION=v1.9.1
+ARG NERDCTL_VERSION=2.2.2
 
-ARG PODMAN_VERSION=v5.7.1
-ARG CRIO_VERSION=v1.34.4
-ARG CONMON_VERSION=v2.2.0
+ARG PODMAN_VERSION=v5.8.1
+ARG CRIO_VERSION=v1.35.2
+ARG CONMON_VERSION=v2.2.1
 ARG COMMON_VERSION=v0.64.1
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=registry.k8s.io/pause:3.6
-ARG NETAVARK_VERSION=v1.17.1
+ARG NETAVARK_VERSION=v1.17.2
 
 ARG CONTAINERIZED_SYSTEMD_VERSION=v0.1.1
 ARG SLIRP4NETNS_VERSION=v1.3.3
@@ -55,17 +55,10 @@ RUN git clone -b ${CONTAINERD_VERSION} --depth 1 \
       https://github.com/containerd/containerd $GOPATH/src/github.com/containerd/containerd && \
     cd $GOPATH/src/github.com/containerd/containerd && \
     echo 'require github.com/containerd/stargz-snapshotter v0.0.0' >> go.mod && \
-    echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> go.mod && \
-    echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> go.mod && \
-    # recent containerd requires to update api/go.mod and integration/client/go.mod as well.
-    if [ -f api/go.mod ] ; then \
-      echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> api/go.mod && \
-      echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> api/go.mod ; \
-    fi && \
-    if [ -f integration/client/go.mod ] ; then \
-      echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> integration/client/go.mod && \
-      echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> integration/client/go.mod ; \
-    fi && \
+    for f in go.mod api/go.mod ; do \
+      echo 'replace github.com/containerd/stargz-snapshotter => '$GOPATH'/src/github.com/containerd/stargz-snapshotter' >> "$f" && \
+      echo 'replace github.com/containerd/stargz-snapshotter/estargz => '$GOPATH'/src/github.com/containerd/stargz-snapshotter/estargz' >> "$f" ; \
+    done && \
     echo 'package main \nimport _ "github.com/containerd/stargz-snapshotter/service/plugin"' > cmd/containerd/builtins_stargz_snapshotter.go && \
     make vendor && GOARCH=$TARGETARCH make && DESTDIR=/out/ PREFIX= make install
 
@@ -112,7 +105,6 @@ RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
     make && make install PREFIX=/out/
 
 # Build CRI-O
-# FROM golang-base AS cri-o-dev
 FROM golang:1.26-bookworm AS cri-o-dev
 ARG CRIO_VERSION
 RUN apt-get update -y && apt-get install -y libseccomp-dev libgpgme-dev && \
