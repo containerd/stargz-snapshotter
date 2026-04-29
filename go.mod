@@ -4,12 +4,12 @@ go 1.25.0
 
 require (
 	github.com/containerd/console v1.0.5
-	github.com/containerd/containerd/v2 v2.2.2
-	github.com/containerd/continuity v0.4.5
+	github.com/containerd/containerd/v2 v2.2.3
+	github.com/containerd/continuity v0.5.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v1.0.0-rc.4
-	github.com/containerd/plugin v1.0.0
+	github.com/containerd/plugin v1.1.0
 	github.com/containerd/stargz-snapshotter/estargz v0.18.2
 	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v29.4.0+incompatible
@@ -39,7 +39,7 @@ require (
 require (
 	cyphar.com/go-pathrs v0.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/Microsoft/hcsshim v0.14.0-rc.1 // indirect
+	github.com/Microsoft/hcsshim v0.14.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/cgroups/v3 v3.1.2 // indirect
