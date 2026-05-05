@@ -173,7 +173,7 @@ COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
 
 # Base image which contains podman with stargz-store
-FROM ubuntu:24.04 AS podman-base
+FROM ubuntu:26.04 AS podman-base
 ARG TARGETARCH
 ARG CNI_PLUGINS_VERSION
 ARG PODMAN_VERSION
@@ -256,7 +256,7 @@ ENTRYPOINT [ "/usr/local/bin/kind-entrypoint.sh", "/usr/local/bin/entrypoint", "
 
 # Image for testing CRI-O with Stargz Store.
 # NOTE: This cannot be used for the node image of KinD.
-FROM ubuntu:24.04 AS crio-stargz-store
+FROM ubuntu:26.04 AS crio-stargz-store
 ARG CNI_PLUGINS_VERSION
 ARG CRIO_TEST_PAUSE_IMAGE_NAME
 ENV container docker
