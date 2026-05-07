@@ -84,6 +84,10 @@ var samplerFlags = []cli.Flag{
 		Usage: "user/group name to override image's default config(user[:group])",
 	},
 	&cli.StringFlag{
+		Name:  "runtime",
+		Usage: "runtime name to use for the analyzer container (e.g., io.containerd.runc.v2, io.containerd.crun.v1)",
+	},
+	&cli.StringFlag{
 		Name:  "cwd",
 		Usage: "working dir to override image's default config",
 	},

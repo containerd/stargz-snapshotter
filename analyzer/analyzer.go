@@ -160,15 +160,16 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 	for range 3 {
 		id := xid.New().String()
 		var s runtimespec.Spec
-		container, err = client.NewContainer(ctx, id,
+		cOpts := []containerd.NewContainerOpts{
 			containerd.WithImage(platformImg),
 			containerd.WithSnapshotter(aOpts.snapshotter),
 			containerd.WithImageStopSignal(platformImg, "SIGKILL"),
-
-			// WithImageConfig depends on WithImage and WithSnapshotter for resolving
-			// username (accesses to /etc/{passwd,group} files on the rootfs)
 			containerd.WithSpec(&s, sOpts...),
-		)
+		}
+		if aOpts.runtime != "" {
+			cOpts = append(cOpts, containerd.WithRuntime(aOpts.runtime, nil))
+		}
+		container, err = client.NewContainer(ctx, id, cOpts...)
 		if err != nil {
 			if errdefs.IsAlreadyExists(err) {
 				log.G(ctx).WithError(err).Warnf("failed to create container")
