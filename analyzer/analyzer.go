@@ -164,6 +164,9 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 			containerd.WithImage(platformImg),
 			containerd.WithSnapshotter(aOpts.snapshotter),
 			containerd.WithImageStopSignal(platformImg, "SIGKILL"),
+
+			// WithImageConfig depends on WithImage and WithSnapshotter for resolving
+			// username (accesses to /etc/{passwd,group} files on the rootfs)
 			containerd.WithSpec(&s, sOpts...),
 		}
 		if aOpts.runtime != "" {
