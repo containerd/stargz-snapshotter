@@ -150,11 +150,11 @@ When stopping FUSE manager for upgrading the binary or restarting the node, you 
 
 ### Unexpected restart handling
 
-When Stargz Snapshotter is killed unexpectedly (e.g., by OOM killer or system crash), the process doesn't get a chance to perform graceful cleanup. In such cases, the snapshotter can successfully restart and restore remote snapshots, but this may lead to fscache duplicating cached data.
+When Stargz Snapshotter is killed unexpectedly (e.g., by OOM killer or system crash), the process doesn't get a chance to perform graceful cleanup. In such cases, the snapshotter can successfully restart and restore remote snapshots, but this may lead to the temporary cache directories having duplicating cached data.
 
 **Recommended handling:**
 
-Since this scenario is caused by abnormal exit, users are expected to manually clean up the cache directory after an unexpected restart to avoid cache duplication issues. The cache cleanup should be performed before restarting the snapshotter service.
+Since this scenario is caused by abnormal exit, users are expected to manually clean up the cache directories (`/var/lib/containerd-stargz-grpc/stargz/fscache` and `/var/lib/containerd-stargz-grpc/stargz/httpcache`) after an unexpected restart to avoid cache duplication issues. The cache cleanup should be performed before restarting the snapshotter service.
 
 ## Registry-related configuration
 
