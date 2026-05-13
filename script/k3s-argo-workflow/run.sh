@@ -26,8 +26,7 @@ ARGO_VERSION=v3.6.4
 
 K3S_NODE_REPO=ghcr.io/stargz-containers
 K3S_NODE_IMAGE_NAME=k3s
-K3S_NODE_TAG=v1.35.4-k3s1
-K3S_NODE_IMAGE="${K3S_NODE_REPO}/${K3S_NODE_IMAGE_NAME}:${K3S_NODE_TAG}"
+K3S_NODE_IMAGE=
 K3S_CLUSTER_NAME="k3s-demo-cluster-$(date +%s%N | shasum | base64 | fold -w 10 | head -1)"
 
 ORG_ARGOYAML=$(mktemp)
@@ -160,6 +159,10 @@ echo "replace github.com/containerd/stargz-snapshotter/estargz => ./scripts/vend
 
 cat "${TMP_K3S_REPO}/go.mod"
 
+# K3s's script to create the image requires specific name for the tag determined by the k8s.io/kubernetes go module's version name (see scripts/version.sh)
+REQUIRED_VERSION_NAME=$(go -C "${TMP_K3S_REPO}" list -mod=readonly -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' k8s.io/kubernetes)
+K3S_NODE_IMAGE="${K3S_NODE_REPO}/${K3S_NODE_IMAGE_NAME}:${REQUIRED_VERSION_NAME}"
+
 (
     cd "${TMP_K3S_REPO}" && \
         export GOTOOLCHAIN=auto && \
@@ -170,7 +173,7 @@ cat "${TMP_K3S_REPO}/go.mod"
         make deps && \
         git add . && \
         git commit -m tmp && \
-        SKIP_AIRGAP=1 REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${K3S_NODE_TAG}" SKIP_VALIDATE=1 make local-image
+        SKIP_AIRGAP=1 REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${REQUIRED_VERSION_NAME}" SKIP_VALIDATE=1 make local-image
 )
 
 #1
