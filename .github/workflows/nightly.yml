@@ -19,6 +19,9 @@ env:
   DOCKER_BUILDKIT: 1
   DOCKER_BUILD_ARGS: --build-arg=CONTAINERD_VERSION=main # do tests with the latest containerd
 
+permissions:
+  contents: read
+
 jobs:
   integration:
     runs-on: ubuntu-24.04
