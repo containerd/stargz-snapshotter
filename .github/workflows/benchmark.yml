@@ -8,6 +8,9 @@ on:
 env:
   DOCKER_BUILDKIT: 1
 
+permissions:
+  contents: read
+
 jobs:
   hello-bench:
     runs-on: ubuntu-24.04
