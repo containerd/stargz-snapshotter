@@ -848,7 +848,7 @@ func (r *reader) openFile(id uint32, preRead func(id uint32, chunkOffset, chunkS
 		size, _ = binary.Varint(b.Get(bucketKeySize))
 		m, _ := binary.Uvarint(b.Get(bucketKeyMode))
 		if !os.FileMode(uint32(m)).IsRegular() {
-			return fmt.Errorf("%q is not a regular file", id)
+			return fmt.Errorf("%d is not a regular file", id)
 		}
 
 		metadataEntries, err := getMetadata(tx, r.fsID)
@@ -1022,7 +1022,7 @@ func getIDByName(md map[uint32]*metadataEntry, name string, rootID uint32) (uint
 		return 0, fmt.Errorf("not found metadata of %d", pid)
 	}
 	if md[pid].children == nil {
-		return 0, fmt.Errorf("not found children of %q", pid)
+		return 0, fmt.Errorf("not found children of %d", pid)
 	}
 	c, ok := md[pid].children[base]
 	if !ok {
