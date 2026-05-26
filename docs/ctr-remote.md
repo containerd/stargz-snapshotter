@@ -84,6 +84,10 @@ You can enable host networking for the container using the `net-host` flag.
 
 You can optimize GPU-based images using the `gpu` flag. The flag expects a comma separated list of integers or 'all'.
 
+- Prerequisites
+  - NVIDIA GPU Drivers and Contaienr Toolkit: For details, refer to the [docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+  - CDI Specification: For details, refer to the [docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html)
+
 ```console
 # ctr-remote i optimize --oci --gpus "0" <src> <target>
 # ctr-remote i optimize --oci --gpus "all" <src> <target>
