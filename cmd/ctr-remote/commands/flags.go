@@ -30,10 +30,10 @@ import (
 	"strings"
 
 	containerd "github.com/containerd/containerd/v2/client"
-	"github.com/containerd/containerd/v2/contrib/nvidia"
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
+	cdispec "github.com/containerd/containerd/v2/pkg/cdi"
 	"github.com/containerd/containerd/v2/pkg/netns"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	gocni "github.com/containerd/go-cni"
@@ -42,26 +42,27 @@ import (
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/rs/xid"
 	"github.com/urfave/cli/v2"
+	"tags.cncf.io/container-device-interface/pkg/cdi"
 )
 
 const netnsMountDir = "/var/run/netns"
 
-func parseGPUs(gpuStr string) ([]int, bool) {
+func parseGPUs(gpuStr string) []string {
 	if gpuStr == "" {
-		return nil, false
+		return nil
 	}
 	if gpuStr == "all" {
-		return nil, true
+		return []string{"nvidia.com/gpu=all"}
 	}
 	parts := strings.Split(gpuStr, ",")
-	var devices []int
+	var devices []string
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		if device, err := strconv.Atoi(part); err == nil {
-			devices = append(devices, device)
+			devices = append(devices, fmt.Sprintf("nvidia.com/gpu=%d", device))
 		}
 	}
-	return devices, false
+	return devices
 }
 
 var samplerFlags = []cli.Flag{
@@ -233,12 +234,9 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 			if runtime.GOOS == "windows" {
 				log.L.Warn("option --gpus is not supported on Windows")
 			} else {
-				devices, useAll := parseGPUs(clicontext.String("gpus"))
-				if useAll {
-					opts = append(opts, nvidia.WithGPUs(nvidia.WithAllDevices, nvidia.WithAllCapabilities))
-				} else if len(devices) > 0 {
-					opts = append(opts, nvidia.WithGPUs(nvidia.WithDevices(devices...), nvidia.WithAllCapabilities))
-				}
+				devices := parseGPUs(clicontext.String("gpus"))
+				log.L.Debugf("Resolved GPU device names: %v", devices)
+				opts = append(opts, withStaticCDIRegistry(), cdispec.WithCDIDevices(devices...))
 			}
 		}
 
@@ -515,4 +513,23 @@ func parseResolveFlag(clicontext *cli.Context) (hosts []string, nameservers []st
 		hosts = append(hosts, fields...)
 	}
 	return
+}
+
+// Copied from containerd v2.3.1
+// withStaticCDIRegistry inits the CDI registry and disables auto-refresh.
+// This is used from the `run` command to avoid creating a registry with auto-refresh enabled.
+// It also provides a way to override the CDI spec file paths if required.
+func withStaticCDIRegistry() oci.SpecOpts {
+	return func(ctx gocontext.Context, _ oci.Client, _ *containers.Container, s *oci.Spec) error {
+		_ = cdi.Configure(cdi.WithAutoRefresh(false))
+		if err := cdi.Refresh(); err != nil {
+			// We don't consider registry refresh failure a fatal error.
+			// For instance, a dynamically generated invalid CDI Spec file for
+			// any particular vendor shouldn't prevent injection of devices of
+			// different vendors. CDI itself knows better and it will fail the
+			// injection if necessary.
+			log.G(ctx).Warnf("CDI registry refresh failed: %v", err)
+		}
+		return nil
+	}
 }
