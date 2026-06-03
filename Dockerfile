@@ -240,7 +240,7 @@ RUN apt-get update && apt-get install -y iptables && \
     git config --global --add safe.directory /go/src/github.com/containerd/stargz-snapshotter
 
 # Image which can be used as a node image for KinD (containerd with builtin snapshotter)
-FROM kindest/node:v1.35.1 AS kind-builtin-snapshotter
+FROM kindest/node:v1.36.1 AS kind-builtin-snapshotter
 COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 COPY ./script/config/ /
@@ -281,7 +281,7 @@ COPY ./script/config-cri-o/ /
 ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 
 # Image which can be used as a node image for KinD
-FROM kindest/node:v1.35.1
+FROM kindest/node:v1.36.1
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /
