@@ -151,12 +151,9 @@ func TestGzipParseFooterInvalidExtra(t *testing.T) {
 }
 
 func legacyFooterBytes(tocOff int64) []byte {
-	buf := bytes.NewBuffer(make([]byte, 0, legacyFooterSize))
-	gz, _ := gzip.NewWriterLevel(buf, gzip.NoCompression)
-	gz.Extra = fmt.Appendf(nil, "%016xSTARGZ", tocOff)
-	gz.Close()
-	if buf.Len() != legacyFooterSize {
-		panic(fmt.Sprintf("footer buffer = %d, not %d", buf.Len(), legacyFooterSize))
+	buf := CreateGzipFooter(fmt.Appendf(nil, "%016xSTARGZ", tocOff))
+	if len(buf) != legacyFooterSize {
+		panic(fmt.Sprintf("footer buffer = %d, not %d", len(buf), legacyFooterSize))
 	}
-	return buf.Bytes()
+	return buf
 }
