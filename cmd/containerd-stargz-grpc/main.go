@@ -36,7 +36,9 @@ import (
 	"github.com/containerd/containerd/v2/pkg/sys"
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cmd/containerd-stargz-grpc/fsopts"
+	"github.com/containerd/stargz-snapshotter/fs"
 	"github.com/containerd/stargz-snapshotter/fusemanager"
+	"github.com/containerd/stargz-snapshotter/hardlink"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
@@ -133,6 +135,14 @@ func main() {
 
 	if err := service.Supported(*rootDir); err != nil {
 		log.G(ctx).WithError(err).Fatalf("snapshotter is not supported")
+	}
+
+	var hlm *hardlink.Manager
+	if config.HardlinkRoot != "" {
+		hlm, err = hardlink.New(config.HardlinkRoot)
+		if err != nil {
+			log.G(ctx).WithError(err).Fatalf("failed to init hardlink manager")
+		}
 	}
 
 	// Create a gRPC server
@@ -251,6 +261,9 @@ func main() {
 		fsOpts, err := fsopts.ConfigFsOpts(ctx, *rootDir, &fsConfig)
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure fs config")
+		}
+		if hlm != nil {
+			fsOpts = append(fsOpts, fs.WithHardlinkManager(hlm))
 		}
 
 		rs, err = service.NewStargzSnapshotterService(ctx, *rootDir, &config.Config,
