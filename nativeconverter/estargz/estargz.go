@@ -129,6 +129,9 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			newDesc.Annotations = make(map[string]string, 1)
 		}
 		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = blob.TOCDigest().String()
+		if blob.PrefetchEnabled() {
+			newDesc.Annotations[estargz.FeatureAnnotation] = "prefetch"
+		}
 		uncompressedSize, err := blob.UncompressedSize()
 		if err != nil {
 			return nil, err
