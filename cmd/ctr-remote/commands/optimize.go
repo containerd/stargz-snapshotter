@@ -459,6 +459,9 @@ func analyze(ctx context.Context, clicontext *cli.Context, client *containerd.Cl
 
 	// Analyze layers and get prioritized files
 	aOpts := []analyzer.Option{analyzer.WithSpecOpts(getSpecOpts(clicontext))}
+	if runtime := clicontext.String("runtime"); runtime != "" {
+		aOpts = append(aOpts, analyzer.WithRuntime(runtime))
+	}
 	if clicontext.IsSet("gpus") {
 		aOpts = append(aOpts, analyzer.WithPreMonitor())
 	}
