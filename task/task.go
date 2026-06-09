@@ -17,6 +17,7 @@
 package task
 
 import (
+	"container/heap"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -30,12 +31,15 @@ import (
 // forced to wait until no prioritized task is running for some period. You can
 // specify the period through the argument of this function, too.
 func NewBackgroundTaskManager(concurrency int64, period time.Duration) *BackgroundTaskManager {
-	return &BackgroundTaskManager{
+	ts := &BackgroundTaskManager{
 		backgroundSem:                semaphore.NewWeighted(concurrency),
 		prioritizedTaskSilencePeriod: period,
 		prioritizedTaskStartNotify:   make(chan struct{}),
 		prioritizedTaskDoneCond:      sync.NewCond(&sync.Mutex{}),
 	}
+	ts.doneSchedulerWakeup = make(chan struct{}, 1)
+	go ts.runDoneScheduler()
+	return ts
 }
 
 // BackgroundTaskManager is a task manager which manages prioritized tasks and
@@ -66,6 +70,9 @@ type BackgroundTaskManager struct {
 	prioritizedTaskStartNotify   chan struct{}
 	prioritizedTaskStartNotifyMu sync.Mutex
 	prioritizedTaskDoneCond      *sync.Cond
+	doneSchedulerMu              sync.Mutex
+	doneSchedulerWakeup          chan struct{}
+	pendingPrioritizedTaskDones  prioritizedTaskDoneHeap
 }
 
 // DoPrioritizedTask tells the manager that we are running a prioritized task
@@ -82,15 +89,15 @@ func (ts *BackgroundTaskManager) DoPrioritizedTask() {
 // DonePrioritizedTask tells the manager that we've done a prioritized task
 // and don't want background tasks to disturb resources(CPU, NW, etc...)
 func (ts *BackgroundTaskManager) DonePrioritizedTask() {
-	go func() {
-		// Notify the task completion after `ts.prioritizedTaskSilencePeriod`
-		// so that background tasks aren't invoked immediately.
-		time.Sleep(ts.prioritizedTaskSilencePeriod)
-		atomic.AddInt64(&ts.prioritizedTasks, -1)
-		ts.prioritizedTaskDoneCond.L.Lock()
-		ts.prioritizedTaskDoneCond.Broadcast()
-		ts.prioritizedTaskDoneCond.L.Unlock()
-	}()
+	if ts.prioritizedTaskSilencePeriod <= 0 {
+		ts.finishPrioritizedTasks(1)
+		return
+	}
+
+	ts.doneSchedulerMu.Lock()
+	heap.Push(&ts.pendingPrioritizedTaskDones, time.Now().Add(ts.prioritizedTaskSilencePeriod))
+	ts.doneSchedulerMu.Unlock()
+	ts.wakeDoneScheduler()
 }
 
 // InvokeBackgroundTask invokes a background task. The task is started only when
@@ -149,4 +156,87 @@ func (ts *BackgroundTaskManager) InvokeBackgroundTask(do func(context.Context), 
 			break
 		}
 	}
+}
+
+func (ts *BackgroundTaskManager) wakeDoneScheduler() {
+	select {
+	case ts.doneSchedulerWakeup <- struct{}{}:
+	default:
+	}
+}
+
+func (ts *BackgroundTaskManager) finishPrioritizedTasks(count int64) {
+	atomic.AddInt64(&ts.prioritizedTasks, -count)
+	ts.prioritizedTaskDoneCond.L.Lock()
+	ts.prioritizedTaskDoneCond.Broadcast()
+	ts.prioritizedTaskDoneCond.L.Unlock()
+}
+
+func (ts *BackgroundTaskManager) runDoneScheduler() {
+	for {
+		ts.doneSchedulerMu.Lock()
+		if len(ts.pendingPrioritizedTaskDones) == 0 {
+			ts.doneSchedulerMu.Unlock()
+			<-ts.doneSchedulerWakeup
+			continue
+		}
+		nextDoneAt := ts.pendingPrioritizedTaskDones[0]
+		ts.doneSchedulerMu.Unlock()
+
+		wait := time.Until(nextDoneAt)
+		if wait > 0 {
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+			case <-ts.doneSchedulerWakeup:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				continue
+			}
+		}
+
+		now := time.Now()
+		var doneCount int64
+
+		ts.doneSchedulerMu.Lock()
+		for len(ts.pendingPrioritizedTaskDones) > 0 && !ts.pendingPrioritizedTaskDones[0].After(now) {
+			heap.Pop(&ts.pendingPrioritizedTaskDones)
+			doneCount++
+		}
+		ts.doneSchedulerMu.Unlock()
+
+		if doneCount > 0 {
+			ts.finishPrioritizedTasks(doneCount)
+		}
+	}
+}
+
+type prioritizedTaskDoneHeap []time.Time
+
+func (h prioritizedTaskDoneHeap) Len() int {
+	return len(h)
+}
+
+func (h prioritizedTaskDoneHeap) Less(i, j int) bool {
+	return h[i].Before(h[j])
+}
+
+func (h prioritizedTaskDoneHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *prioritizedTaskDoneHeap) Push(x interface{}) {
+	*h = append(*h, x.(time.Time))
+}
+
+func (h *prioritizedTaskDoneHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+	return item
 }
