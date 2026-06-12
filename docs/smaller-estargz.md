@@ -4,7 +4,7 @@ The following flags of `ctr-remote i convert` and `ctr-remote i optimize` allow 
 
 - `--estargz-external-toc`: Separate TOC JSON into another image (called "TOC image"). The result eStargz doesn't contain TOC so we can expect a smaller size than normal eStargz.
 
-- `--estargz-min-chunk-size`: The minimal number of bytes of data must be written in one gzip stream. If it's > 0, multiple files and chunks can be written into one gzip stream. Smaller number of gzip header and smaller size of the result blob can be expected. `--estargz-min-chunk-size=0` produces normal eStargz.
+- `--estargz-min-chunk-size`: The minimal number of bytes of data must be written in one gzip stream. If it's > 0, multiple files and chunks can be written into one gzip stream. Smaller number of gzip header and smaller size of the result blob can be expected. `--estargz-min-chunk-size=0` produces normal eStargz. A trailing gzip stream that cannot reach the minimum is folded into the preceding stream instead, so a stream falls below `--estargz-min-chunk-size` only when the layer itself is smaller.
 
 ## `--estargz-external-toc` usage
 
