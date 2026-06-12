@@ -113,6 +113,11 @@ var OptimizeCommand = &cli.Command{
 			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand (not applied to zstd:chunked)",
 			Value: 0,
 		},
+		&cli.IntFlag{
+			Name:  "estargz-parallelism",
+			Usage: "Number of workers used to build the layer. Pinning it makes builds reproducible across machines regardless of CPU count. 0 (default) uses GOMAXPROCS; 1 forces a sequential build. Has no effect with --estargz-min-chunk-size (not applied to zstd:chunked)",
+			Value: 0,
+		},
 		&cli.StringFlag{
 			Name:    "estargz-gzip-helper",
 			Aliases: []string{"GH"},
@@ -201,6 +206,7 @@ var OptimizeCommand = &cli.Command{
 			esgzOpts := []estargz.Option{
 				estargz.WithChunkSize(clicontext.Int("estargz-chunk-size")),
 				estargz.WithMinChunkSize(clicontext.Int("estargz-min-chunk-size")),
+				estargz.WithParallelism(clicontext.Int("estargz-parallelism")),
 			}
 			if estargzGzipHelper := clicontext.String("estargz-gzip-helper"); estargzGzipHelper != "" {
 				gzipHelperFunc, err := decompressutil.GetGzipHelperFunc(estargzGzipHelper)
