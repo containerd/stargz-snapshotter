@@ -6,6 +6,8 @@ The following flags of `ctr-remote i convert` and `ctr-remote i optimize` allow 
 
 - `--estargz-min-chunk-size`: The minimal number of bytes of data must be written in one gzip stream. If it's > 0, multiple files and chunks can be written into one gzip stream. Smaller number of gzip header and smaller size of the result blob can be expected. `--estargz-min-chunk-size=0` produces normal eStargz.
 
+- `--estargz-parallelism`: The number of workers used to build each layer. The tar is split into this many slices that are compressed in parallel, so the value also fixes the chunk boundaries: pinning it makes builds reproducible across machines regardless of their CPU count. `0` (the default) uses `GOMAXPROCS`; `1` forces a fully sequential build. This has no effect with `--estargz-min-chunk-size`, which is built with a single worker.
+
 ## `--estargz-external-toc` usage
 
 convert:
