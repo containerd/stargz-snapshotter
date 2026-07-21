@@ -22,6 +22,7 @@ import (
 	"fmt"
 	golog "log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -29,6 +30,7 @@ import (
 	"syscall"
 
 	"github.com/containerd/log"
+	metrics "github.com/docker/go-metrics"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
@@ -38,12 +40,13 @@ import (
 )
 
 var (
-	versionFlag   bool
-	fuseStoreAddr string
-	address       string
-	logLevel      string
-	logPath       string
-	action        string
+	versionFlag    bool
+	fuseStoreAddr  string
+	address        string
+	metricsAddress string
+	logLevel       string
+	logPath        string
+	action         string
 )
 
 func parseFlags() {
@@ -51,6 +54,7 @@ func parseFlags() {
 	flag.StringVar(&action, "action", "", "action of fusemanager")
 	flag.StringVar(&fuseStoreAddr, "fusestore-path", "/var/lib/containerd-stargz-grpc/fusestore.db", "address for the fusemanager's store")
 	flag.StringVar(&address, "address", "/run/containerd-stargz-grpc/fuse-manager.sock", "address for the fusemanager's gRPC socket")
+	flag.StringVar(&metricsAddress, "metrics-address", "", "address for the fusemanager's metrics API")
 	flag.StringVar(&logLevel, "log-level", logrus.InfoLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
 	flag.StringVar(&logPath, "log-path", "", "path to fusemanager's logs, logs to stderr by default, pass --log-level=panic to disable logging")
 
@@ -82,13 +86,13 @@ func run() error {
 
 	switch action {
 	case "start":
-		return startNew(ctx, logPath, address, fuseStoreAddr, logLevel)
+		return startNew(ctx, logPath, address, fuseStoreAddr, logLevel, metricsAddress)
 	default:
 		return runFuseManager(ctx)
 	}
 }
 
-func startNew(ctx context.Context, logPath, address, fusestore, logLevel string) error {
+func startNew(ctx context.Context, logPath, address, fusestore, logLevel, metricsAddr string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -103,6 +107,9 @@ func startNew(ctx context.Context, logPath, address, fusestore, logLevel string)
 		"-address", address,
 		"-fusestore-path", fusestore,
 		"-log-level", logLevel,
+	}
+	if metricsAddr != "" {
+		args = append(args, "-metrics-address", metricsAddr)
 	}
 
 	// we use shim-like approach to start new fusemanager process by self-invoking in the background
@@ -189,6 +196,23 @@ func runFuseManager(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen socket: %w", err)
 	}
+	defer l.Close()
+
+	errCh := make(chan error, 2)
+	if metricsAddress != "" {
+		ml, err := net.Listen("tcp", metricsAddress)
+		if err != nil {
+			return fmt.Errorf("failed to get listener for metrics endpoint: %w", err)
+		}
+		defer ml.Close()
+		m := http.NewServeMux()
+		m.Handle("/metrics", metrics.Handler())
+		go func() {
+			if err := http.Serve(ml, m); err != nil {
+				errCh <- fmt.Errorf("error on serving metrics via %q: %w", metricsAddress, err)
+			}
+		}()
+	}
 
 	server := grpc.NewServer()
 	fm, err := NewFuseManager(ctx, l, server, fuseStoreAddr, address)
@@ -198,7 +222,6 @@ func runFuseManager(ctx context.Context) error {
 
 	pb.RegisterStargzFuseManagerServiceServer(server, fm)
 
-	errCh := make(chan error, 1)
 	go func() {
 		if err := server.Serve(l); err != nil {
 			errCh <- fmt.Errorf("error on serving via socket %q: %w", address, err)
@@ -223,7 +246,7 @@ func runFuseManager(ctx context.Context) error {
 	return nil
 }
 
-func StartFuseManager(ctx context.Context, executable, address, fusestore, logLevel, logPath string) (newlyStarted bool, err error) {
+func StartFuseManager(ctx context.Context, executable, address, fusestore, logLevel, logPath, metricsAddr string) (newlyStarted bool, err error) {
 	// if socket exists, do not start it
 	if _, err := os.Stat(address); err == nil {
 		return false, nil
@@ -241,6 +264,9 @@ func StartFuseManager(ctx context.Context, executable, address, fusestore, logLe
 		"-fusestore-path", fusestore,
 		"-log-level", logLevel,
 		"-log-path", logPath,
+	}
+	if metricsAddr != "" {
+		args = append(args, "-metrics-address", metricsAddr)
 	}
 
 	cmd := exec.Command(executable, args...)
