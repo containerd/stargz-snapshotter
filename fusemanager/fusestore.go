@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/containerd/log"
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/containerd/stargz-snapshotter/service"
@@ -80,6 +81,11 @@ func (fm *Server) removeFuseInfo(fuseInfo *fuseInfo) error {
 // restoreFuseInfo restores fuseInfo when Init is called, it will skip mounted
 // layers whose mountpoint can be found in fsMap
 func (fm *Server) restoreFuseInfo(ctx context.Context) error {
+	if fm.config.Config.LazyRestoreOnRestart {
+		log.G(ctx).Debug("deferred fuse-manager mount restoration until first use")
+		return nil
+	}
+
 	return fm.ms.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(fuseInfoBucket)
 		if bucket == nil {
