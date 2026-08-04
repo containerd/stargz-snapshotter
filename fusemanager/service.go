@@ -47,6 +47,10 @@ type Config struct {
 	IPFS                       bool   `toml:"ipfs" json:"ipfs"`
 	MetadataStore              string `toml:"metadata_store" default:"memory" json:"metadata_store"`
 	DefaultImageServiceAddress string `json:"default_image_service_address"`
+	CRIContainerdAddress       string `toml:"cri_containerd_address" json:"cri_containerd_address"`
+	CRIContainerdNamespace     string `toml:"cri_containerd_namespace" json:"cri_containerd_namespace"`
+	CRIListenPath              string `toml:"cri_listen_path" json:"cri_listen_path"`
+	StargzSnapshotterAddress   string `toml:"stargz_snapshotter_address" json:"stargz_snapshotter_address"`
 }
 
 type ConfigContext struct {

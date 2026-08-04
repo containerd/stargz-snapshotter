@@ -91,7 +91,8 @@ EOF
 echo "Createing k3s cluster"
 k3d cluster create "${K3S_CLUSTER_NAME}" --image="${K3S_NODE_IMAGE}" \
     --registry-config="${TMP_BUILTIN_CONF}" -v "${K3S_REGISTRY_CA}":/registry.crt:ro \
-    --k3s-arg='--snapshotter=stargz@server:*;agent:*'
+    --k3s-arg='--snapshotter=stargz@server:*;agent:*' \
+    --env "CONTAINERD_LOG_LEVEL=debug@server:*;agent:*"
 k3d kubeconfig get "${K3S_CLUSTER_NAME}" > "${K3S_USER_KUBECONFIG}"
 K3S_NODENAME="$(k3d node list | grep ${K3S_CLUSTER_NAME}-server-0 | cut -d " " -f 1 | tr -d '\n')"
 docker network connect "${REGISTRY_NETWORK}" "${K3S_NODENAME}"

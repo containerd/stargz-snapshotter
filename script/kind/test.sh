@@ -35,6 +35,11 @@ if [ "${KIND_NO_RECREATE:-}" != "true" ] ; then
     docker build ${DOCKER_BUILD_ARGS:-} -t "${PREPARE_NODE_IMAGE}" --target containerd-base "${REPO}"
 fi
 
+CRI_SOCKET_PATH="unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+if [ "${FUSE_MANAGER:-}" == "true" ] ; then
+    CRI_SOCKET_PATH="unix:///run/containerd-stargz-grpc/fuse-manager-cri.sock"
+fi
+
 AUTH_DIR=$(mktemp -d)
 DOCKERCONFIG=$(mktemp)
 DOCKER_COMPOSE_YAML=$(mktemp)
@@ -119,12 +124,14 @@ if ! ( "${CONTEXT}"/run-kind.sh "${KIND_CLUSTER_NAME}" \
                  "${AUTH_DIR}/certs/domain.crt" \
                  "${REPO}" \
                  "${REGISTRY_NETWORK}" \
-                 "${DOCKERCONFIG}" && \
+                 "${DOCKERCONFIG}" \
+                 "${CRI_SOCKET_PATH}" && \
          echo "Waiting until secrets fullly synced..." && \
          sleep 30 && \
          echo "Trying to pull private image with secret..." && \
          "${CONTEXT}"/create-pod.sh "$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sed -n 1p)" \
-                     "${KIND_KUBECONFIG}" "${TESTIMAGE}" ) ; then
+                     "${KIND_KUBECONFIG}" "${TESTIMAGE}" "${CRI_SOCKET_PATH}" && \
+         test_image_verification "${KIND_KUBECONFIG}" "${PREPARE_NODE_NAME}" "${REGISTRY_HOST}:5000" ns1) ; then
     FAIL=true
 fi
 docker compose -f "${DOCKER_COMPOSE_YAML}" down -v

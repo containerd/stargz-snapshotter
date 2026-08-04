@@ -46,6 +46,12 @@ func NewRemoteDecompressor(ctx context.Context, hosts source.RegistryHosts, refs
 	})
 }
 
+func NewRemoteDecompressorWithResolver(ctx context.Context, resolver remotes.Resolver, refspec reference.Spec, desc ocispec.Descriptor) *esgzexternaltoc.GzipDecompressor {
+	return esgzexternaltoc.NewGzipDecompressor(func() ([]byte, error) {
+		return fetchTOCBlob(ctx, resolver, refspec, desc.Digest)
+	})
+}
+
 func fetchTOCBlob(ctx context.Context, resolver remotes.Resolver, refspec reference.Spec, dgst digest.Digest) ([]byte, error) {
 	// TODO: support custom location of TOC manifest and TOCs using annotations, etc.
 	tocImgRef, err := getTOCReference(refspec.String())

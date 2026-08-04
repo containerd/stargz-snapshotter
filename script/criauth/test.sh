@@ -123,7 +123,8 @@ if ! ( "${CONTEXT}"/run-kind.sh "${KIND_CLUSTER_NAME}" \
          sleep 20 && \
          echo "Trying to pull private image with secret..." && \
          "${CONTEXT}"/create-pod.sh "$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sed -n 1p)" \
-                     "${KIND_KUBECONFIG}" "${TESTIMAGE}" ) ; then
+                     "${KIND_KUBECONFIG}" "${TESTIMAGE}" && \
+         test_image_verification "${KIND_KUBECONFIG}" "${PREPARE_NODE_NAME}" "${REGISTRY_HOST}:5000" ns1) ; then
     FAIL=true
 fi
 docker compose -f "${DOCKER_COMPOSE_YAML}" down -v
