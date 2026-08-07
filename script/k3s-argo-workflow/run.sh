@@ -173,7 +173,7 @@ K3S_NODE_IMAGE="${K3S_NODE_REPO}/${K3S_NODE_IMAGE_NAME}:${REQUIRED_VERSION_NAME}
         make deps && \
         git add . && \
         git commit -m tmp && \
-        SKIP_AIRGAP=1 REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${REQUIRED_VERSION_NAME}" SKIP_VALIDATE=1 make local-image
+        REPO="${K3S_NODE_REPO}" IMAGE_NAME="${K3S_NODE_IMAGE_NAME}" TAG="${REQUIRED_VERSION_NAME}" make image
 )
 
 #1
