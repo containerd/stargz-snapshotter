@@ -372,19 +372,19 @@ REGISTRY_HOST_IP=$(getent hosts "${REGISTRY_HOST}" | awk '{ print $1 }')
 REGISTRY_ALT_HOST_IP=$(getent hosts "${REGISTRY_ALT_HOST}" | awk '{ print $1 }')
 
 echo "Disabling source registry and check if mirroring is working for stargz snapshotter..."
-iptables -A OUTPUT -d "${REGISTRY_HOST_IP}" -j DROP
+iptables -A OUTPUT -p tcp -d "${REGISTRY_HOST_IP}" -j REJECT --reject-with tcp-reset
 iptables -L
 copy_out_dir "${REGISTRY_HOST}/alpine:esgz" "/usr" "${USR_MIRROR}" "stargz"
-iptables -D OUTPUT -d "${REGISTRY_HOST_IP}" -j DROP
+iptables -D OUTPUT -p tcp -d "${REGISTRY_HOST_IP}" -j REJECT --reject-with tcp-reset
 
 echo "Disabling mirror registry and check if refreshing works for stargz snapshotter..."
-iptables -A OUTPUT -d "${REGISTRY_ALT_HOST_IP}" -j DROP
+iptables -A OUTPUT -p tcp -d "${REGISTRY_ALT_HOST_IP}" -j REJECT --reject-with tcp-reset
 iptables -L
 copy_out_dir "${REGISTRY_HOST}/alpine:esgz" "/usr" "${USR_REFRESH}" "stargz"
-iptables -D OUTPUT -d "${REGISTRY_ALT_HOST_IP}" -j DROP
+iptables -D OUTPUT -p tcp -d "${REGISTRY_ALT_HOST_IP}" -j REJECT --reject-with tcp-reset
 
 echo "Disabling all registries and running container should fail"
-iptables -A OUTPUT -d "${REGISTRY_HOST_IP}","${REGISTRY_ALT_HOST_IP}" -j DROP
+iptables -A OUTPUT -p tcp -d "${REGISTRY_HOST_IP}","${REGISTRY_ALT_HOST_IP}" -j REJECT --reject-with tcp-reset
 iptables -L
 if ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}/alpine:esgz" test tar -c /usr > /usr_dummy_fail.tar ; then
     echo "All registries are disabled so this must be failed"
@@ -392,7 +392,7 @@ if ctr-remote run --rm --snapshotter=stargz "${REGISTRY_HOST}/alpine:esgz" test 
 else
     echo "Failed to run the container as expected"
 fi
-iptables -D OUTPUT -d "${REGISTRY_HOST_IP}","${REGISTRY_ALT_HOST_IP}" -j DROP
+iptables -D OUTPUT -p tcp -d "${REGISTRY_HOST_IP}","${REGISTRY_ALT_HOST_IP}" -j REJECT --reject-with tcp-reset
 
 echo "Diffing root filesystems for mirroring"
 diff --no-dereference -qr "${USR_ORG}/" "${USR_MIRROR}/"
