@@ -98,6 +98,9 @@ type FuseManagerConfig struct {
 
 	// Path is path to the fusemanager's executable (default: looking for a binary "stargz-fuse-manager")
 	Path string `toml:"path" json:"path"`
+
+	// MetricsAddress is address for the fusemanager's metrics API
+	MetricsAddress string `toml:"metrics_address" json:"metrics_address"`
 }
 
 func main() {
@@ -173,7 +176,11 @@ func main() {
 		if !filepath.IsAbs(fmAddr) {
 			log.G(ctx).WithError(err).Fatalf("fuse manager address must be an absolute path: %s", fmAddr)
 		}
-		managerNewlyStarted, err := fusemanager.StartFuseManager(ctx, fmPath, fmAddr, filepath.Join(*rootDir, "fusestore.db"), *logLevel, filepath.Join(*rootDir, "stargz-fuse-manager.log"))
+		fmMetricsAddr := ""
+		if !config.NoPrometheus {
+			fmMetricsAddr = fuseManagerConfig.MetricsAddress
+		}
+		managerNewlyStarted, err := fusemanager.StartFuseManager(ctx, fmPath, fmAddr, filepath.Join(*rootDir, "fusestore.db"), *logLevel, filepath.Join(*rootDir, "stargz-fuse-manager.log"), fmMetricsAddr)
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to start fusemanager")
 		}
