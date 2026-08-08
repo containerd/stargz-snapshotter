@@ -80,6 +80,11 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			Usage: "The minimal number of bytes of data must be written in one gzip stream. Note that this adds a TOC property that old reader doesn't understand.",
 			Value: 0,
 		},
+		&cli.IntFlag{
+			Name:  "estargz-parallelism",
+			Usage: "Number of workers used to build the layer. Pinning it makes builds reproducible across machines regardless of CPU count. 0 (default) uses GOMAXPROCS; 1 forces a sequential build. Has no effect with --estargz-min-chunk-size.",
+			Value: 0,
+		},
 		&cli.BoolFlag{
 			Name:  "estargz-external-toc",
 			Usage: "Separate TOC JSON into another image (called \"TOC image\"). The name of TOC image is the original + \"-esgztoc\" suffix. Both eStargz and the TOC image should be pushed to the same registry. stargz-snapshotter refers to the TOC image when it pulls the result eStargz image.",
@@ -278,6 +283,7 @@ func getESGZConvertOpts(context *cli.Context) ([]estargz.Option, error) {
 		estargz.WithCompressionLevel(context.Int("estargz-compression-level")),
 		estargz.WithChunkSize(context.Int("estargz-chunk-size")),
 		estargz.WithMinChunkSize(context.Int("estargz-min-chunk-size")),
+		estargz.WithParallelism(context.Int("estargz-parallelism")),
 	}
 	if estargzRecordIn := context.String("estargz-record-in"); estargzRecordIn != "" {
 		paths, err := readPathsFromRecordFile(estargzRecordIn)

@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -671,4 +672,83 @@ func TestCountReader(t *testing.T) {
 		})
 	}
 
+}
+
+func sampleTar(t *testing.T, n, size int) (tarBytes []byte, want map[string]string) {
+	t.Helper()
+	want = make(map[string]string, n)
+	var ents []tarEntry
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("file%04d", i)
+		content := randomContents(size)
+		want[name] = content
+		ents = append(ents, file(name, content))
+	}
+	sr := buildTar(t, ents, "")
+	tarBytes = make([]byte, sr.Size())
+	if _, err := sr.ReadAt(tarBytes, 0); err != nil && err != io.EOF {
+		t.Fatalf("read tar: %v", err)
+	}
+	return tarBytes, want
+}
+
+func buildBlobBytes(t *testing.T, tarBytes []byte, opts ...Option) []byte {
+	t.Helper()
+	blob, err := Build(io.NewSectionReader(bytes.NewReader(tarBytes), 0, int64(len(tarBytes))), opts...)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	data, err := io.ReadAll(blob)
+	if err != nil {
+		t.Fatalf("read blob: %v", err)
+	}
+	if err := blob.Close(); err != nil {
+		t.Fatalf("close blob: %v", err)
+	}
+	return data
+}
+
+func assertRoundTrip(t *testing.T, blob []byte, want map[string]string) {
+	t.Helper()
+	r, err := Open(io.NewSectionReader(bytes.NewReader(blob), 0, int64(len(blob))))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	for name, content := range want {
+		e, ok := r.Lookup(name)
+		if !ok {
+			t.Fatalf("missing entry %q", name)
+		}
+		sr, err := r.OpenFile(name)
+		if err != nil {
+			t.Fatalf("OpenFile %q: %v", name, err)
+		}
+		got := make([]byte, e.Size)
+		if _, err := sr.ReadAt(got, 0); err != nil && err != io.EOF {
+			t.Fatalf("ReadAt %q: %v", name, err)
+		}
+		if string(got) != content {
+			t.Fatalf("content mismatch for %q", name)
+		}
+	}
+}
+
+// TestBuildParallelismReproducible ensures an explicit worker count produces the
+// same blob regardless of GOMAXPROCS, which is what makes parallel builds
+// reproducible across machines with different core counts.
+func TestBuildParallelismReproducible(t *testing.T) {
+	tarBytes, want := sampleTar(t, 128, 1500)
+
+	prev := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(prev)
+
+	withTwoCores := buildBlobBytes(t, tarBytes, WithChunkSize(512), WithParallelism(6))
+
+	runtime.GOMAXPROCS(8)
+	withEightCores := buildBlobBytes(t, tarBytes, WithChunkSize(512), WithParallelism(6))
+
+	if !bytes.Equal(withTwoCores, withEightCores) {
+		t.Fatalf("blob differs with GOMAXPROCS: parallelism must be honored verbatim")
+	}
+	assertRoundTrip(t, withTwoCores, want)
 }
