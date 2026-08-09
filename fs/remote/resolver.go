@@ -34,6 +34,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -247,6 +248,11 @@ func newHTTPFetcher(ctx context.Context, fc *fetcherConfig) (*httpFetcher, int64
 			path.Join(host.Host, host.Path),
 			strings.TrimPrefix(fc.refspec.Locator, fc.refspec.Hostname()+"/"),
 			digest)
+		if isProxy(host, fc.refspec.Hostname()) {
+			// Qualify requests to mirror hosts with the upstream registry
+			// namespace, following the same convention as containerd.
+			blobURL += "?ns=" + url.QueryEscape(fc.refspec.Hostname())
+		}
 		url, header, err := redirect(ctx, blobURL, tr, timeout, host.Header)
 		if err != nil {
 			rErr = fmt.Errorf("failed to redirect (host %q, ref:%q, digest:%q): %v: %w", host.Host, fc.refspec, digest, err, rErr)
@@ -276,6 +282,22 @@ func newHTTPFetcher(ctx context.Context, fc *fetcherConfig) (*httpFetcher, int64
 	}
 
 	return nil, 0, fmt.Errorf("cannot resolve layer: %w", rErr)
+}
+
+// isProxy returns true when the host serves contents of other registries
+// (i.e. the host is configured as a mirror), following the same rule as
+// containerd's resolver. registry-1.docker.io is the canonical host of
+// "docker.io" references so it isn't a proxy for them.
+//
+// Ported from containerd's unexported RegistryHost.isProxy:
+// https://github.com/containerd/containerd/blob/77c84241c7cbdd9b4eca2591793e3d4f4317c590/core/remotes/docker/registry.go#L85-L92
+func isProxy(host docker.RegistryHost, refHost string) bool {
+	if refHost != host.Host {
+		if refHost != "docker.io" || host.Host != "registry-1.docker.io" {
+			return true
+		}
+	}
+	return false
 }
 
 type transport struct {
