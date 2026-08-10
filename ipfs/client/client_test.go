@@ -21,7 +21,9 @@ package client
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"io"
+	"net/http"
 	"testing"
 )
 
@@ -48,6 +50,7 @@ func TestIPFSClient(t *testing.T) {
 	}
 	checkData(t, c, cid, 0, len(sampleString), sampleString, len(sampleString))
 	checkData(t, c, cid, 10, 4, sampleString[10:14], len(sampleString))
+	testPublishAndResolve(t, c, cid)
 }
 
 func checkData(t *testing.T, c *Client, cid string, off, len int, wantData string, allSize int) {
@@ -74,4 +77,62 @@ func checkData(t *testing.T, c *Client, cid string, off, len int, wantData strin
 		t.Errorf("unexpected data got from IPFS %q; wanted %q", string(dGot), wantData)
 		return
 	}
+}
+
+func testPublishAndResolve(t *testing.T, c *Client, cid string) {
+	ref := "test/ref:example"
+
+	if err := c.Publish(ref, cid); err != nil {
+		t.Errorf("failed to publish CID: %v", err)
+		return
+	}
+
+	resolvedCID, err := c.Resolve(ref)
+	if err != nil {
+		t.Errorf("failed to resolve ref: %v", err)
+		return
+	}
+
+	if resolvedCID != cid {
+		t.Errorf("unexpected resolved CID: got %v, want %v", resolvedCID, cid)
+	}
+
+	// Clean up the imported key
+	if err := c.removeKey(ref); err != nil {
+		t.Errorf("failed to remove key: %v", err)
+	}
+}
+
+// removeKey removes the key associated with the given ref
+func (c *Client) removeKey(ref string) error {
+	if c.Address == "" {
+		return fmt.Errorf("specify IPFS API address")
+	}
+
+	client := c.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	ipfsAPIKeyRemove := c.Address + "/api/v0/key/rm"
+	req, err := http.NewRequest("POST", ipfsAPIKeyRemove, nil)
+	if err != nil {
+		return err
+	}
+
+	q := req.URL.Query()
+	q.Add("arg", ref)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to remove key; status code: %v", resp.StatusCode)
+	}
+
+	return nil
 }

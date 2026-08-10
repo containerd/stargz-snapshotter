@@ -70,7 +70,15 @@ func PushWithIPFSPath(ctx context.Context, client *containerd.Client, ref string
 	if err != nil {
 		return "", err
 	}
-	return iclient.Add(bytes.NewReader(root))
+	cid, err := iclient.Add(bytes.NewReader(root))
+	if err != nil {
+		return "", err
+	}
+	if err := iclient.Publish(ref, cid); err != nil {
+		return "", err
+	}
+
+	return cid, nil
 }
 
 func pushBlobHook(client *ipfsclient.Client) converter.ConvertHookFunc {
