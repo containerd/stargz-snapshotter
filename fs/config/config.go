@@ -39,6 +39,10 @@ type Config struct {
 	// Other values default to cache them on disk.
 	HTTPCacheType string `toml:"http_cache_type" json:"http_cache_type"`
 
+	// HTTPCacheChunkTTLSec specifies TTL (in sec) for each http cache chunk.
+	// Zero or negative values disable TTL-based cleanup.
+	HTTPCacheChunkTTLSec int `toml:"http_cache_chunk_ttl_sec" json:"http_cache_chunk_ttl_sec"`
+
 	// Type of cache for uncompressed files contents. "memory" stores them on memory. Other values
 	// default to cache them on disk.
 	FSCacheType string `toml:"filesystem_cache_type" json:"filesystem_cache_type"`
