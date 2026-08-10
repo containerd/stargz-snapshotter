@@ -62,6 +62,7 @@ func NewLayerManager(ctx context.Context, root string, hosts source.RegistryHost
 		func(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) []metadata.Decompressor {
 			return []metadata.Decompressor{esgzexternaltoc.NewRemoteDecompressor(ctx, hosts, refspec, desc)}
 		},
+		nil,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup resolver: %w", err)
