@@ -78,6 +78,9 @@ func NewStargzSnapshotterService(ctx context.Context, root string, config *Confi
 	if config.AllowInvalidMountsOnRestart {
 		snOpts = append(snOpts, snapshot.AllowInvalidMountsOnRestart)
 	}
+	if config.ImageServicePath != "" {
+		snOpts = append(snOpts, snapshot.CleanupOrphanRemoteSnapshotsOnStartup(config.ImageServicePath))
+	}
 
 	snapshotter, err = snapshot.NewSnapshotter(ctx, snapshotterRoot(root), fs, snOpts...)
 	if err != nil {

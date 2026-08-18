@@ -25,6 +25,7 @@ package layer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -194,6 +195,20 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 		overlayOpaqueType:       overlayOpaqueType,
 		additionalDecompressors: additionalDecompressors,
 	}, nil
+}
+
+func (r *Resolver) Cleanup(ctx context.Context) error {
+	var errs []error
+	for _, dir := range []string{
+		filepath.Join(r.rootDir, "fscache"),
+		filepath.Join(r.rootDir, "httpcache"),
+	} {
+		if err := os.RemoveAll(dir); err != nil {
+			log.G(ctx).WithError(err).WithField("dir", dir).Warn("failed to cleanup cache directory")
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache, error) {
