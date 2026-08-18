@@ -294,6 +294,74 @@ func TestMirror(t *testing.T) {
 	}
 }
 
+// TestNamespaceQuery tests that requests to mirror hosts are qualified with
+// the "ns" query parameter pointing to the upstream registry, following the
+// same convention as containerd, and that requests to the upstream registry
+// itself aren't.
+func TestNamespaceQuery(t *testing.T) {
+	tests := []struct {
+		name   string
+		ref    string
+		mirror string
+		wantNS string
+	}{
+		{
+			name:   "mirror",
+			ref:    "dummyexample.com/library/test",
+			mirror: "mirrorexample.com",
+			wantNS: "dummyexample.com",
+		},
+		{
+			name: "no-mirror",
+			ref:  "dummyexample.com/library/test",
+		},
+		{
+			name:   "docker-mirror",
+			ref:    "docker.io/library/test",
+			mirror: "mirrorexample.com",
+			wantNS: "docker.io",
+		},
+		{
+			name:   "docker-canonical-host",
+			ref:    "docker.io/library/test",
+			mirror: "registry-1.docker.io",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refspec, err := reference.Parse(tt.ref)
+			if err != nil {
+				t.Fatalf("failed to prepare dummy reference: %v", err)
+			}
+			wantHost := refspec.Hostname()
+			tr := &sampleRoundTripper{okURLs: []string{regexp.QuoteMeta(wantHost)}}
+			var mirrors []hostFactory
+			if tt.mirror != "" {
+				wantHost = tt.mirror
+				tr.okURLs = []string{regexp.QuoteMeta(tt.mirror)}
+				mirrors = append(mirrors, hostSimple(tt.mirror))
+			}
+			fetcher, _, err := newHTTPFetcher(context.Background(), &fetcherConfig{
+				hosts:   hostsConfig(tr, mirrors...)(t),
+				refspec: refspec,
+				desc:    ocispec.Descriptor{Digest: digest.FromString("dummy")},
+			})
+			if err != nil {
+				t.Fatalf("failed to resolve reference: %v", err)
+			}
+			checkFetcherURL(t, fetcher, wantHost)
+			nurl, err := url.Parse(fetcher.url)
+			if err != nil {
+				t.Fatalf("failed to parse url %q: %v", fetcher.url, err)
+			}
+			if gotNS := nurl.Query().Get("ns"); gotNS != tt.wantNS {
+				t.Errorf("invalid ns query parameter %q(%q); want %q", gotNS, nurl.String(), tt.wantNS)
+			}
+		})
+	}
+}
+
 func checkFetcherURL(t *testing.T, f *httpFetcher, wantHost string) {
 	nurl, err := url.Parse(f.url)
 	if err != nil {
