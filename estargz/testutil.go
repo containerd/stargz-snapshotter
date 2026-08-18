@@ -1159,6 +1159,8 @@ func testWriteAndOpen(t *TestRunner, controllers ...TestingControllerFactory) {
 		wantNumGzLossLess  int // expected number of streams (> 0) in lossless mode if it's different from wantNumGz
 		wantFailOnLossLess bool
 		wantTOCVersion     int // default = 1
+
+		wantOpenError bool // opening this blob should fail with returning an error
 	}{
 		{
 			name:      "empty",
@@ -1473,6 +1475,13 @@ func testWriteAndOpen(t *TestRunner, controllers ...TestingControllerFactory) {
 				hasFileContentsRange("foo3", len(data64KB)-1, data64KB[len(data64KB)-1:]),
 			),
 		},
+		{
+			name: "cyclic_hardlink",
+			in: tarOf(
+				link("foo", "foo"),
+			),
+			wantOpenError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1544,6 +1553,9 @@ func testWriteAndOpen(t *TestRunner, controllers ...TestingControllerFactory) {
 								WithTelemetry(telemetry),
 							)
 							if err != nil {
+								if tt.wantOpenError {
+									return
+								}
 								t.Fatalf("stargz.Open: %v", err)
 							}
 							if _, ok := r.Lookup(""); !ok {
