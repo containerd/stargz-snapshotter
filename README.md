@@ -71,6 +71,11 @@ version = 2
   disable_snapshot_annotations = false
 ```
 
+Since v0.19.0, you also need to specify `--image-service-endpoint=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock` to kubelet to allow stargz snapshotter proxying the CRI calls with additional image verification logic.
+Otherwise, stargz-snapshotter can't verify the DiffIDs advertised in the image configuration.
+This allows a maliciously crafted image with faked DiffIDs being mounted to other containers that has those DiffIDs.
+See the "kubelet configuration" section in [`./docs/overview.md`](./docs/overview.md) for details.
+
 You can try our [prebuilt](/Dockerfile) [KinD](https://github.com/kubernetes-sigs/kind) node image that contains the above configuration.
 
 ```console
