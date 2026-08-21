@@ -248,7 +248,7 @@ func layerLossLessConvertFunc(compressor estargz.Compressor, chunkSize int, minC
 				esgzUncompressedInfo.diffID.String(), orgUncompressedInfo.diffID.String())
 		}
 		if esgzUncompressedInfo.size != orgUncompressedInfo.size {
-			return nil, fmt.Errorf("unexpected uncompressed size %q; want %q",
+			return nil, fmt.Errorf("unexpected uncompressed size %v; want %v",
 				esgzUncompressedInfo.size, orgUncompressedInfo.size)
 		}
 
