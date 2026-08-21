@@ -136,7 +136,7 @@ func multiCredsFuncs(ref reference.Spec, credsFuncs ...Credential) func(string) 
 	}
 }
 
-// makeStringSlice is a helper func to convert from []interface{} to []string.
+// makeStringSlice is a helper func to convert from []any to []string.
 // Additionally an optional cb func may be passed to perform string mapping.
 // NOTE: Ported from https://github.com/containerd/containerd/blob/v1.6.9/remotes/docker/config/hosts.go#L516-L533
 func makeStringSlice(slice []any, cb func(string) string) ([]string, error) {
