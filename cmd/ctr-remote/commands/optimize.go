@@ -115,7 +115,7 @@ var OptimizeCommand = &cli.Command{
 		},
 		&cli.IntFlag{
 			Name:  "estargz-parallelism",
-			Usage: "Number of workers used to build the layer. Pinning it makes builds reproducible across machines regardless of CPU count. 0 (default) uses GOMAXPROCS; 1 forces a sequential build. Has no effect with --estargz-min-chunk-size (not applied to zstd:chunked)",
+			Usage: "Number of workers used to build the layer. Pinning it makes builds reproducible across machines regardless of CPU count. 0 (default) uses GOMAXPROCS; 1 forces a sequential build (not applied to zstd:chunked)",
 			Value: 0,
 		},
 		&cli.StringFlag{

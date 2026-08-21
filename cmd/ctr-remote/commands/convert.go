@@ -82,7 +82,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		},
 		&cli.IntFlag{
 			Name:  "estargz-parallelism",
-			Usage: "Number of workers used to build the layer. Pinning it makes builds reproducible across machines regardless of CPU count. 0 (default) uses GOMAXPROCS; 1 forces a sequential build. Has no effect with --estargz-min-chunk-size.",
+			Usage: "Number of workers used to build the layer. Pinning it makes builds reproducible across machines regardless of CPU count. 0 (default) uses GOMAXPROCS; 1 forces a sequential build.",
 			Value: 0,
 		},
 		&cli.BoolFlag{
