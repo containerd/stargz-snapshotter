@@ -281,7 +281,7 @@ COPY ./script/config-cri-o/ /
 ENTRYPOINT [ "/usr/local/bin/entrypoint" ]
 
 # Image which can be used as a node image for KinD
-FROM kindest/node:v1.35.1
+FROM kindest/node:v1.36.1
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=snapshotter-dev /out/* /usr/local/bin/
 COPY ./script/config/ /
