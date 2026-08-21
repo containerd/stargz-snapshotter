@@ -22,8 +22,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/core/snapshots"
@@ -371,6 +374,333 @@ func TestFailureDetection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLazyRestoreOnRestart(t *testing.T) {
+	tests := []struct {
+		name          string
+		prepareActive bool
+		use           func(context.Context, snapshots.Snapshotter, string, string) error
+	}{
+		{
+			name: "prepare",
+			use: func(ctx context.Context, sn snapshots.Snapshotter, target, _ string) error {
+				_, err := sn.Prepare(ctx, "active-after-restart", target)
+				return err
+			},
+		},
+		{
+			name: "view",
+			use: func(ctx context.Context, sn snapshots.Snapshotter, target, _ string) error {
+				_, err := sn.View(ctx, "view-after-restart", target)
+				return err
+			},
+		},
+		{
+			name:          "mounts",
+			prepareActive: true,
+			use: func(ctx context.Context, sn snapshots.Snapshotter, _, active string) error {
+				_, err := sn.Mounts(ctx, active)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			root, fs, target, active := prepareRemoteSnapshotForRestart(t, tt.prepareActive)
+			fs.setMountFailure(true) // Simulate a registry that isn't reachable during startup.
+
+			sn, err := NewSnapshotter(ctx, root, fs, LazyRestoreOnRestart)
+			if err != nil {
+				t.Fatalf("failed to restart snapshotter lazily: %v", err)
+			}
+			defer sn.Close()
+
+			if got := fs.mountCallCount(); got != 0 {
+				t.Fatalf("startup mounted %d remote layers; want zero", got)
+			}
+			layers, err := sn.(*snapshotter).remoteLayers(ctx, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(layers) != 1 {
+				t.Fatalf("got %d remote layers; want one", len(layers))
+			}
+			if _, err := os.Stat(layers[0].mountpoint); err != nil {
+				t.Fatalf("remote snapshot directory wasn't restored: %v", err)
+			}
+
+			// Metadata-only APIs must not cause remote mounts.
+			if _, err := sn.Stat(ctx, target); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sn.Usage(ctx, target); err != nil {
+				t.Fatal(err)
+			}
+			if err := sn.Walk(ctx, func(context.Context, snapshots.Info) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if got := fs.mountCallCount(); got != 0 {
+				t.Fatalf("metadata-only APIs mounted %d remote layers; want zero", got)
+			}
+
+			fs.setMountFailure(false) // Registry/network becomes available after startup.
+			if err := tt.use(ctx, sn, target, active); err != nil {
+				t.Fatalf("first use failed: %v", err)
+			}
+			if got := fs.mountCallCount(); got != 1 {
+				t.Fatalf("first use mounted remote layer %d times; want one", got)
+			}
+		})
+	}
+}
+
+func TestOnDemandRemountFailureIsRetried(t *testing.T) {
+	fs := newRestartFileSystem()
+	fs.setMountFailure(true)
+	o := &snapshotter{
+		fs:                   fs,
+		lazyRestoreOnRestart: true,
+	}
+	mountpoint := "/snapshot/1/fs"
+
+	if err := o.ensureLayerAvailable(context.Background(), mountpoint, nil); err == nil {
+		t.Fatal("first remount succeeded; want failure")
+	}
+	if err := o.ensureLayerAvailable(context.Background(), mountpoint, nil); err == nil {
+		t.Fatal("second remount succeeded; want failure")
+	}
+	if got := fs.mountCallCount(); got != 2 {
+		t.Fatalf("two requests made %d mount attempts; want two", got)
+	}
+}
+
+func TestOnDemandRemountErrorIsReported(t *testing.T) {
+	ctx := context.Background()
+	root, fs, _, active := prepareRemoteSnapshotForRestart(t, true)
+	fs.setMountFailure(true)
+
+	sn, err := NewSnapshotter(ctx, root, fs, LazyRestoreOnRestart)
+	if err != nil {
+		t.Fatalf("failed to restart snapshotter lazily: %v", err)
+	}
+	defer sn.Close()
+
+	_, err = sn.Mounts(ctx, active)
+	if !errdefs.IsUnavailable(err) {
+		t.Fatalf("Mounts() error = %v; want unavailable", err)
+	}
+	if !strings.Contains(err.Error(), "registry unavailable") {
+		t.Fatalf("Mounts() error = %v; want registry failure details", err)
+	}
+}
+
+func TestOnDemandRemountSingleflight(t *testing.T) {
+	const callers = 16
+	fs := newRestartFileSystem()
+	fs.mountStarted = make(chan struct{}, 1)
+	fs.mountRelease = make(chan struct{})
+	fs.checkObserved = make(chan struct{}, callers+1)
+	o := &snapshotter{
+		fs:                   fs,
+		lazyRestoreOnRestart: true,
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	for range callers {
+		go func() {
+			<-start
+			errs <- o.ensureLayerAvailable(context.Background(), "/snapshot/1/fs", nil)
+		}()
+	}
+	close(start)
+
+	select {
+	case <-fs.mountStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for remount")
+	}
+	// Every caller performs an initial Check and the singleflight leader checks
+	// once more before mounting.
+	for range callers + 1 {
+		select {
+		case <-fs.checkObserved:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for concurrent availability checks")
+		}
+	}
+	close(fs.mountRelease)
+
+	for range callers {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent remount failed: %v", err)
+		}
+	}
+	if got := fs.mountCallCount(); got != 1 {
+		t.Fatalf("concurrent callers made %d mount attempts; want one", got)
+	}
+}
+
+func TestOnDemandRemountSurvivesLeaderCancellation(t *testing.T) {
+	fs := newRestartFileSystem()
+	fs.mountStarted = make(chan struct{}, 1)
+	fs.mountRelease = make(chan struct{})
+	o := &snapshotter{
+		fs:                   fs,
+		lazyRestoreOnRestart: true,
+	}
+
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		leaderErr <- o.ensureLayerAvailable(leaderCtx, "/snapshot/1/fs", nil)
+	}()
+
+	select {
+	case <-fs.mountStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for leader remount")
+	}
+
+	followerErr := make(chan error, 1)
+	go func() {
+		followerErr <- o.ensureLayerAvailable(context.Background(), "/snapshot/1/fs", nil)
+	}()
+
+	cancelLeader()
+	select {
+	case err := <-leaderErr:
+		if err != context.Canceled {
+			t.Fatalf("leader error = %v; want context canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled leader remained blocked on shared remount")
+	}
+
+	close(fs.mountRelease)
+	select {
+	case err := <-followerErr:
+		if err != nil {
+			t.Fatalf("follower failed after leader cancellation: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for follower")
+	}
+
+	if got := fs.mountCallCount(); got != 1 {
+		t.Fatalf("concurrent callers made %d mount attempts; want one", got)
+	}
+}
+
+func prepareRemoteSnapshotForRestart(t *testing.T, prepareActive bool) (root string, fs *restartFileSystem, target, active string) {
+	t.Helper()
+	ctx := context.Background()
+	root = t.TempDir()
+	fs = newRestartFileSystem()
+	sn, err := NewSnapshotter(ctx, root, fs)
+	if err != nil {
+		t.Fatalf("failed to create initial snapshotter: %v", err)
+	}
+	target = prepareWithTarget(t, sn, "remote-target", "remote-prepare", "", nil)
+	if prepareActive {
+		active = "active-before-restart"
+		if _, err := sn.Prepare(ctx, active, target); err != nil {
+			t.Fatalf("failed to prepare active snapshot: %v", err)
+		}
+	}
+	if err := sn.Close(); err != nil {
+		t.Fatalf("failed to close initial snapshotter: %v", err)
+	}
+	fs.reset()
+	return root, fs, target, active
+}
+
+type restartFileSystem struct {
+	mu            sync.Mutex
+	mounted       map[string]bool
+	mountCalls    int
+	failMount     bool
+	mountStarted  chan struct{}
+	mountRelease  chan struct{}
+	checkObserved chan struct{}
+}
+
+func newRestartFileSystem() *restartFileSystem {
+	return &restartFileSystem{mounted: make(map[string]bool)}
+}
+
+func (fs *restartFileSystem) Mount(ctx context.Context, mountpoint string, labels map[string]string) error {
+	fs.mu.Lock()
+	fs.mountCalls++
+	fail := fs.failMount
+	release := fs.mountRelease
+	started := fs.mountStarted
+	fs.mu.Unlock()
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	if release != nil {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if fail {
+		return fmt.Errorf("registry unavailable")
+	}
+	fs.mu.Lock()
+	fs.mounted[mountpoint] = true
+	fs.mu.Unlock()
+	return nil
+}
+
+func (fs *restartFileSystem) Check(ctx context.Context, mountpoint string, labels map[string]string) error {
+	if fs.checkObserved != nil {
+		select {
+		case fs.checkObserved <- struct{}{}:
+		default:
+		}
+	}
+	fs.mu.Lock()
+	mounted := fs.mounted[mountpoint]
+	fs.mu.Unlock()
+	if !mounted {
+		return ErrLayerNotRegistered
+	}
+	return nil
+}
+
+func (fs *restartFileSystem) Unmount(ctx context.Context, mountpoint string) error {
+	fs.mu.Lock()
+	delete(fs.mounted, mountpoint)
+	fs.mu.Unlock()
+	return nil
+}
+
+func (fs *restartFileSystem) setMountFailure(fail bool) {
+	fs.mu.Lock()
+	fs.failMount = fail
+	fs.mu.Unlock()
+}
+
+func (fs *restartFileSystem) mountCallCount() int {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.mountCalls
+}
+
+func (fs *restartFileSystem) reset() {
+	fs.mu.Lock()
+	fs.mountCalls = 0
+	fs.mounted = make(map[string]bool)
+	fs.mu.Unlock()
 }
 
 func bindFileSystem(t *testing.T) FileSystem {
