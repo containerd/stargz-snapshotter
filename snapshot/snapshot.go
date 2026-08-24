@@ -24,9 +24,13 @@ import (
 	"strings"
 	"syscall"
 
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/core/snapshots/storage"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/plugins/snapshots/overlay/overlayutils"
 	"github.com/containerd/continuity/fs"
 	"github.com/containerd/errdefs"
@@ -39,6 +43,7 @@ const (
 	targetSnapshotLabel = "containerd.io/snapshot.ref"
 	remoteLabel         = "containerd.io/snapshot/remote"
 	remoteLabelVal      = "remote snapshot"
+	gcSnapshotRefPrefix = "containerd.io/gc.ref.snapshot."
 
 	// remoteSnapshotLogKey is a key for log line, which indicates whether
 	// `Prepare` method successfully prepared targeting remote snapshot or not, as
@@ -68,11 +73,16 @@ type FileSystem interface {
 	Unmount(ctx context.Context, mountpoint string) error
 }
 
+type cleanupFileSystem interface {
+	Cleanup(ctx context.Context) error
+}
+
 // SnapshotterConfig is used to configure the remote snapshotter instance
 type SnapshotterConfig struct {
 	asyncRemove                 bool
 	noRestore                   bool
 	allowInvalidMountsOnRestart bool
+	containerdAddress           string
 }
 
 // Opt is an option to configure the remote snapshotter
@@ -97,6 +107,13 @@ func AllowInvalidMountsOnRestart(config *SnapshotterConfig) error {
 	return nil
 }
 
+func CleanupOrphanRemoteSnapshotsOnStartup(containerdAddress string) Opt {
+	return func(config *SnapshotterConfig) error {
+		config.containerdAddress = containerdAddress
+		return nil
+	}
+}
+
 type snapshotter struct {
 	root        string
 	ms          *storage.MetaStore
@@ -107,6 +124,7 @@ type snapshotter struct {
 	userxattr                   bool // whether to enable "userxattr" mount option
 	noRestore                   bool
 	allowInvalidMountsOnRestart bool
+	containerdAddress           string
 }
 
 // NewSnapshotter returns a Snapshotter which can use unpacked remote layers
@@ -157,6 +175,20 @@ func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts 
 		userxattr:                   userxattr,
 		noRestore:                   config.noRestore,
 		allowInvalidMountsOnRestart: config.allowInvalidMountsOnRestart,
+		containerdAddress:           config.containerdAddress,
+	}
+
+	if !o.noRestore {
+		if err := o.unmountSnapshotMounts(ctx); err != nil {
+			return nil, fmt.Errorf("failed to unmount snapshot mounts: %w", err)
+		}
+		if err := o.cleanupFilesystem(ctx); err != nil {
+			return nil, fmt.Errorf("failed to cleanup filesystem: %w", err)
+		}
+	}
+
+	if err := o.cleanupOrphanRemoteSnapshots(ctx); err != nil {
+		log.G(ctx).WithError(err).Warn("failed to cleanup orphan remote snapshots")
 	}
 
 	if err := o.restoreRemoteSnapshot(ctx); err != nil {
@@ -744,11 +776,237 @@ func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
 	return true
 }
 
-func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
-	if o.noRestore {
+type localSnapshot struct {
+	parent string
+	remote bool
+}
+
+func (o *snapshotter) cleanupOrphanRemoteSnapshots(ctx context.Context) error {
+	if o.containerdAddress == "" {
 		return nil
 	}
 
+	localSnapshots, children, err := o.listLocalSnapshots(ctx)
+	if err != nil {
+		return err
+	}
+	if len(localSnapshots) == 0 {
+		return nil
+	}
+
+	referenced, err := collectContainerdSnapshotReferences(ctx, o.containerdAddress)
+	if err != nil {
+		log.G(ctx).WithError(err).Warn("skip orphan remote snapshot cleanup")
+		return nil
+	}
+
+	retained := make(map[string]struct{})
+	for key := range referenced {
+		for key != "" {
+			s, ok := localSnapshots[key]
+			if !ok {
+				break
+			}
+			if s.remote {
+				retained[key] = struct{}{}
+			}
+			key = s.parent
+		}
+	}
+
+	orphan := make(map[string]struct{})
+	for key, s := range localSnapshots {
+		if !s.remote {
+			continue
+		}
+		if _, ok := retained[key]; !ok {
+			orphan[key] = struct{}{}
+		}
+	}
+	if len(orphan) == 0 {
+		return nil
+	}
+
+	order := orphanRemoteSnapshotRemovalOrder(orphan, children)
+	if len(order) == 0 {
+		log.G(ctx).WithField("count", len(orphan)).Debug("no orphan remote snapshots can be removed")
+		return nil
+	}
+
+	for _, key := range order {
+		if err := o.Remove(ctx, key); err != nil && !errdefs.IsNotFound(err) {
+			log.G(ctx).WithError(err).WithField("key", key).Warn("failed to remove orphan remote snapshot")
+		}
+	}
+
+	return o.Cleanup(ctx)
+}
+
+func (o *snapshotter) listLocalSnapshots(ctx context.Context) (map[string]localSnapshot, map[string][]string, error) {
+	ctx, t, err := o.ms.TransactionContext(ctx, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer t.Rollback()
+
+	snapshotsByName := make(map[string]localSnapshot)
+	children := make(map[string][]string)
+	err = storage.WalkInfo(ctx, func(ctx context.Context, info snapshots.Info) error {
+		_, isRemote := info.Labels[remoteLabel]
+		snapshotsByName[info.Name] = localSnapshot{
+			parent: info.Parent,
+			remote: isRemote,
+		}
+		if info.Parent != "" {
+			children[info.Parent] = append(children[info.Parent], info.Name)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return snapshotsByName, children, nil
+}
+
+func orphanRemoteSnapshotRemovalOrder(orphan map[string]struct{}, children map[string][]string) []string {
+	var order []string
+	visited := make(map[string]struct{})
+	removable := make(map[string]bool)
+
+	var visit func(string) bool
+	visit = func(key string) bool {
+		if _, ok := visited[key]; ok {
+			return removable[key]
+		}
+		visited[key] = struct{}{}
+
+		canRemove := true
+		for _, child := range children[key] {
+			if _, ok := orphan[child]; !ok {
+				canRemove = false
+				continue
+			}
+			if !visit(child) {
+				canRemove = false
+			}
+		}
+		if canRemove {
+			order = append(order, key)
+		}
+		removable[key] = canRemove
+		return canRemove
+	}
+
+	for key := range orphan {
+		visit(key)
+	}
+	return order
+}
+
+func collectContainerdSnapshotReferences(
+	ctx context.Context,
+	containerdAddress string,
+) (map[string]struct{}, error) {
+	client, err := containerd.New(containerdAddress)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	nss, err := client.NamespaceService().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	refs := make(map[string]struct{})
+	for _, ns := range nss {
+		nsCtx := namespaces.WithNamespace(ctx, ns)
+		if err := collectContainerSnapshotReferences(nsCtx, client, refs); err != nil {
+			return nil, err
+		}
+		if err := collectContentSnapshotReferences(nsCtx, client.ContentStore(), refs); err != nil {
+			return nil, err
+		}
+		if err := collectLeaseSnapshotReferences(nsCtx, client.LeasesService(), refs); err != nil {
+			return nil, err
+		}
+	}
+	return refs, nil
+}
+
+func collectContainerSnapshotReferences(
+	ctx context.Context,
+	client *containerd.Client,
+	refs map[string]struct{},
+) error {
+	containers, err := client.ContainerService().List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, c := range containers {
+		if c.SnapshotKey != "" {
+			refs[c.SnapshotKey] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func collectContentSnapshotReferences(
+	ctx context.Context,
+	store content.Store,
+	refs map[string]struct{},
+) error {
+	return store.Walk(ctx, func(info content.Info) error {
+		for k, v := range info.Labels {
+			if v != "" && snapshotGCRefLabelMatches(k) {
+				refs[v] = struct{}{}
+			}
+		}
+		return nil
+	})
+}
+
+func collectLeaseSnapshotReferences(
+	ctx context.Context,
+	manager leases.Manager,
+	refs map[string]struct{},
+) error {
+	all, err := manager.List(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, lease := range all {
+		resources, err := manager.ListResources(ctx, lease)
+		if err != nil {
+			return err
+		}
+		for _, resource := range resources {
+			if resource.ID != "" && leaseSnapshotResourceMatches(resource.Type) {
+				refs[resource.ID] = struct{}{}
+			}
+		}
+	}
+	return nil
+}
+
+func snapshotGCRefLabelMatches(label string) bool {
+	return strings.HasPrefix(label, gcSnapshotRefPrefix)
+}
+
+func leaseSnapshotResourceMatches(resourceType string) bool {
+	return strings.HasPrefix(resourceType, "snapshots/")
+}
+
+func (o *snapshotter) cleanupFilesystem(ctx context.Context) error {
+	cleaner, ok := o.fs.(cleanupFileSystem)
+	if !ok {
+		return nil
+	}
+	return cleaner.Cleanup(ctx)
+}
+
+func (o *snapshotter) unmountSnapshotMounts(ctx context.Context) error {
 	mounts, err := mountinfo.GetMounts(nil)
 	if err != nil {
 		return err
@@ -759,6 +1017,13 @@ func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
 				return fmt.Errorf("failed to unmount %s: %w", m.Mountpoint, err)
 			}
 		}
+	}
+	return nil
+}
+
+func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
+	if o.noRestore {
+		return nil
 	}
 
 	var task []snapshots.Info
