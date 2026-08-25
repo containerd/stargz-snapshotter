@@ -288,7 +288,7 @@ func makeFile(t TestingT, contents []byte, chunkSize int, factory metadata.Store
 	f, ok := ra.(*file)
 	if !ok {
 		vr.Close()
-		t.Fatalf("invalid type of file %q", tid)
+		t.Fatalf("invalid type of file %d", tid)
 	}
 	return f, vr.Close
 }

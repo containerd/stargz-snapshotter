@@ -444,7 +444,7 @@ func writeMetadataEntry(md *bolt.Bucket, m *metadataEntry) error {
 					}
 				}
 				if err := cbkt.Put([]byte(c.base), encodeID(c.id)); err != nil {
-					return fmt.Errorf("failed to add child ID %q: %w", c.id, err)
+					return fmt.Errorf("failed to add child ID %d: %w", c.id, err)
 				}
 			}
 		}
@@ -452,7 +452,7 @@ func writeMetadataEntry(md *bolt.Bucket, m *metadataEntry) error {
 	if len(m.chunks) > 0 {
 		first := m.chunks[0]
 		if err := md.Put(bucketKeyChunk, encodeChunkEntry(first)); err != nil {
-			return fmt.Errorf("failed to set chunk %q: %w", first.offset, err)
+			return fmt.Errorf("failed to set chunk %d: %w", first.offset, err)
 		}
 		var cbkt *bolt.Bucket
 		for _, e := range m.chunks[1:] {
