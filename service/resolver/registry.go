@@ -17,6 +17,7 @@
 package resolver
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -57,6 +58,10 @@ type MirrorConfig struct {
 
 	// Header are additional headers to send to the server
 	Header map[string]any `toml:"header" json:"header"`
+
+	// TLS is a pair of CA/Cert/Key which are used when creating the transport
+	// that communicates with the registry.
+	TLS *TLSConfig `toml:"tls" json:"tls"`
 }
 
 type Credential func(string, reference.Spec) (string, string, error)
@@ -81,6 +86,19 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.Regist
 					client.HTTPClient.Timeout = time.Duration(h.RequestTimeoutSec) * time.Second
 				}
 			} // h.RequestTimeoutSec < 0 means "no timeout"
+
+			if h.TLS != nil {
+				if tr, ok := client.HTTPClient.Transport.(*http.Transport); ok {
+					var err error
+					tr.TLSClientConfig, err = getTLSConfig(*h.TLS)
+					if err != nil {
+						return nil, fmt.Errorf("get TLSConfig for registry %q: %w", h.Host, err)
+					}
+				} else {
+					return nil, errors.New("TLS config cannot be applied; Client.Transport is not *http.Transport")
+				}
+			}
+
 			tr := client.StandardClient()
 			var header http.Header
 			var err error
