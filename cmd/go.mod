@@ -23,8 +23,8 @@ require (
 	github.com/rs/xid v1.6.0
 	github.com/urfave/cli/v2 v2.27.7
 	go.etcd.io/bbolt v1.4.3
-	golang.org/x/sync v0.21.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/sync v0.23.0
+	golang.org/x/sys v0.48.0
 	google.golang.org/grpc v1.82.1
 	tags.cncf.io/container-device-interface v1.1.0
 )
