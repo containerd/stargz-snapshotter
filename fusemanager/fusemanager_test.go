@@ -19,6 +19,7 @@ package fusemanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -27,6 +28,7 @@ import (
 
 	pb "github.com/containerd/stargz-snapshotter/fusemanager/api"
 	"github.com/containerd/stargz-snapshotter/service"
+	"github.com/containerd/stargz-snapshotter/snapshot"
 	"google.golang.org/grpc"
 )
 
@@ -229,7 +231,49 @@ func TestFuseManager(t *testing.T) {
 				if !mockFs.unmountCalled {
 					t.Error("Unmount() was not called on filesystem")
 				}
+
+				err = client.Check(context.Background(), tc.mountpoint, tc.labels)
+				if !errors.Is(err, snapshot.ErrLayerNotRegistered) {
+					t.Errorf("Check() after unmount error = %v; want ErrLayerNotRegistered", err)
+				}
 			}
 		})
+	}
+}
+
+func TestRestoreFuseInfoRespectsRestartMode(t *testing.T) {
+	ctx := context.Background()
+	fuseStorePath := filepath.Join(t.TempDir(), "fusestore.db")
+	fm, err := NewFuseManager(ctx, nil, grpc.NewServer(), fuseStorePath, "")
+	if err != nil {
+		t.Fatalf("failed to create fuse manager: %v", err)
+	}
+	defer fm.Close(ctx)
+
+	mockFs := newMockFileSystem(t)
+	fm.curFs = mockFs
+	fm.config = &Config{Config: service.Config{
+		SnapshotterConfig: service.SnapshotterConfig{LazyRestoreOnRestart: true},
+	}}
+	if err := fm.storeFuseInfo(&fuseInfo{
+		Mountpoint: "/snapshot/1/fs",
+		Labels:     map[string]string{"test": "label"},
+	}); err != nil {
+		t.Fatalf("failed to store fuse info: %v", err)
+	}
+
+	if err := fm.restoreFuseInfo(ctx); err != nil {
+		t.Fatalf("lazy fuse restore failed: %v", err)
+	}
+	if mockFs.mountCalled {
+		t.Fatal("lazy fuse restore mounted a remote layer")
+	}
+
+	fm.config.Config.LazyRestoreOnRestart = false
+	if err := fm.restoreFuseInfo(ctx); err != nil {
+		t.Fatalf("eager fuse restore failed: %v", err)
+	}
+	if !mockFs.mountCalled {
+		t.Fatal("eager fuse restore didn't mount the remote layer")
 	}
 }

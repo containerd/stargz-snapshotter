@@ -24,6 +24,7 @@ package fs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/layer"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/task"
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	digest "github.com/opencontainers/go-digest"
@@ -58,6 +60,10 @@ func TestCheck(t *testing.T) {
 	bl.success = false
 	if err := fs.Check(context.TODO(), "test", nil); err == nil {
 		t.Errorf("connection succeeded; wanted to fail")
+	}
+
+	if err := fs.Check(context.TODO(), "missing", nil); !errors.Is(err, snapshot.ErrLayerNotRegistered) {
+		t.Fatalf("missing layer error = %v; want ErrLayerNotRegistered", err)
 	}
 }
 

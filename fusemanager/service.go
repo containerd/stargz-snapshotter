@@ -19,6 +19,7 @@ package fusemanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -30,6 +31,8 @@ import (
 	"github.com/moby/sys/mountinfo"
 	bolt "go.etcd.io/bbolt"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/containerd/stargz-snapshotter/fusemanager/api"
 	"github.com/containerd/stargz-snapshotter/service"
@@ -261,15 +264,18 @@ func (fm *Server) Check(ctx context.Context, req *pb.CheckRequest) (*pb.Response
 
 	obj, found := fm.fsMap.Load(req.Mountpoint)
 	if !found {
-		err := fmt.Errorf("failed to find filesystem of mountpoint %s", req.Mountpoint)
+		err := fmt.Errorf("%w: failed to find filesystem of mountpoint %s", snapshot.ErrLayerNotRegistered, req.Mountpoint)
 		log.G(ctx).WithError(err).Errorf("failed to check filesystem")
-		return &pb.Response{}, err
+		return &pb.Response{}, status.Error(codes.NotFound, err.Error())
 	}
 
 	fs := obj.(snapshot.FileSystem)
 	err := fs.Check(ctx, req.Mountpoint, req.Labels)
 	if err != nil {
 		log.G(ctx).WithError(err).Errorf("failed to check filesystem")
+		if errors.Is(err, snapshot.ErrLayerNotRegistered) {
+			return &pb.Response{}, status.Error(codes.NotFound, err.Error())
+		}
 		return &pb.Response{}, err
 	}
 

@@ -26,7 +26,9 @@ import (
 	"github.com/containerd/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/containerd/stargz-snapshotter/fusemanager/api"
 	"github.com/containerd/stargz-snapshotter/snapshot"
@@ -120,6 +122,9 @@ func (cli *Client) Check(ctx context.Context, mountpoint string, labels map[stri
 	_, err := cli.client.Check(ctx, req)
 	if err != nil {
 		log.G(ctx).WithError(err).Errorf("failed to call Check")
+		if status.Code(err) == codes.NotFound {
+			return fmt.Errorf("%w: %v", snapshot.ErrLayerNotRegistered, err)
+		}
 		return err
 	}
 

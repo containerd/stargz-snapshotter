@@ -9,3 +9,5 @@ insecure = true
 direct = true
 [snapshotter]
 allow_invalid_mounts_on_restart = true
+# Set to true to avoid registry access while restoring snapshots at startup.
+# lazy_restore_on_restart = true

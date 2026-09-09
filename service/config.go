@@ -70,4 +70,8 @@ type SnapshotterConfig struct {
 	// NOTE: User needs to manually remove the snapshots from containerd's metadata store using
 	//       ctr (e.g. `ctr snapshot rm`).
 	AllowInvalidMountsOnRestart bool `toml:"allow_invalid_mounts_on_restart" json:"allow_invalid_mounts_on_restart"`
+
+	// LazyRestoreOnRestart restores remote snapshot directories at startup but
+	// defers remote resolution and FUSE mounting until a snapshot is first used.
+	LazyRestoreOnRestart bool `toml:"lazy_restore_on_restart" json:"lazy_restore_on_restart"`
 }
