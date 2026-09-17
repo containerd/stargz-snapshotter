@@ -119,6 +119,13 @@ address = "/run/containerd-stargz-grpc/fuse-manager.sock"
 path = "/usr/local/bin/stargz-fuse-manager"
 ```
 
+If you run the snapshotter under systemd, the unit must set `KillMode=process` (as the
+shipped [`stargz-snapshotter.service`](../script/config/etc/systemd/system/stargz-snapshotter.service)
+does). With the default `KillMode=control-group`, systemd signals every process in the
+service's control group on `stop`/`restart`, including the detached fuse manager process,
+which unmounts all snapshots just like a plain snapshotter restart would. This defeats the
+purpose of enabling `fuse_manager`.
+
 ## Killing and restarting Stargz Snapshotter
 
 Stargz Snapshotter works as a FUSE server for the snapshots.
