@@ -119,13 +119,6 @@ address = "/run/containerd-stargz-grpc/fuse-manager.sock"
 path = "/usr/local/bin/stargz-fuse-manager"
 ```
 
-If you run the snapshotter under systemd, the unit must set `KillMode=process` (as the
-shipped [`stargz-snapshotter.service`](../script/config/etc/systemd/system/stargz-snapshotter.service)
-does). With the default `KillMode=control-group`, systemd signals every process in the
-service's control group on `stop`/`restart`, including the detached fuse manager process,
-which unmounts all snapshots just like a plain snapshotter restart would. This defeats the
-purpose of enabling `fuse_manager`.
-
 ## Killing and restarting Stargz Snapshotter
 
 Stargz Snapshotter works as a FUSE server for the snapshots.
@@ -145,6 +138,10 @@ If the snapshotter fails to mount one of the snapshots (e.g. because of lazy pul
 
 Killing containerd-stargz-grpc using non-SIGINT signal (e.g. using SIGTERM) doesn't affect the snapshot mounts because the FUSE manager process detached from containerd-stargz-grpc keeps on serving FUSE mounts to the kernel.
 This is useful when you reload the updated config TOML to Stargz Snapshotter without unmounting existing snapshots.
+
+With systemd's default `KillMode=control-group`, `systemctl stop`/`restart` also sends SIGTERM to the detached FUSE manager, which makes all snapshot mounts unavailable.
+The shipped [`stargz-snapshotter.service`](../script/config/etc/systemd/system/stargz-snapshotter.service) sets `KillMode=process` so only containerd-stargz-grpc is signalled; if you use your own unit, set it too.
+Note that `systemctl stop` then leaves the FUSE manager running, so use the SIGINT procedure below for a full shutdown.
 
 FUSE manager serves FUSE mounts of the snapshots so if you kill this process, all snapshot mounts will be unavailable.
 When stopping FUSE manager for upgrading the binary or restarting the node, you can use SIGINT signal to trigger the graceful exit as shown in the following steps.
