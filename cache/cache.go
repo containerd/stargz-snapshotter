@@ -314,7 +314,15 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 				}
 			}
 
-			return os.Rename(wip.Name(), c)
+			if err := os.Rename(wip.Name(), c); err != nil {
+				var errs []error
+				if err := os.Remove(wip.Name()); err != nil {
+					errs = append(errs, err)
+				}
+				errs = append(errs, fmt.Errorf("failed to commit cache file %q: %w", c, err))
+				return errors.Join(errs...)
+			}
+			return nil
 		},
 		abortFunc: func() error {
 			return os.Remove(wip.Name())
@@ -329,6 +337,9 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 	}
 
 	b := dc.bufPool.Get().(*bytes.Buffer)
+	// Set once commit has passed b to the memory cache or back to the pool,
+	// after which abort must not touch b or the file writer.
+	var handedOff bool
 	memW := &writer{
 		WriteCloser: nopWriteCloser(io.Writer(b)),
 		commitFunc: func() error {
@@ -336,6 +347,7 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 				w.Close()
 				return fmt.Errorf("cache is already closed")
 			}
+			handedOff = true
 			cached, done, added := dc.cache.Add(key, b)
 			if !added {
 				dc.putBuffer(b) // already exists in the cache. abort it.
@@ -361,6 +373,9 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 			return nil
 		},
 		abortFunc: func() error {
+			if handedOff {
+				return nil
+			}
 			defer w.Close()
 			defer w.Abort()
 			dc.putBuffer(b) // abort it.
