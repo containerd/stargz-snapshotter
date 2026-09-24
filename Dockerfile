@@ -13,19 +13,19 @@
 #   limitations under the License.
 
 ARG CONTAINERD_VERSION=v2.4.0
-ARG RUNC_VERSION=v1.4.2
+ARG RUNC_VERSION=v1.5.1
 ARG CNI_PLUGINS_VERSION=v1.9.1
-ARG NERDCTL_VERSION=2.2.2
+ARG NERDCTL_VERSION=2.4.0
 
-ARG PODMAN_VERSION=v5.8.1
-ARG CRIO_VERSION=v1.35.2
+ARG PODMAN_VERSION=v6.1.2
+ARG CRIO_VERSION=v1.37.1
 ARG CONMON_VERSION=v2.2.1
 ARG COMMON_VERSION=v0.64.1
 ARG CRIO_TEST_PAUSE_IMAGE_NAME=registry.k8s.io/pause:3.6
-ARG NETAVARK_VERSION=v1.17.2
+ARG NETAVARK_VERSION=v2.1.0
+ARG PASST_VERSION=588b545dae741bec6fd7622a33c7852c06d72a59
 
-ARG CONTAINERIZED_SYSTEMD_VERSION=v0.1.1
-ARG SLIRP4NETNS_VERSION=v1.3.3
+ARG CONTAINERIZED_SYSTEMD_VERSION=v0.1.2
 ARG PAUSE_IMAGE_NAME_TEST=registry.k8s.io/pause:3.10.1
 ARG EXTRA_PAUSE_IMAGE_NAME_TEST=registry.k8s.io/pause:3.10.2
 
@@ -65,11 +65,9 @@ RUN git clone -b ${CONTAINERD_VERSION} --depth 1 \
 # Build runc
 FROM golang:1.26-bookworm AS runc-dev
 ARG RUNC_VERSION
-RUN apt-get update -y && apt-get install -y libseccomp-dev && \
-    git clone -b ${RUNC_VERSION} --depth 1 \
-              https://github.com/opencontainers/runc $GOPATH/src/github.com/opencontainers/runc && \
-    cd $GOPATH/src/github.com/opencontainers/runc && \
-    make && make install PREFIX=/out/
+RUN mkdir /out && \
+    curl -sSL --output /out/runc https://github.com/opencontainers/runc/releases/download/${RUNC_VERSION}/runc.${TARGETARCH:-amd64} && \
+    chmod 755 /out/runc
 
 # Build stargz snapshotter
 FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS snapshotter-dev
@@ -144,7 +142,7 @@ RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3 && \
     tar zxvf /tmp/nerdctl.tgz -C /usr/local/bin && \
     rm -f /tmp/nerdctl.tgz
 COPY --from=containerd-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
-COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
+COPY --from=runc-dev /out/* /usr/local/sbin/
 
 # Base image which contains containerd with stargz snapshotter
 FROM containerd-base AS snapshotter-base
@@ -160,7 +158,7 @@ RUN apt-get update -y && apt-get --no-install-recommends install -y fuse3 && \
     tar zxvf /tmp/nerdctl.tgz -C /usr/local/bin && \
     rm -f /tmp/nerdctl.tgz
 COPY --from=containerd-snapshotter-dev /out/bin/containerd /out/bin/containerd-shim-runc-v2 /usr/local/bin/
-COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
+COPY --from=runc-dev /out/* /usr/local/sbin/
 COPY --from=snapshotter-dev /out/ctr-remote /usr/local/bin/
 RUN ln -s /usr/local/bin/ctr-remote /usr/local/bin/ctr
 
@@ -170,8 +168,9 @@ ARG TARGETARCH
 ARG CNI_PLUGINS_VERSION
 ARG PODMAN_VERSION
 ARG NETAVARK_VERSION
+ARG PASST_VERSION
 RUN apt-get update -y && DEBIAN_FRONTEND=noninteractive apt-get install -y fuse3 libgpgme-dev \
-                         iptables libyajl-dev curl ca-certificates libglib2.0 libseccomp-dev wget && \
+                         iptables libyajl-dev curl ca-certificates libglib2.0 libseccomp-dev wget git make gcc && \
     # Make CNI plugins manipulate iptables instead of nftables
     # as this test runs in a Docker container that network is configured with iptables.
     # c.f. https://github.com/moby/moby/issues/26824
@@ -187,8 +186,14 @@ RUN mkdir /tmp/netavark ; \
     mv /tmp/netavark/netavark /usr/local/libexec/podman/ ; \
     chmod 0755 /usr/local/libexec/podman/netavark
 
+RUN git clone https://passt.top/passt && \
+    cd passt && \
+    git checkout "${PASST_VERSION}" && \
+    make && \
+    make install
+
 COPY --from=podman-dev /out/bin/* /usr/local/bin/
-COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
+COPY --from=runc-dev /out/* /usr/local/sbin/
 COPY --from=conmon-dev /out/bin/* /usr/local/bin/
 COPY --from=containers-common-dev /out/seccomp.json /usr/share/containers/
 COPY --from=stargz-store-dev /out/* /usr/local/bin/
@@ -197,13 +202,10 @@ COPY --from=stargz-store-dev /out/* /usr/local/bin/
 # This takes the same approach as nerdctl CI: https://github.com/containerd/nerdctl/blob/6341c8320984f7148b92dd33472d8eaca6dba756/Dockerfile#L302-L326
 FROM podman-base AS podman-rootless
 ARG CONTAINERIZED_SYSTEMD_VERSION
-ARG SLIRP4NETNS_VERSION
 RUN apt-get update -y && apt-get install -y \
                          systemd systemd-sysv dbus dbus-user-session \
                          openssh-server openssh-client uidmap
-RUN curl -o /usr/local/bin/slirp4netns --fail -L https://github.com/rootless-containers/slirp4netns/releases/download/${SLIRP4NETNS_VERSION}/slirp4netns-$(uname -m) && \
-    chmod +x /usr/local/bin/slirp4netns && \
-    curl -L -o /docker-entrypoint.sh https://raw.githubusercontent.com/AkihiroSuda/containerized-systemd/${CONTAINERIZED_SYSTEMD_VERSION}/docker-entrypoint.sh && \
+RUN curl -L -o /docker-entrypoint.sh https://raw.githubusercontent.com/AkihiroSuda/containerized-systemd/${CONTAINERIZED_SYSTEMD_VERSION}/docker-entrypoint.sh && \
     chmod +x /docker-entrypoint.sh && \
     curl -L -o /etc/containers/policy.json https://raw.githubusercontent.com/containers/skopeo/master/default-policy.json
 # storage.conf plugs Stargz Store into Podman as an Additional Layer Store
@@ -273,7 +275,7 @@ RUN apt-get update -y && apt-get install --no-install-recommends -y \
 COPY --from=stargz-store-dev /out/* /usr/local/bin/
 COPY --from=cri-o-dev /out/bin/* /usr/local/bin/
 COPY --from=cri-o-dev /out/crio.service /etc/systemd/system/
-COPY --from=runc-dev /out/sbin/* /usr/local/sbin/
+COPY --from=runc-dev /out/* /usr/local/sbin/
 COPY --from=conmon-dev /out/bin/* /usr/local/bin/
 COPY --from=containers-common-dev /out/seccomp.json /usr/share/containers/
 COPY ./script/config-cri-o/ /
