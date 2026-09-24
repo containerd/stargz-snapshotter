@@ -110,7 +110,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		return nil, err
 	}
 	blobConfig := &r.blobConfig
-	return makeBlob(f,
+	b := makeBlob(f,
 		size,
 		blobConfig.ChunkSize,
 		blobConfig.PrefetchChunkSize,
@@ -118,7 +118,9 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		time.Now(),
 		time.Duration(blobConfig.ValidInterval)*time.Second,
 		r,
-		time.Duration(blobConfig.FetchTimeoutSec)*time.Second), nil
+		time.Duration(blobConfig.FetchTimeoutSec)*time.Second)
+	b.layer = desc.Digest
+	return b, nil
 }
 
 func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (f fetcher, size int64, err error) {

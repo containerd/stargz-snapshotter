@@ -39,6 +39,9 @@ const (
 	// BytesServedKey is the key for any metric related to counting bytes served as the part of specific operation.
 	BytesServedKey = "bytes_served"
 
+	// CacheWritesSkippedKey is the key for the count of fetched chunks served without being cached.
+	CacheWritesSkippedKey = "cache_writes_skipped_total"
+
 	// Keep namespace as stargz and subsystem as fs.
 	namespace = "stargz"
 	subsystem = "fs"
@@ -126,6 +129,18 @@ var (
 		},
 		[]string{"operation_type", "layer"},
 	)
+
+	// cacheWritesSkipped counts fetched chunks that were served to the reader
+	// but could not be written to the cache, per layer sha.
+	cacheWritesSkipped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      CacheWritesSkippedKey,
+			Help:      "The count of fetched chunks served without being cached because writing to the cache failed. Broken down by layer sha.",
+		},
+		[]string{"layer"},
+	)
 )
 
 var register sync.Once
@@ -153,6 +168,7 @@ func Register(l log.Level) {
 		prometheus.MustRegister(operationLatencyMicroseconds)
 		prometheus.MustRegister(operationCount)
 		prometheus.MustRegister(bytesCount)
+		prometheus.MustRegister(cacheWritesSkipped)
 	})
 }
 
@@ -182,6 +198,11 @@ func IncOperationCount(operation string, layer digest.Digest) {
 // AddBytesCount wraps the labels attachment as well as calling Add into a single method.
 func AddBytesCount(operation string, layer digest.Digest, bytes int64) {
 	bytesCount.WithLabelValues(operation, layer.String()).Add(float64(bytes))
+}
+
+// IncCacheWriteSkipped counts a fetched chunk that was served without being cached.
+func IncCacheWriteSkipped(layer digest.Digest) {
+	cacheWritesSkipped.WithLabelValues(layer.String()).Inc()
 }
 
 // WriteLatencyLogValue wraps writing the log info record for latency in milliseconds. The log record breaks down by operation and layer digest.
