@@ -320,7 +320,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26'
-        check-latest: true
+          check-latest: true
       - uses: actions/checkout@v6
         with:
           path: src/github.com/containerd/stargz-snapshotter
