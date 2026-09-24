@@ -17,18 +17,19 @@
 package commands
 
 import (
+	gocontext "context"
 	"fmt"
 	"os"
 
 	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/service"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // FanotifyCommand notifies filesystem event under the specified directory.
 var FanotifyCommand = &cli.Command{
 	Name:   "fanotify",
 	Hidden: true,
-	Action: func(context *cli.Context) error {
+	Action: func(_ gocontext.Context, context *cli.Command) error {
 		target := context.Args().Get(0)
 		if target == "" {
 			return fmt.Errorf("target must be specified")

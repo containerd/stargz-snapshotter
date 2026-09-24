@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +28,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // GetTOCDigestCommand outputs TOC info of a layer
@@ -47,13 +48,13 @@ var GetTOCDigestCommand = &cli.Command{
 			Usage: "dump TOC instead of digest. Note that the dumped TOC might be formatted with indents so may have different digest against the original in the layer",
 		},
 	},
-	Action: func(clicontext *cli.Context) error {
+	Action: func(ctx context.Context, clicontext *cli.Command) error {
 		layerDgstStr := clicontext.Args().Get(0)
 		if layerDgstStr == "" {
 			return errors.New("layer digest need to be specified")
 		}
 
-		client, ctx, cancel, err := commands.NewClient(clicontext)
+		client, ctx, cancel, err := commands.NewClient(ctx, clicontext)
 		if err != nil {
 			return err
 		}
