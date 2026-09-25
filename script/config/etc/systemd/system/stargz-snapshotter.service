@@ -9,6 +9,12 @@ Environment=HOME=/root
 ExecStart=/usr/local/bin/containerd-stargz-grpc --log-level=debug --config=/etc/containerd-stargz-grpc/config.toml
 Restart=always
 RestartSec=1
+# KillMode=process ensures systemd only signals the main containerd-stargz-grpc
+# process on stop/restart. The default KillMode=control-group would also signal
+# the detached fuse manager process (see [fuse_manager] in the config), which
+# treats SIGTERM the same as SIGINT and unmounts all snapshots, defeating the
+# purpose of enabling fuse_manager.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target
