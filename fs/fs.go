@@ -377,7 +377,7 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string, labels map[s
 	fs.layerMu.Unlock()
 	if l == nil {
 		log.G(ctx).Debug("layer not registered")
-		return fmt.Errorf("layer not registered")
+		return snapshot.ErrLayerNotRegistered
 	}
 
 	if l.Info().FetchedSize < l.Info().Size {

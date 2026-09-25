@@ -18,6 +18,7 @@ package snapshot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,6 +34,7 @@ import (
 	"github.com/containerd/log"
 	"github.com/moby/sys/mountinfo"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -52,6 +54,11 @@ const (
 	prepareSucceeded     = "true"
 	prepareFailed        = "false"
 )
+
+// ErrLayerNotRegistered indicates that a remote layer has no live filesystem
+// registration. This can happen after snapshotter or node restart when remote
+// snapshot restoration was skipped or failed.
+var ErrLayerNotRegistered = errors.New("layer not registered")
 
 // FileSystem is a backing filesystem abstraction.
 //
@@ -73,6 +80,7 @@ type SnapshotterConfig struct {
 	asyncRemove                 bool
 	noRestore                   bool
 	allowInvalidMountsOnRestart bool
+	lazyRestoreOnRestart        bool
 }
 
 // Opt is an option to configure the remote snapshotter
@@ -97,6 +105,13 @@ func AllowInvalidMountsOnRestart(config *SnapshotterConfig) error {
 	return nil
 }
 
+// LazyRestoreOnRestart restores remote snapshot directories at startup but
+// defers creating their FUSE mounts until the snapshots are used.
+func LazyRestoreOnRestart(config *SnapshotterConfig) error {
+	config.lazyRestoreOnRestart = true
+	return nil
+}
+
 type snapshotter struct {
 	root        string
 	ms          *storage.MetaStore
@@ -107,6 +122,9 @@ type snapshotter struct {
 	userxattr                   bool // whether to enable "userxattr" mount option
 	noRestore                   bool
 	allowInvalidMountsOnRestart bool
+	lazyRestoreOnRestart        bool
+
+	remountGroup singleflight.Group
 }
 
 // NewSnapshotter returns a Snapshotter which can use unpacked remote layers
@@ -157,6 +175,7 @@ func NewSnapshotter(ctx context.Context, root string, targetFs FileSystem, opts 
 		userxattr:                   userxattr,
 		noRestore:                   config.noRestore,
 		allowInvalidMountsOnRestart: config.allowInvalidMountsOnRestart,
+		lazyRestoreOnRestart:        config.lazyRestoreOnRestart,
 	}
 
 	if err := o.restoreRemoteSnapshot(ctx); err != nil {
@@ -602,8 +621,10 @@ func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, 
 
 func (o *snapshotter) mounts(ctx context.Context, s storage.Snapshot, checkKey string) ([]mount.Mount, error) {
 	// Make sure that all layers lower than the target layer are available
-	if checkKey != "" && !o.checkAvailability(ctx, checkKey) {
-		return nil, fmt.Errorf("layer %q unavailable: %w", s.ID, errdefs.ErrUnavailable)
+	if checkKey != "" {
+		if err := o.checkAvailability(ctx, checkKey); err != nil {
+			return nil, errdefs.ErrUnavailable.WithMessage(fmt.Sprintf("layer %q unavailable: %v", s.ID, err))
+		}
 	}
 
 	if len(s.ParentIDs) == 0 {
@@ -703,45 +724,114 @@ func (o *snapshotter) prepareRemoteSnapshot(ctx context.Context, key string, lab
 	return o.fs.Mount(ctx, mountpoint, labels)
 }
 
-// checkAvailability checks avaiability of the specified layer and all lower
+// checkAvailability checks availability of the specified layer and all lower
 // layers using filesystem's checking functionality.
-func (o *snapshotter) checkAvailability(ctx context.Context, key string) bool {
+func (o *snapshotter) checkAvailability(ctx context.Context, key string) error {
 	log.G(ctx).WithField("key", key).Debug("checking layer availability")
 
+	layers, err := o.remoteLayers(ctx, key)
+	if err != nil {
+		log.G(ctx).WithError(err).Warn("failed to collect remote layers")
+		return err
+	}
+
+	eg, egCtx := errgroup.WithContext(ctx)
+	for _, layer := range layers {
+		layer := layer
+		eg.Go(func() error {
+			lCtx := log.WithLogger(egCtx, log.G(egCtx).WithField("mount-point", layer.mountpoint))
+			log.G(lCtx).Debug("checking mount point")
+			if err := o.ensureLayerAvailable(lCtx, layer.mountpoint, layer.labels); err != nil {
+				log.G(lCtx).WithError(err).Warn("layer is unavailable")
+				return err
+			}
+			return nil
+		})
+	}
+	return eg.Wait()
+}
+
+type remoteLayer struct {
+	mountpoint string
+	labels     map[string]string
+}
+
+// remoteLayers copies all information needed for availability checks out of
+// the metadata transaction so checks and remounts never hold it during network
+// operations.
+func (o *snapshotter) remoteLayers(ctx context.Context, key string) ([]remoteLayer, error) {
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
-		log.G(ctx).WithError(err).Warn("failed to get transaction")
-		return false
+		return nil, err
 	}
 	defer t.Rollback()
 
-	eg, egCtx := errgroup.WithContext(ctx)
+	var layers []remoteLayer
 	for cKey := key; cKey != ""; {
 		id, info, _, err := storage.GetInfo(ctx, cKey)
 		if err != nil {
-			log.G(ctx).WithError(err).Warnf("failed to get info of %q", cKey)
-			return false
+			return nil, fmt.Errorf("failed to get info of %q: %w", cKey, err)
 		}
-		mp := o.upperPath(id)
-		lCtx := log.WithLogger(ctx, log.G(ctx).WithField("mount-point", mp))
 		if _, ok := info.Labels[remoteLabel]; ok {
-			eg.Go(func() error {
-				log.G(lCtx).Debug("checking mount point")
-				if err := o.fs.Check(egCtx, mp, info.Labels); err != nil {
-					log.G(lCtx).WithError(err).Warn("layer is unavailable")
-					return err
-				}
-				return nil
+			layers = append(layers, remoteLayer{
+				mountpoint: o.upperPath(id),
+				labels:     cloneLabels(info.Labels),
 			})
-		} else {
-			log.G(lCtx).Debug("layer is normal snapshot(overlayfs)")
 		}
 		cKey = info.Parent
 	}
-	if err := eg.Wait(); err != nil {
-		return false
+	return layers, nil
+}
+
+func cloneLabels(labels map[string]string) map[string]string {
+	cloned := make(map[string]string, len(labels))
+	for key, value := range labels {
+		cloned[key] = value
 	}
-	return true
+	return cloned
+}
+
+func (o *snapshotter) ensureLayerAvailable(ctx context.Context, mountpoint string, labels map[string]string) error {
+	err := o.fs.Check(ctx, mountpoint, labels)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, ErrLayerNotRegistered) || !o.lazyRestoreOnRestart {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// A remount is shared by all callers for this mountpoint, so it must not be
+	// canceled when one caller goes away. Each caller still observes its own
+	// cancellation while waiting for the shared result below.
+	remountCtx := context.WithoutCancel(ctx)
+	resultCh := o.remountGroup.DoChan(mountpoint, func() (any, error) {
+		// Another caller may have completed the mount while this caller waited.
+		if err := o.fs.Check(remountCtx, mountpoint, labels); err == nil {
+			return nil, nil
+		} else if !errors.Is(err, ErrLayerNotRegistered) {
+			return nil, err
+		}
+
+		log.G(remountCtx).Info("remounting remote layer on demand")
+		if err := o.fs.Mount(remountCtx, mountpoint, labels); err != nil {
+			return nil, fmt.Errorf("failed to remount remote layer: %w", err)
+		}
+
+		return nil, nil
+	})
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case result := <-resultCh:
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return result.Err
+	}
 }
 
 func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
@@ -791,6 +881,10 @@ func (o *snapshotter) restoreRemoteSnapshot(ctx context.Context) error {
 			return nil
 		}(); err != nil {
 			return fmt.Errorf("failed to create remote snapshot directory: %s: %w", info.Name, err)
+		}
+		if o.lazyRestoreOnRestart {
+			log.G(ctx).WithField("snapshot", info.Name).Debug("deferred remote snapshot mount until first use")
+			continue
 		}
 		if err := o.prepareRemoteSnapshot(ctx, info.Name, info.Labels); err != nil {
 			if o.allowInvalidMountsOnRestart {

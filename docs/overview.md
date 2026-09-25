@@ -128,6 +128,9 @@ When you stop Stargz Sanpshotter on the node, it takes the following behaviour d
 
 killing containerd-stargz-grpc will result in unmounting all snapshot mounts managed by Stargz Snapshotter.
 When containerd-stargz-grpc is restarted, all those snapshots are mounted again by lazy pulling all layers.
+If `lazy_restore_on_restart = true`, containerd-stargz-grpc restores the local snapshot directories but doesn't resolve remote blobs or create FUSE mounts at startup. The first `Prepare`, `View`, or `Mounts` request that uses a remote snapshot mounts it on demand. If the registry is still unavailable, that request fails with an unavailable error while the snapshotter keeps running; a later request retries the mount. Metadata-only operations such as `Stat`, `Usage`, and `Walk` don't trigger an on-demand mount.
+When `lazy_restore_on_restart` and `allow_invalid_mounts_on_restart` are both enabled, lazy restoration takes precedence during startup, so `allow_invalid_mounts_on_restart` isn't consulted unless lazy restoration is disabled.
+
 If the snapshotter fails to mount one of the snapshots (e.g. because of lazy pulling failure) during this step, the behaviour differs depending on `allow_invalid_mounts_on_restart` flag in the config TOML.
 
 - `allow_invalid_mounts_on_restart = true`: containerd-stargz-grpc leaves the failed snapshots as empty directories. The user needs to manually remove those snapshot via containerd (e.g. using `ctr snapshot rm` command). The name of those snapshots can be seen in the log with `failed to restore remote snapshot` message.
@@ -147,6 +150,8 @@ When stopping FUSE manager for upgrading the binary or restarting the node, you 
 3. Kill the FUSE manager process (`stargz-fuse-manager`)
 4. Restart the containerd-stargz-grpc process. This restores all snapshot mounts by lazy pulling them. `allow_invalid_mounts_on_restart` (described in the above) can still be used for controlling the behaviour of the error cases.
 5. Restart the containers.
+
+If `lazy_restore_on_restart` is enabled, step 4 restores only the local snapshot directories. Remote FUSE mounts are deferred until the snapshots are first used.
 
 ### Unexpected restart handling
 

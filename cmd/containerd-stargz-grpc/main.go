@@ -197,6 +197,9 @@ func main() {
 			log.G(ctx).WithError(err).Fatalf("failed to configure fusemanager")
 		}
 		flags := []snbase.Opt{snbase.AsynchronousRemove}
+		if config.LazyRestoreOnRestart {
+			flags = append(flags, snbase.LazyRestoreOnRestart)
+		}
 		// "managerNewlyStarted" being true indicates that the FUSE manager is newly started. To
 		// fully recover the snapshotter and the FUSE manager's state, we need to restore
 		// all snapshot mounts. If managerNewlyStarted is false, the existing FUSE manager maintains
