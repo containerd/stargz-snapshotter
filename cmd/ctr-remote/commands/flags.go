@@ -41,7 +41,7 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/rs/xid"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"tags.cncf.io/container-device-interface/pkg/cdi"
 )
 
@@ -147,7 +147,7 @@ var samplerFlags = []cli.Flag{
 	},
 }
 
-func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs string) (opts []oci.SpecOpts, done func() error, rErr error) {
+func getSpecOpts(clicontext *cli.Command) func(image containerd.Image, rootfs string) (opts []oci.SpecOpts, done func() error, rErr error) {
 	return func(image containerd.Image, rootfs string) (opts []oci.SpecOpts, done func() error, rErr error) {
 		var cleanups []func() error
 		done = func() error {
@@ -244,7 +244,7 @@ func getSpecOpts(clicontext *cli.Context) func(image containerd.Image, rootfs st
 	}
 }
 
-func withEntrypointArgs(clicontext *cli.Context, image containerd.Image) (oci.SpecOpts, error) {
+func withEntrypointArgs(clicontext *cli.Command, image containerd.Image) (oci.SpecOpts, error) {
 	var eFlag []string
 	if eStr := clicontext.String("entrypoint"); eStr != "" {
 		if err := json.Unmarshal([]byte(eStr), &eFlag); err != nil {
@@ -287,7 +287,7 @@ func withEntrypointArgs(clicontext *cli.Context, image containerd.Image) (oci.Sp
 	}, nil
 }
 
-func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, rErr error) {
+func withCNI(clicontext *cli.Command) (specOpt oci.SpecOpts, done func() error, rErr error) {
 	var cleanups []func() error
 	done = func() error {
 		var errs []error
@@ -347,7 +347,7 @@ func withCNI(clicontext *cli.Context) (specOpt oci.SpecOpts, done func() error, 
 	}), done, nil
 }
 
-func withResolveConfig(clicontext *cli.Context) (specOpt oci.SpecOpts, cleanup func() error, rErr error) {
+func withResolveConfig(clicontext *cli.Command) (specOpt oci.SpecOpts, cleanup func() error, rErr error) {
 	defer func() {
 		if rErr != nil {
 			if err := cleanup(); err != nil {
@@ -483,7 +483,7 @@ func parseMountFlag(m string) (runtimespec.Mount, error) {
 	return mount, nil
 }
 
-func parseResolveFlag(clicontext *cli.Context) (hosts []string, nameservers []string, searches []string, dnsopts []string, _ error) {
+func parseResolveFlag(clicontext *cli.Command) (hosts []string, nameservers []string, searches []string, dnsopts []string, _ error) {
 	if nFlag := clicontext.String("dns-nameservers"); nFlag != "" {
 		fields, err := csv.NewReader(strings.NewReader(nFlag)).Read()
 		if err != nil {
