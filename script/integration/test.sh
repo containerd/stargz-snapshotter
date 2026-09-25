@@ -19,6 +19,9 @@ set -euo pipefail
 CONTEXT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/"
 REPO="${CONTEXT}../../"
 
+# stargzify relies on compress/gzip for emitting footer, which doesn't work since Go 1.27 (see #2330)
+STARGZIFY_GO_VERSION="1.26"
+
 INTEGRATION_BASE_IMAGE_NAME="integration-image-base"
 INTEGRATION_TEST_IMAGE_NAME="integration-image-test"
 REGISTRY_HOST=registry-integration.test
@@ -98,16 +101,20 @@ cp -R "${CONTEXT}/containerd" \
    "${REPO}/script/util/utils.sh" \
    "${TMP_CONTEXT}"
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
+FROM golang:${STARGZIFY_GO_VERSION}-bookworm AS stargzify-base
+RUN mkdir /out && \
+    GOBIN=/out/ go install github.com/google/crfs/stargz/stargzify@71d77da419c90be7b05d12e59945ac7a8c94a543
+
 FROM ${INTEGRATION_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
     apt-get install -y iptables jq netcat-openbsd && \
-    go install github.com/google/crfs/stargz/stargzify@71d77da419c90be7b05d12e59945ac7a8c94a543 && \
     wget https://dist.ipfs.io/go-ipfs/${IPFS_VERSION}/go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
     tar -xvzf go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
     cd go-ipfs && \
     bash install.sh
 
+COPY --from=stargzify-base /out/stargzify /usr/local/bin/
 COPY ./containerd/config.containerd.toml /etc/containerd/config.toml
 COPY ./containerd/config.stargz.toml /etc/containerd-stargz-grpc/config.toml
 COPY ./containerd/entrypoint.sh ./utils.sh /

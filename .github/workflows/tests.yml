@@ -38,12 +38,12 @@ jobs:
         fetch-depth: '0'
     - uses: actions/setup-go@v7
       with:
-        go-version: '1.26'
+        go-version: '1.27'
         check-latest: true
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v9.3.0
       with:
-        version: v2.11
+        version: v2.14
         args: --verbose --timeout=10m
         working-directory: ${{ matrix.targetdir }}
 
@@ -242,7 +242,7 @@ jobs:
     steps:
     - uses: actions/setup-go@v7
       with:
-        go-version: '1.26'
+        go-version: '1.27'
         check-latest: true
     - name: Install k3d
       run: |
@@ -273,7 +273,7 @@ jobs:
     steps:
     - uses: actions/setup-go@v7
       with:
-        go-version: '1.26'
+        go-version: '1.27'
         check-latest: true
     - name: Install k3d
       run: |
@@ -319,7 +319,7 @@ jobs:
     steps:
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27'
           check-latest: true
       - uses: actions/checkout@v7
         with:
