@@ -17,6 +17,7 @@
 package commands
 
 import (
+	gocontext "context"
 	"errors"
 	"fmt"
 
@@ -27,7 +28,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/ipfs"
 	estargzconvert "github.com/containerd/stargz-snapshotter/nativeconverter/estargz"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // IPFSPushCommand pushes an image to IPFS
@@ -40,7 +41,6 @@ var IPFSPushCommand = &cli.Command{
 		&cli.StringSliceFlag{
 			Name:  "platform",
 			Usage: "Add content for a specific platform",
-			Value: &cli.StringSlice{},
 		},
 		&cli.BoolFlag{
 			Name:  "all-platforms",
@@ -52,7 +52,7 @@ var IPFSPushCommand = &cli.Command{
 			Usage: "Convert the image into eStargz",
 		},
 	},
-	Action: func(context *cli.Context) error {
+	Action: func(ctx gocontext.Context, context *cli.Command) error {
 		srcRef := context.Args().Get(0)
 		if srcRef == "" {
 			return errors.New("image need to be specified")
@@ -77,7 +77,7 @@ var IPFSPushCommand = &cli.Command{
 			}
 		}
 
-		client, ctx, cancel, err := commands.NewClient(context)
+		client, ctx, cancel, err := commands.NewClient(ctx, context)
 		if err != nil {
 			return err
 		}

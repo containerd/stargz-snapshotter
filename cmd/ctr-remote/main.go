@@ -17,12 +17,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/containerd/containerd/v2/cmd/ctr/app"
 	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/commands"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func main() {
@@ -42,10 +43,10 @@ func main() {
 			}
 
 			// First, replace duplicated subcommands
-			for j := range app.Commands[i].Subcommands {
+			for j := range app.Commands[i].Commands {
 				for name, subcmd := range sc {
-					if name == app.Commands[i].Subcommands[j].Name {
-						app.Commands[i].Subcommands[j] = subcmd
+					if name == app.Commands[i].Commands[j].Name {
+						app.Commands[i].Commands[j] = subcmd
 						delete(sc, name)
 					}
 				}
@@ -53,14 +54,29 @@ func main() {
 
 			// Next, append all new sub commands
 			for _, subcmd := range sc {
-				app.Commands[i].Subcommands = append(app.Commands[i].Subcommands, subcmd)
+				app.Commands[i].Commands = append(app.Commands[i].Commands, subcmd)
 			}
 			break
 		}
 	}
+	for i := range app.Commands {
+		if app.Commands[i].Name == "run" {
+			n := 2
+			app.Commands[i].StopOnNthArg = &n
+			break
+		}
+	}
 	app.Commands = append(app.Commands, commands.FanotifyCommand)
-	if err := app.Run(os.Args); err != nil {
+	disableSliceFlagSeparator(app)
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "ctr-remote: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func disableSliceFlagSeparator(cmd *cli.Command) {
+	cmd.DisableSliceFlagSeparator = true
+	for _, c := range cmd.Commands {
+		disableSliceFlagSeparator(c)
 	}
 }

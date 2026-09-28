@@ -50,7 +50,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 const defaultPeriod = 10
@@ -68,7 +68,6 @@ var OptimizeCommand = &cli.Command{
 		&cli.StringSliceFlag{
 			Name:  "platform",
 			Usage: "Pull content from a specific platform",
-			Value: &cli.StringSlice{},
 		},
 		&cli.BoolFlag{
 			Name:  "all-platforms",
@@ -138,7 +137,7 @@ var OptimizeCommand = &cli.Command{
 			Usage: "path to a text file listing files/patterns to prefetch (one per line; supports glob *, ?, [], and **)",
 		},
 	}, samplerFlags...),
-	Action: func(clicontext *cli.Context) error {
+	Action: func(ctx context.Context, clicontext *cli.Command) error {
 		convertOpts := []converter.Opt{}
 		srcRef := clicontext.Args().Get(0)
 		targetRef := clicontext.Args().Get(1)
@@ -176,7 +175,7 @@ var OptimizeCommand = &cli.Command{
 			return errors.New("option --zstdchunked must be used in conjunction with --oci")
 		}
 
-		client, ctx, cancel, err := commands.NewClient(clicontext)
+		client, ctx, cancel, err := commands.NewClient(ctx, clicontext)
 		if err != nil {
 			return err
 		}
@@ -259,9 +258,9 @@ var OptimizeCommand = &cli.Command{
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(clicontext.App.Writer, "extra image:", finimg.Name)
+			fmt.Fprintln(clicontext.Root().Writer, "extra image:", finimg.Name)
 		}
-		fmt.Fprintln(clicontext.App.Writer, newImg.Target.Digest.String())
+		fmt.Fprintln(clicontext.Root().Writer, newImg.Target.Digest.String())
 		return nil
 	},
 }
@@ -305,7 +304,7 @@ func readPrefetchList(filePath string) ([]string, error) {
 }
 
 func buildLayerOptsFromRecord(
-	ctx context.Context, clicontext *cli.Context, client *containerd.Client,
+	ctx context.Context, clicontext *cli.Command, client *containerd.Client,
 	srcRef string, recordOut digest.Digest) (map[digest.Digest][]estargz.Option,
 	func(converter.ConvertFunc) converter.ConvertFunc, error) {
 	cs := client.ContentStore()
@@ -375,7 +374,7 @@ func buildLayerOptsFromRecord(
 }
 
 func analyzePrefetchList(
-	ctx context.Context, clicontext *cli.Context, client *containerd.Client,
+	ctx context.Context, clicontext *cli.Command, client *containerd.Client,
 	srcRef string, prefetchPaths []string) (digest.Digest,
 	map[digest.Digest][]estargz.Option, func(converter.ConvertFunc) converter.ConvertFunc, error) {
 	cs := client.ContentStore()
@@ -422,7 +421,7 @@ func analyzePrefetchList(
 	return recordOut, layerOpts, wrapper, nil
 }
 
-func analyze(ctx context.Context, clicontext *cli.Context, client *containerd.Client, srcRef string) (digest.Digest, map[digest.Digest][]estargz.Option, func(converter.ConvertFunc) converter.ConvertFunc, error) {
+func analyze(ctx context.Context, clicontext *cli.Command, client *containerd.Client, srcRef string) (digest.Digest, map[digest.Digest][]estargz.Option, func(converter.ConvertFunc) converter.ConvertFunc, error) {
 	if clicontext.Bool("no-optimize") {
 		if clicontext.Bool("reuse") {
 			layerOpts, wrapper, err := buildLayerOptsFromRecord(ctx, clicontext, client, srcRef, "")

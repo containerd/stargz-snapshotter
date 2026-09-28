@@ -31,7 +31,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/ipfs"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 const (
@@ -63,7 +63,7 @@ command.
 			Usage: "Use labels defined in containerd project",
 		},
 	), commands.SnapshotterFlags...),
-	Action: func(context *cli.Context) error {
+	Action: func(ctx context.Context, context *cli.Command) error {
 		var (
 			ref    = context.Args().First()
 			config = &rPullConfig{}
@@ -72,7 +72,7 @@ command.
 			return fmt.Errorf("please provide an image reference to pull")
 		}
 
-		client, ctx, cancel, err := commands.NewClient(context)
+		client, ctx, cancel, err := commands.NewClient(ctx, context)
 		if err != nil {
 			return err
 		}

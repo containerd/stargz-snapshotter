@@ -40,7 +40,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/util/decompressutil"
 	"github.com/klauspost/compress/zstd"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 // ConvertCommand converts an image
@@ -131,14 +131,13 @@ When '--all-platforms' is given all images in a manifest list must be available.
 		&cli.StringSliceFlag{
 			Name:  "platform",
 			Usage: "Convert content for a specific platform",
-			Value: &cli.StringSlice{},
 		},
 		&cli.BoolFlag{
 			Name:  "all-platforms",
 			Usage: "Convert content for all platforms",
 		},
 	},
-	Action: func(context *cli.Context) error {
+	Action: func(ctx gocontext.Context, context *cli.Command) error {
 		var (
 			convertOpts = []converter.Opt{}
 		)
@@ -233,7 +232,7 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			convertOpts = append(convertOpts, converter.WithDockerToOCI(true))
 		}
 
-		client, ctx, cancel, err := commands.NewClient(context)
+		client, ctx, cancel, err := commands.NewClient(ctx, context)
 		if err != nil {
 			return err
 		}
@@ -271,14 +270,14 @@ When '--all-platforms' is given all images in a manifest list must be available.
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(context.App.Writer, "extra image:", finimg.Name)
+			fmt.Fprintln(context.Root().Writer, "extra image:", finimg.Name)
 		}
-		fmt.Fprintln(context.App.Writer, newImg.Target.Digest.String())
+		fmt.Fprintln(context.Root().Writer, newImg.Target.Digest.String())
 		return nil
 	},
 }
 
-func getESGZConvertOpts(context *cli.Context) ([]estargz.Option, error) {
+func getESGZConvertOpts(context *cli.Command) ([]estargz.Option, error) {
 	esgzOpts := []estargz.Option{
 		estargz.WithCompressionLevel(context.Int("estargz-compression-level")),
 		estargz.WithChunkSize(context.Int("estargz-chunk-size")),
@@ -304,7 +303,7 @@ func getESGZConvertOpts(context *cli.Context) ([]estargz.Option, error) {
 	return esgzOpts, nil
 }
 
-func getZstdchunkedConvertOpts(context *cli.Context) ([]estargz.Option, error) {
+func getZstdchunkedConvertOpts(context *cli.Command) ([]estargz.Option, error) {
 	esgzOpts := []estargz.Option{
 		estargz.WithChunkSize(context.Int("zstdchunked-chunk-size")),
 	}
