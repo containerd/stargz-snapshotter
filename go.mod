@@ -12,13 +12,13 @@ require (
 	github.com/containerd/plugin v1.1.0
 	github.com/containerd/stargz-snapshotter/estargz v0.18.2
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v29.4.3+incompatible
+	github.com/docker/cli v29.8.1+incompatible
 	github.com/docker/go-metrics v0.1.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
-	github.com/hanwen/go-fuse/v2 v2.10.1
+	github.com/hanwen/go-fuse/v2 v2.11.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
-	github.com/klauspost/compress v1.20.0
+	github.com/klauspost/compress v1.20.1
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
@@ -93,8 +93,8 @@ require (
 	github.com/sasha-s/go-deadlock v0.3.5 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/testify v1.12.1 // indirect
-	github.com/urfave/cli/v3 v3.11.0 // indirect
-	github.com/vbatts/tar-split v0.12.2 // indirect
+	github.com/urfave/cli/v3 v3.13.0 // indirect
+	github.com/vbatts/tar-split v0.12.3 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
