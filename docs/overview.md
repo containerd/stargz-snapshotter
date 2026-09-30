@@ -228,11 +228,9 @@ kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
 Please note that kubeconfig-based authentication requires additional privilege (i.e. kubeconfig to list/watch secrets) to the node.
 And this doesn't work if kubelet retrieve creds from somewhere not API server (e.g. [credential provider](https://kubernetes.io/docs/tasks/kubelet-credential-provider/kubelet-credential-provider/)).
 
-### Registry mirrors and insecure connection
+### Registry mirrors and connection settings
 
-The hostname used as a mirror host can be specified using `host` option.
-If an optional field `insecure` is `true`, snapshotter tries to connect to the registry using plain HTTP instead of HTTPS.
-`request_timeout_sec` can also be specified for each mirror to override the global setting.
+Configure alternative endpoints for a registry by adding `mirrors` entries under its hostname. Each entry requires a `host` and uses HTTPS by default.
 
 ```toml
 # Use `mirrorhost.io` as a mirrored host of `exampleregistry.io` and
@@ -248,16 +246,37 @@ host = "exampleregistry.io"
 insecure = true
 ```
 
-`header` field allows to set headers to send to the server.
+Set `insecure = true` to use plain HTTP instead of HTTPS. Use `request_timeout_sec` to override the global request timeout for a mirror.
+
+#### TLS
+
+For a registry that requires custom TLS settings, add a `tls` table to its mirror entry:
 
 ```toml
-[[resolver.host."registry2:5000".mirrors]]
-  host = "registry2:5000"
-  [resolver.host."registry2:5000".mirrors.header]
-    x-custom-2 = ["value3", "value4"]
+[[resolver.host."exampleregistry.io".mirrors]]
+host = "exampleregistry.io"
+
+  [resolver.host."exampleregistry.io".mirrors.tls]
+  ca_file = "/etc/ssl/certs/registry-ca.pem"
+  cert_file = "/etc/ssl/certs/client.pem"
+  key_file = "/etc/ssl/private/client.key"
 ```
 
-> NOTE: Headers aren't passed to the redirected location.
+`ca_file` specifies a CA bundle used in addition to the system certificate pool. To use mTLS, set both `cert_file` and `key_file` to the client certificate and its private key. The optional `insecure_skip_verify` field disables server certificate verification and should be used only for testing.
+
+#### Headers
+
+Add a `header` table to send custom headers to a mirror:
+
+```toml
+[[resolver.host."exampleregistry.io".mirrors]]
+host = "exampleregistry.io"
+
+  [resolver.host."exampleregistry.io".mirrors.header]
+  x-custom-2 = ["value3", "value4"]
+```
+
+> NOTE: Custom headers are not passed to redirected locations.
 
 ### Request timeout
 
