@@ -12,7 +12,7 @@ require (
 	github.com/containerd/plugin v1.1.0
 	github.com/containerd/stargz-snapshotter/estargz v0.18.2
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v29.8.1+incompatible
+	github.com/docker/cli v29.8.2+incompatible
 	github.com/docker/go-metrics v0.1.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
