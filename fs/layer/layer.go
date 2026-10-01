@@ -42,6 +42,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/fs/reader"
 	"github.com/containerd/stargz-snapshotter/fs/remote"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/hardlink"
 	"github.com/containerd/stargz-snapshotter/metadata"
 	"github.com/containerd/stargz-snapshotter/task"
 	"github.com/containerd/stargz-snapshotter/util/cacheutil"
@@ -141,10 +142,11 @@ type Resolver struct {
 	metadataStore           metadata.Store
 	overlayOpaqueType       OverlayOpaqueType
 	additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor
+	hlManager               *hardlink.Manager
 }
 
 // NewResolver returns a new layer resolver.
-func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager, cfg config.Config, resolveHandlers map[string]remote.Handler, metadataStore metadata.Store, overlayOpaqueType OverlayOpaqueType, additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor) (*Resolver, error) {
+func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager, cfg config.Config, resolveHandlers map[string]remote.Handler, metadataStore metadata.Store, overlayOpaqueType OverlayOpaqueType, additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor, hlManager *hardlink.Manager) (*Resolver, error) {
 	resolveResultEntryTTL := time.Duration(cfg.ResolveResultEntryTTLSec) * time.Second
 	if resolveResultEntryTTL == 0 {
 		resolveResultEntryTTL = defaultResolveResultEntryTTLSec * time.Second
@@ -193,10 +195,11 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 		metadataStore:           metadataStore,
 		overlayOpaqueType:       overlayOpaqueType,
 		additionalDecompressors: additionalDecompressors,
+		hlManager:               hlManager,
 	}, nil
 }
 
-func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache, error) {
+func newCache(root string, cacheType string, cfg config.Config, hlManager *hardlink.Manager) (cache.BlobCache, error) {
 	if cacheType == memoryCacheType {
 		return cache.NewMemoryCache(), nil
 	}
@@ -235,12 +238,13 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 	return cache.NewDirectoryCache(
 		cachePath,
 		cache.DirectoryCacheConfig{
-			SyncAdd:      dcc.SyncAdd,
-			DataCache:    dCache,
-			FdCache:      fCache,
-			BufPool:      bufPool,
-			Direct:       dcc.Direct,
-			FadvDontNeed: dcc.FadvDontNeed,
+			HardlinkManager: hlManager,
+			SyncAdd:         dcc.SyncAdd,
+			DataCache:       dCache,
+			FdCache:         fCache,
+			BufPool:         bufPool,
+			Direct:          dcc.Direct,
+			FadvDontNeed:    dcc.FadvDontNeed,
 		},
 	)
 }
@@ -285,7 +289,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 		}
 	}()
 
-	fsCache, err := newCache(filepath.Join(r.rootDir, "fscache"), r.config.FSCacheType, r.config)
+	fsCache, err := newCache(filepath.Join(r.rootDir, "fscache"), r.config.FSCacheType, r.config, r.hlManager)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fs cache: %w", err)
 	}
@@ -367,7 +371,7 @@ func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, 
 		r.blobCacheMu.Unlock()
 	}
 
-	httpCache, err := newCache(filepath.Join(r.rootDir, "httpcache"), r.config.HTTPCacheType, r.config)
+	httpCache, err := newCache(filepath.Join(r.rootDir, "httpcache"), r.config.HTTPCacheType, r.config, r.hlManager)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http cache: %w", err)
 	}
