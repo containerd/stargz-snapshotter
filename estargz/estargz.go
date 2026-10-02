@@ -672,6 +672,11 @@ type Writer struct {
 
 	uncompressedCounter *countWriteFlusher
 
+	// cur is the stream being written; pending is the preceding stream, kept
+	// unterminated so cur can fold into it if it ends below MinChunkSize.
+	cur     *gzStream
+	pending *gzStream
+
 	// ChunkSize optionally controls the maximum number of bytes
 	// of data of a regular file that can be written in one gzip
 	// stream before a new gzip stream is started.
@@ -699,6 +704,9 @@ func (ccw currentCompressionWriter) Write(p []byte) (int, error) {
 		if err := ccw.w.condOpenGz(); err != nil {
 			return 0, err
 		}
+	}
+	if r := ccw.w.cur.raw; r != nil {
+		r.Write(p)
 	}
 	return ccw.w.gz.Write(p)
 }
@@ -788,17 +796,103 @@ func (w *Writer) Close() (digest.Digest, error) {
 	return tocDigest, nil
 }
 
+// closeGz ends the in-progress stream and terminates the pending one, folding
+// the former into the latter when it ends below MinChunkSize. No stream is
+// left open after it returns.
 func (w *Writer) closeGz() error {
 	if w.closed {
 		return errors.New("write on closed Writer")
 	}
-	if w.gz != nil {
-		if err := w.gz.Close(); err != nil {
+	if err := w.cutGz(); err != nil {
+		return err
+	}
+	return w.closePendingGz()
+}
+
+// cutGz cuts the blob at the end of the in-progress stream, so that the next
+// write starts a new one. A stream that reached MinChunkSize is kept open as
+// pending, so that an under-filled trailing stream can still fold into it; an
+// under-filled stream folds into pending right away, or is terminated in
+// place when there is none.
+func (w *Writer) cutGz() error {
+	m := w.cur
+	if m == nil {
+		return nil
+	}
+	full := w.MinChunkSize > 0 && m.sink.n >= int64(w.MinChunkSize)
+	if !full {
+		if err := w.gz.Close(); err != nil { // the exact compressed size is now known
 			return err
 		}
 		w.gz = nil
+		if w.pending != nil && m.sink.n < int64(w.MinChunkSize) && !m.pinned {
+			// Fold the stream into pending by replaying its raw bytes. They were
+			// hashed and counted when first written, so they bypass the
+			// registered counting writer.
+			if _, err := w.pending.gz.Write(m.raw.Bytes()); err != nil {
+				return err
+			}
+			for _, e := range m.entries {
+				e.Offset = w.pending.offset
+				e.InnerOffset += m.rawStart - w.pending.rawStart
+			}
+			w.cur = nil
+			return w.closePendingGz()
+		}
+	}
+	// Terminate pending, then fix the stream's position in the blob, writing
+	// its buffered bytes through and resolving its entries' offsets.
+	if err := w.closePendingGz(); err != nil {
+		return err
+	}
+	if m.offset < 0 {
+		m.offset = w.cw.n
+		if _, err := w.cw.Write(m.buf.Bytes()); err != nil {
+			return err
+		}
+		m.sink.w = w.cw
+		m.buf = nil
+	}
+	for _, e := range m.entries {
+		e.Offset = m.offset
+	}
+	m.entries = nil
+	w.cur = nil
+	if full {
+		// Keep the full stream open as the new pending; its raw bytes are no
+		// longer needed since it can no longer fold.
+		m.raw = nil
+		w.pending, w.gz = m, nil
 	}
 	return nil
+}
+
+// closePendingGz writes the pending stream's terminator.
+func (w *Writer) closePendingGz() error {
+	if w.pending == nil {
+		return nil
+	}
+	err := w.pending.gz.Close()
+	w.pending = nil
+	return err
+}
+
+// gzStream is a single compression stream (e.g. a gzip member) of the blob.
+//
+// With MinChunkSize > 0 a stream is not terminated as soon as it is full:
+// cutGz keeps it waiting as w.pending so that, should the next stream end
+// below MinChunkSize, the short tail can be folded into it. closePendingGz
+// writes the withheld terminator once the stream's successor is known to
+// stand on its own, or the blob ends.
+type gzStream struct {
+	gz       io.WriteCloser // compressor for this stream
+	sink     *countWriter   // compressed bytes of this stream, into buf or the blob
+	buf      *bytes.Buffer  // buffers the stream until placed in the blob; nil once placed
+	raw      *bytes.Buffer  // uncompressed bytes of the stream, kept while it may still fold
+	offset   int64          // position of the stream in the blob; -1 until placed
+	rawStart int64          // Writer.uncompressedCounter.n at the stream's start
+	entries  []*TOCEntry    // data entries in this stream; Offsets resolve when placed
+	pinned   bool           // the stream's offset is meaningful (e.g. prefetch landmark); never fold it
 }
 
 func (w *Writer) flushGz() error {
@@ -831,14 +925,27 @@ func (w *Writer) nameIfChanged(mp *map[int]string, id int, name string) string {
 	return name
 }
 
-func (w *Writer) condOpenGz() (err error) {
-	if w.gz == nil {
-		w.gz, err = w.compressor.Writer(w.cw)
-		if w.gz != nil {
-			w.gz = w.uncompressedCounter.register(w.gz)
-		}
+func (w *Writer) condOpenGz() error {
+	if w.cur != nil {
+		return nil
 	}
-	return
+	sink := &countWriter{w: w.cw}
+	var buf, raw *bytes.Buffer
+	offset := w.cw.n
+	if w.pending != nil {
+		// Buffer the stream until pending's terminator is written and its blob
+		// position is known; keep raw bytes so it can fold into pending if short.
+		buf, raw = new(bytes.Buffer), new(bytes.Buffer)
+		sink.w = buf
+		offset = -1
+	}
+	gz, err := w.compressor.Writer(sink)
+	if err != nil {
+		return err
+	}
+	w.cur = &gzStream{gz: gz, sink: sink, buf: buf, raw: raw, offset: offset, rawStart: w.uncompressedCounter.n}
+	w.gz = w.uncompressedCounter.register(gz)
+	return nil
 }
 
 // AppendTar reads the tar or tar.gz file from r and appends
@@ -885,8 +992,6 @@ func (w *Writer) appendTar(r io.Reader, lossless bool) error {
 	if lossless {
 		tr.RawAccounting = true
 	}
-	prevOffset := w.cw.n
-	var prevOffsetUncompressed int64
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
@@ -994,20 +1099,18 @@ func (w *Writer) appendTar(r io.Reader, lossless bool) error {
 					ent.ChunkSize = chunkSize
 				}
 
-				// We flush the underlying compression writer here to correctly calculate "w.cw.n".
+				// We flush the underlying compression writer here to correctly measure
+				// the stream's compressed size.
 				if err := w.flushGz(); err != nil {
 					return err
 				}
-				if w.needsOpenGz(ent) || w.cw.n-prevOffset >= int64(w.MinChunkSize) {
-					if err := w.closeGz(); err != nil {
+				forced := w.needsOpenGz(ent)
+				if forced || w.cur == nil || w.cur.sink.n >= int64(w.MinChunkSize) {
+					if err := w.cutGz(); err != nil {
 						return err
 					}
-					ent.Offset = w.cw.n
-					prevOffset = ent.Offset
-					prevOffsetUncompressed = w.uncompressedCounter.n
 				} else {
-					ent.Offset = prevOffset
-					ent.InnerOffset = w.uncompressedCounter.n - prevOffsetUncompressed
+					ent.InnerOffset = w.uncompressedCounter.n - w.cur.rawStart
 				}
 
 				ent.ChunkOffset = written
@@ -1016,6 +1119,13 @@ func (w *Writer) appendTar(r io.Reader, lossless bool) error {
 				if err := w.condOpenGz(); err != nil {
 					return err
 				}
+				if forced {
+					// The entry's offset is meaningful on its own (the prefetch
+					// landmark's marks the end of the prefetch range), so this stream
+					// must keep its position even if it ends below MinChunkSize.
+					w.cur.pinned = true
+				}
+				w.cur.entries = append(w.cur.entries, ent)
 
 				teeChunk := io.TeeReader(tee, chunkDigest.Hash())
 				var out io.Writer
