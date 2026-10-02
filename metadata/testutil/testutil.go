@@ -437,22 +437,22 @@ func newCalledTelemetry() (telemetry *metadata.Telemetry, check func() error) {
 	var getTocLatencyCalled bool
 	var deserializeTocLatencyCalled bool
 	return &metadata.Telemetry{
-			GetFooterLatency:      func(time.Time) { getFooterLatencyCalled = true },
-			GetTocLatency:         func(time.Time) { getTocLatencyCalled = true },
-			DeserializeTocLatency: func(time.Time) { deserializeTocLatencyCalled = true },
-		}, func() error {
-			var errs []error
-			if !getFooterLatencyCalled {
-				errs = append(errs, fmt.Errorf("metrics GetFooterLatency isn't called"))
-			}
-			if !getTocLatencyCalled {
-				errs = append(errs, fmt.Errorf("metrics GetTocLatency isn't called"))
-			}
-			if !deserializeTocLatencyCalled {
-				errs = append(errs, fmt.Errorf("metrics DeserializeTocLatency isn't called"))
-			}
-			return errors.Join(errs...)
+		GetFooterLatency:      func(time.Time) { getFooterLatencyCalled = true },
+		GetTocLatency:         func(time.Time) { getTocLatencyCalled = true },
+		DeserializeTocLatency: func(time.Time) { deserializeTocLatencyCalled = true },
+	}, func() error {
+		var errs []error
+		if !getFooterLatencyCalled {
+			errs = append(errs, fmt.Errorf("metrics GetFooterLatency isn't called"))
 		}
+		if !getTocLatencyCalled {
+			errs = append(errs, fmt.Errorf("metrics GetTocLatency isn't called"))
+		}
+		if !deserializeTocLatencyCalled {
+			errs = append(errs, fmt.Errorf("metrics DeserializeTocLatency isn't called"))
+		}
+		return errors.Join(errs...)
+	}
 }
 
 func dumpNodes(t TestingT, r TestableReader, id uint32, level int) {

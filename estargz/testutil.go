@@ -1620,24 +1620,24 @@ func newCalledTelemetry() (telemetry *Telemetry, check func(needsGetTOC bool) er
 	var getTocLatencyCalled bool
 	var deserializeTocLatencyCalled bool
 	return &Telemetry{
-			func(time.Time) { getFooterLatencyCalled = true },
-			func(time.Time) { getTocLatencyCalled = true },
-			func(time.Time) { deserializeTocLatencyCalled = true },
-		}, func(needsGetTOC bool) error {
-			var allErr []error
-			if !getFooterLatencyCalled {
-				allErr = append(allErr, fmt.Errorf("metrics GetFooterLatency isn't called"))
-			}
-			if needsGetTOC {
-				if !getTocLatencyCalled {
-					allErr = append(allErr, fmt.Errorf("metrics GetTocLatency isn't called"))
-				}
-			}
-			if !deserializeTocLatencyCalled {
-				allErr = append(allErr, fmt.Errorf("metrics DeserializeTocLatency isn't called"))
-			}
-			return errors.Join(allErr...)
+		func(time.Time) { getFooterLatencyCalled = true },
+		func(time.Time) { getTocLatencyCalled = true },
+		func(time.Time) { deserializeTocLatencyCalled = true },
+	}, func(needsGetTOC bool) error {
+		var allErr []error
+		if !getFooterLatencyCalled {
+			allErr = append(allErr, fmt.Errorf("metrics GetFooterLatency isn't called"))
 		}
+		if needsGetTOC {
+			if !getTocLatencyCalled {
+				allErr = append(allErr, fmt.Errorf("metrics GetTocLatency isn't called"))
+			}
+		}
+		if !deserializeTocLatencyCalled {
+			allErr = append(allErr, fmt.Errorf("metrics DeserializeTocLatency isn't called"))
+		}
+		return errors.Join(allErr...)
+	}
 }
 
 func digestFor(content string) string {
@@ -2150,15 +2150,19 @@ func file(name, contents string, opts ...any) tarEntry {
 		if len(xattrs) > 0 {
 			format = tar.FormatPAX // only PAX supports xattrs
 		}
+		xattrsPAXRecords := make(map[string]string)
+		for k, v := range xattrs {
+			xattrsPAXRecords["SCHILY.xattr."+k] = v
+		}
 		if err := tw.WriteHeader(&tar.Header{
-			Typeflag: tar.TypeReg,
-			Name:     prefix + name,
-			Mode:     tm,
-			Xattrs:   xattrs,
-			Size:     int64(len(contents)),
-			Uid:      o.uid,
-			Gid:      o.gid,
-			Format:   format,
+			Typeflag:   tar.TypeReg,
+			Name:       prefix + name,
+			Mode:       tm,
+			PAXRecords: xattrsPAXRecords,
+			Size:       int64(len(contents)),
+			Uid:        o.uid,
+			Gid:        o.gid,
+			Format:     format,
 		}); err != nil {
 			return err
 		}

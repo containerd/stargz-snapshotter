@@ -179,12 +179,12 @@ func (kc *keychain) startSyncSecrets(ctx context.Context, client kubernetes.Inte
 	// get informed on `kubernetes.io/dockerconfigjson` secrets in all namespaces
 	informer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
-			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+			ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 				// TODO: support legacy image secret `kubernetes.io/dockercfg`
 				options.FieldSelector = dockerconfigSelector
 				return client.CoreV1().Secrets(metav1.NamespaceAll).List(ctx, options)
 			},
-			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+			WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 				// TODO: support legacy image secret `kubernetes.io/dockercfg`
 				options.FieldSelector = dockerconfigSelector
 				return client.CoreV1().Secrets(metav1.NamespaceAll).Watch(ctx, options)
