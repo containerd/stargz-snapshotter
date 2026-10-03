@@ -18,7 +18,9 @@ package commonmetrics
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/containerd/log"
@@ -38,6 +40,9 @@ const (
 
 	// BytesServedKey is the key for any metric related to counting bytes served as the part of specific operation.
 	BytesServedKey = "bytes_served"
+
+	// BlobFetchErrorsKey is the key for the count of failed blob reads.
+	BlobFetchErrorsKey = "blob_fetch_errors_total"
 
 	// Keep namespace as stargz and subsystem as fs.
 	namespace = "stargz"
@@ -126,7 +131,43 @@ var (
 		},
 		[]string{"operation_type", "layer"},
 	)
+
+	// blobFetchErrors counts blob reads that failed, broken down by the
+	// errno the failure carried. The label is drawn from a fixed set so
+	// that a storm of failures cannot blow up metric cardinality.
+	blobFetchErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      BlobFetchErrorsKey,
+			Help:      "The number of failed blob reads. Broken down by the errno the failure carried.",
+		},
+		[]string{"errno"},
+	)
 )
+
+// errnoNames is the set of errnos reported under their own label value.
+// Anything else is reported as "other", and an error carrying no errno at all
+// as "none".
+var errnoNames = map[syscall.Errno]string{
+	syscall.EACCES:       "EACCES",
+	syscall.EAGAIN:       "EAGAIN",
+	syscall.EBADF:        "EBADF",
+	syscall.ECONNREFUSED: "ECONNREFUSED",
+	syscall.ECONNRESET:   "ECONNRESET",
+	syscall.EDQUOT:       "EDQUOT",
+	syscall.EHOSTUNREACH: "EHOSTUNREACH",
+	syscall.EIO:          "EIO",
+	syscall.EMFILE:       "EMFILE",
+	syscall.ENETUNREACH:  "ENETUNREACH",
+	syscall.ENFILE:       "ENFILE",
+	syscall.ENOENT:       "ENOENT",
+	syscall.ENOSPC:       "ENOSPC",
+	syscall.EPIPE:        "EPIPE",
+	syscall.EROFS:        "EROFS",
+	syscall.ESTALE:       "ESTALE",
+	syscall.ETIMEDOUT:    "ETIMEDOUT",
+}
 
 var register sync.Once
 var logLevel = log.DebugLevel
@@ -153,6 +194,7 @@ func Register(l log.Level) {
 		prometheus.MustRegister(operationLatencyMicroseconds)
 		prometheus.MustRegister(operationCount)
 		prometheus.MustRegister(bytesCount)
+		prometheus.MustRegister(blobFetchErrors)
 	})
 }
 
@@ -182,6 +224,27 @@ func IncOperationCount(operation string, layer digest.Digest) {
 // AddBytesCount wraps the labels attachment as well as calling Add into a single method.
 func AddBytesCount(operation string, layer digest.Digest, bytes int64) {
 	bytesCount.WithLabelValues(operation, layer.String()).Add(float64(bytes))
+}
+
+// IncBlobFetchError records a failed blob read. Calling it before Register is
+// harmless; the counter simply is not exported yet.
+func IncBlobFetchError(err error) {
+	if err == nil {
+		return
+	}
+	blobFetchErrors.WithLabelValues(ErrnoLabel(err)).Inc()
+}
+
+// ErrnoLabel returns the errno label value used for the given error.
+func ErrnoLabel(err error) string {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return "none"
+	}
+	if name, ok := errnoNames[errno]; ok {
+		return name
+	}
+	return "other"
 }
 
 // WriteLatencyLogValue wraps writing the log info record for latency in milliseconds. The log record breaks down by operation and layer digest.
