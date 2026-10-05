@@ -11,11 +11,19 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["stable", "oldstable"]
     name: Build
     steps:
     - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: ${{ matrix.go-version }}
+        check-latest: true
     - name: Build all
-      run: ./script/util/make.sh build -j2
+      run: make
 
   test:
     runs-on: ubuntu-24.04
