@@ -23,7 +23,7 @@ IMAGE_NAME="testipfs"
 source "${REPO}/script/util/utils.sh"
 
 GOBASE_VERSION=$(go_base_version "${REPO}/Dockerfile")
-IPFS_VERSION=v0.17.0
+IPFS_VERSION=v0.43.1
 
 TMP_CONTEXT=$(mktemp -d)
 function cleanup {
@@ -36,9 +36,9 @@ trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM golang:${GOBASE_VERSION}
 RUN apt-get update -y && apt-get install -y fuse3 && \
-    wget https://dist.ipfs.io/go-ipfs/${IPFS_VERSION}/go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
-    tar -xvzf go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
-    cd go-ipfs && \
+    wget https://github.com/ipfs/kubo/releases/download/${IPFS_VERSION}/kubo_${IPFS_VERSION}_linux-amd64.tar.gz && \
+    tar -xvzf kubo_${IPFS_VERSION}_linux-amd64.tar.gz && \
+    cd kubo && \
     bash install.sh
 COPY ./entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]

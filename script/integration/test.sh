@@ -30,7 +30,7 @@ CONTAINERD_NODE=testenv_integration
 DUMMYUSER=dummyuser
 DUMMYPASS=dummypass
 
-IPFS_VERSION=v0.17.0
+IPFS_VERSION=v0.43.1
 
 source "${REPO}/script/util/utils.sh"
 
@@ -109,9 +109,9 @@ FROM ${INTEGRATION_BASE_IMAGE_NAME}
 
 RUN apt-get update -y && \
     apt-get install -y iptables jq netcat-openbsd && \
-    wget https://dist.ipfs.io/go-ipfs/${IPFS_VERSION}/go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
-    tar -xvzf go-ipfs_${IPFS_VERSION}_linux-amd64.tar.gz && \
-    cd go-ipfs && \
+    wget https://github.com/ipfs/kubo/releases/download/${IPFS_VERSION}/kubo_${IPFS_VERSION}_linux-amd64.tar.gz && \
+    tar -xvzf kubo_${IPFS_VERSION}_linux-amd64.tar.gz && \
+    cd kubo && \
     bash install.sh
 
 COPY --from=stargzify-base /out/stargzify /usr/local/bin/
