@@ -14,14 +14,14 @@ require (
 	github.com/containerd/stargz-snapshotter/ipfs v0.18.2
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/docker/go-metrics v0.1.0
-	github.com/goccy/go-json v0.11.1
+	github.com/goccy/go-json v0.11.2
 	github.com/klauspost/compress v1.20.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/pelletier/go-toml v1.9.5
 	github.com/rs/xid v1.6.0
-	github.com/urfave/cli/v3 v3.13.0
+	github.com/urfave/cli/v3 v3.14.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
