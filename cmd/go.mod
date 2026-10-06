@@ -9,9 +9,9 @@ require (
 	github.com/containerd/go-cni v1.1.14
 	github.com/containerd/log v0.2.0
 	github.com/containerd/platforms v1.0.0-rc.5
-	github.com/containerd/stargz-snapshotter v0.18.2
-	github.com/containerd/stargz-snapshotter/estargz v0.18.2
-	github.com/containerd/stargz-snapshotter/ipfs v0.18.2
+	github.com/containerd/stargz-snapshotter v0.19.0
+	github.com/containerd/stargz-snapshotter/estargz v0.19.0
+	github.com/containerd/stargz-snapshotter/ipfs v0.19.0
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/docker/go-metrics v0.1.0
 	github.com/goccy/go-json v0.11.2
