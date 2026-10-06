@@ -313,6 +313,20 @@ ctr-remote image push -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:es
 convert "${REGISTRY_HOST}/ubuntu:22.04" "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id" "false" --estargz --estargz-external-toc --estargz-keep-diff-id
 ctr-remote image push -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/ubuntu:esgz-ex-keep-diff-id-esgztoc"
 
+############
+# Test invalid diffID
+
+ctr-remote image pull -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz"
+create-invalid-image -estargz -- "${REGISTRY_HOST}/alpine:esgz" "${REGISTRY_HOST}/alpine:esgz-invalid"
+ctr-remote image push -u "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz-invalid"
+
+reboot_containerd
+ctr-remote i rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz-invalid"
+if ctr-remote i rpull --user "${DUMMYUSER}:${DUMMYPASS}" "${REGISTRY_HOST}/alpine:esgz" ; then
+    echo "inconsistent diffIDs must be denied"
+    exit 1
+fi
+
 if [ "${BUILTIN_SNAPSHOTTER}" != "true" ] ; then
 
     ############

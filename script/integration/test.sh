@@ -34,6 +34,8 @@ IPFS_VERSION=v0.43.1
 
 source "${REPO}/script/util/utils.sh"
 
+GOBASE_VERSION=$(go_base_version "${REPO}/Dockerfile")
+
 if [ "${INTEGRATION_NO_RECREATE:-}" != "true" ] ; then
     echo "Preparing node image..."
 
@@ -100,10 +102,17 @@ trap 'cleanup "$?"' EXIT SIGHUP SIGINT SIGQUIT SIGTERM
 cp -R "${CONTEXT}/containerd" \
    "${REPO}/script/util/utils.sh" \
    "${TMP_CONTEXT}"
+mkdir "${TMP_CONTEXT}/repo/"
+cp -R "${REPO}/"* "${TMP_CONTEXT}/repo/"
 cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM golang:${STARGZIFY_GO_VERSION}-bookworm AS stargzify-base
 RUN mkdir /out && \
     GOBIN=/out/ go install github.com/google/crfs/stargz/stargzify@71d77da419c90be7b05d12e59945ac7a8c94a543
+
+FROM golang:${GOBASE_VERSION} AS invalid-image-creator-dev
+COPY ./repo/ /build/
+WORKDIR /build/
+RUN mkdir /out && go build -o /out/create-invalid-image ./script/util/create-invalid-image
 
 FROM ${INTEGRATION_BASE_IMAGE_NAME}
 
@@ -114,6 +123,7 @@ RUN apt-get update -y && \
     cd kubo && \
     bash install.sh
 
+COPY --from=invalid-image-creator-dev /out/create-invalid-image /usr/local/bin/
 COPY --from=stargzify-base /out/stargzify /usr/local/bin/
 COPY ./containerd/config.containerd.toml /etc/containerd/config.toml
 COPY ./containerd/config.stargz.toml /etc/containerd-stargz-grpc/config.toml

@@ -30,6 +30,7 @@ import (
 	fsconfig "github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/ipfs"
+	"github.com/containerd/stargz-snapshotter/service/verifier"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/urfave/cli/v3"
 )
@@ -107,6 +108,13 @@ command.
 		config.snapshotter = remoteSnapshotterName
 		if sn := context.String("snapshotter"); sn != "" {
 			config.snapshotter = sn
+		}
+
+		// checks if the TOCDigest consistency between the pulling image and existing images.
+		// When a TOCDigest inconsistency is detected, it returns an error and the user needs
+		// to manually remove the existing invalid images.
+		if err := verifier.VerifyImage(ctx, client, ref, config.Resolver); err != nil {
+			return fmt.Errorf("verification error: %w", err)
 		}
 
 		return pull(ctx, client, ref, config)
