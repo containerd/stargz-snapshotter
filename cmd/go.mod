@@ -6,7 +6,6 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.2
 	github.com/containerd/containerd/api v1.12.0
 	github.com/containerd/containerd/v2 v2.4.1
-	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/go-cni v1.1.14
 	github.com/containerd/log v0.2.0
 	github.com/containerd/platforms v1.0.0-rc.5
@@ -27,6 +26,7 @@ require (
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
 	google.golang.org/grpc v1.84.0
+	k8s.io/cri-api v0.37.1
 	tags.cncf.io/container-device-interface v1.1.1
 )
 
@@ -39,6 +39,7 @@ require (
 	github.com/containerd/cgroups/v3 v3.1.3 // indirect
 	github.com/containerd/console v1.0.5 // indirect
 	github.com/containerd/continuity v0.5.0 // indirect
+	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/go-dmverity v0.1.0 // indirect
@@ -144,7 +145,6 @@ require (
 	k8s.io/api v0.37.1 // indirect
 	k8s.io/apimachinery v0.37.1 // indirect
 	k8s.io/client-go v0.37.1 // indirect
-	k8s.io/cri-api v0.37.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
