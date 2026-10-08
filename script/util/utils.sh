@@ -72,11 +72,11 @@ function test_image_verification {
     REGISTRY="${3}"
     TEST_POD_NS="${4}"
 
-    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images pull ghcr.io/stargz-containers/alpine:3.15.3-esgz'
-    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images tag ghcr.io/stargz-containers/alpine:3.15.3-esgz '"${REGISTRY}"'/alpine:esgz'
-    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '( cd /go/src/github.com/containerd/stargz-snapshotter/script/util/create-invalid-image/ ; go run main.go -estargz -- '"${REGISTRY}"'/alpine:esgz '"${REGISTRY}"'/alpine:esgz-invalid )'
-    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images push -u "${REGISTRY_CREDS}" '"${REGISTRY}"'/alpine:esgz'
-    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images push -u "${REGISTRY_CREDS}" '"${REGISTRY}"'/alpine:esgz-invalid'
+    docker exec "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images pull ghcr.io/stargz-containers/alpine:3.15.3-esgz'
+    docker exec "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images tag ghcr.io/stargz-containers/alpine:3.15.3-esgz '"${REGISTRY}"'/alpine:esgz'
+    docker exec "${PREPARE_NODE_NAME}" /bin/sh -c '( cd /go/src/github.com/containerd/stargz-snapshotter/script/util/create-invalid-image/ ; go run main.go -estargz -- '"${REGISTRY}"'/alpine:esgz '"${REGISTRY}"'/alpine:esgz-invalid )'
+    docker exec "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images push -u "${REGISTRY_CREDS}" '"${REGISTRY}"'/alpine:esgz'
+    docker exec "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images push -u "${REGISTRY_CREDS}" '"${REGISTRY}"'/alpine:esgz-invalid'
 
 
     cat <<EOF | KUBECONFIG="${KUBECONFIG_IN}" kubectl apply -f -
