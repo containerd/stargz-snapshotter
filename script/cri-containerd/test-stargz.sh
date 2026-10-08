@@ -175,7 +175,8 @@ fi
 docker exec "${TEST_NODE_NAME}" systemctl restart containerd
 CONNECTED=
 for i in $(seq 100) ; do
-    if docker exec "${TEST_NODE_NAME}" ctr version ; then
+    if docker exec "${TEST_NODE_NAME}" ctr version \
+            && docker exec -i "${TEST_NODE_NAME}" crictl --image-endpoint="${IMAGE_ENDPOINT_SOCK}" images ; then
         CONNECTED=true
         break
     fi
