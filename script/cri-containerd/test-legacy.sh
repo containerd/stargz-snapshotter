@@ -49,7 +49,8 @@ TEST_NODE_ID=$(docker run --rm -d --privileged \
 echo "Running node on: ${TEST_NODE_ID}"
 FAIL=
 for i in $(seq 100) ; do
-    if docker exec -i "${TEST_NODE_ID}" ctr version ; then
+    if docker exec -i "${TEST_NODE_ID}" ctr version \
+            && docker exec -i "${TEST_NODE_ID}" crictl --image-endpoint="${IMAGE_ENDPOINT_SOCK}" images ; then
         break
     fi
     echo "Fail(${i}). Retrying..."
