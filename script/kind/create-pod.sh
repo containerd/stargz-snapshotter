@@ -24,6 +24,7 @@ TEST_CONTAINER_NAME=testcontainer-$(head /dev/urandom | tr -dc a-z0-9 | head -c 
 KIND_NODENAME="${1}"
 KIND_KUBECONFIG="${2}"
 TESTIMAGE="${3}"
+CRI_SOCKET_PATH="${4}"
 
 echo "Creating testing pod...."
 cat <<EOF | KUBECONFIG="${KIND_KUBECONFIG}" kubectl apply -f -
@@ -114,6 +115,7 @@ if [ "${BUILTIN_SNAPSHOTTER:-}" != "true" ] ; then
     KUBECONFIG="${KIND_KUBECONFIG}" kubectl delete pod "${TEST_POD_NAME}" --namespace="${TEST_POD_NS}"
     docker exec -i "${KIND_NODENAME}" systemctl restart stargz-snapshotter.service
     docker exec -i "${KIND_NODENAME}" systemctl is-active stargz-snapshotter.service
+    while ! docker exec -i "${KIND_NODENAME}" crictl --image-endpoint="${CRI_SOCKET_PATH}" images ; do sleep 1 ; done
 fi
 
 exit 0

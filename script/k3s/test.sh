@@ -124,7 +124,8 @@ if ! ( "${CONTEXT}"/run-k3s.sh "${K3S_CLUSTER_NAME}" \
          sleep 30 && \
          echo "Trying to pull private image with secret..." && \
          "${CONTEXT}"/create-pod.sh "$(k3d node list | grep ${K3S_CLUSTER_NAME}-server-0 | cut -d " " -f 1 | tr -d '\n')" \
-                     "${K3S_KUBECONFIG}" "${TESTIMAGE}" ) ; then
+                     "${K3S_KUBECONFIG}" "${TESTIMAGE}" && \
+         test_image_verification "${K3S_KUBECONFIG}" "${PREPARE_NODE_NAME}" "${REGISTRY_HOST}:5000" ns1) ; then
     FAIL=true
 fi
 docker compose -f "${DOCKER_COMPOSE_YAML}" down -v

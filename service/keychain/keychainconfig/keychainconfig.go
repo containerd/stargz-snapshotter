@@ -18,29 +18,26 @@ package keychainconfig
 
 import (
 	"context"
-	"time"
+	"fmt"
+	"net"
+	"sync"
 
-	"github.com/containerd/containerd/v2/defaults"
-	"github.com/containerd/containerd/v2/pkg/dialer"
 	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
 	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
 	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 type Config struct {
-	EnableKubeKeychain         bool
-	EnableCRIKeychain          bool
-	KubeconfigPath             string
-	DefaultImageServiceAddress string
-	ImageServicePath           string
+	EnableKubeKeychain bool
+	EnableCRIKeychain  bool
+	KubeconfigPath     string
 }
 
-func ConfigKeychain(ctx context.Context, rpc *grpc.Server, config *Config) ([]resolver.Credential, error) {
+func ConfigKeychain(ctx context.Context, rpc *grpc.Server, config *Config) ([]resolver.Credential, net.Listener, error) {
 	credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
 	if config.EnableKubeKeychain {
 		var opts []kubeconfig.Option
@@ -49,14 +46,17 @@ func ConfigKeychain(ctx context.Context, rpc *grpc.Server, config *Config) ([]re
 		}
 		credsFuncs = append(credsFuncs, kubeconfig.NewKubeconfigKeychain(ctx, opts...))
 	}
+	var lis net.Listener
 	if config.EnableCRIKeychain {
-		// connects to the backend CRI service (defaults to containerd socket)
-		criAddr := config.DefaultImageServiceAddress
-		if cp := config.ImageServicePath; cp != "" {
-			criAddr = cp
-		}
+		bc := newPipeListener()
+		lis = bc
 		connectCRI := func() (runtime.ImageServiceClient, error) {
-			conn, err := newCRIConn(criAddr)
+			conn, err := grpc.NewClient("passthrough://localhost:0",
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+					return bc.dial()
+				}),
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -67,22 +67,70 @@ func ConfigKeychain(ctx context.Context, rpc *grpc.Server, config *Config) ([]re
 		credsFuncs = append(credsFuncs, f)
 	}
 
-	return credsFuncs, nil
+	return credsFuncs, lis, nil
 }
 
-func newCRIConn(criAddr string) (*grpc.ClientConn, error) {
-	// TODO: make gRPC options configurable from config.toml
-	backoffConfig := backoff.DefaultConfig
-	backoffConfig.MaxDelay = 3 * time.Second
-	connParams := grpc.ConnectParams{
-		Backoff: backoffConfig,
+func newPipeListener() *pipeListener {
+	return &pipeListener{
+		ch:   make(chan net.Conn),
+		done: make(chan struct{}),
 	}
-	gopts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithConnectParams(connParams),
-		grpc.WithContextDialer(dialer.ContextDialer),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
-	}
-	return grpc.NewClient(dialer.DialAddress(criAddr), gopts...)
 }
+
+type pipeListener struct {
+	ch        chan net.Conn
+	done      chan struct{}
+	closed    bool
+	closeOnce sync.Once
+	closedMu  sync.Mutex
+}
+
+func (l *pipeListener) dial() (net.Conn, error) {
+	if l.isClosed() {
+		return nil, fmt.Errorf("closed")
+	}
+	c1, c2 := net.Pipe()
+	select {
+	case <-l.done:
+		return nil, fmt.Errorf("closed")
+	case l.ch <- c1:
+	}
+	return c2, nil
+}
+
+func (l *pipeListener) Accept() (net.Conn, error) {
+	if l.isClosed() {
+		return nil, fmt.Errorf("closed")
+	}
+	select {
+	case <-l.done:
+		return nil, fmt.Errorf("closed")
+	case conn := <-l.ch:
+		return conn, nil
+	}
+}
+
+func (l *pipeListener) Close() error {
+	l.closeOnce.Do(func() {
+		l.closedMu.Lock()
+		l.closed = true
+		close(l.done)
+		l.closedMu.Unlock()
+	})
+	return nil
+}
+
+func (l *pipeListener) isClosed() bool {
+	l.closedMu.Lock()
+	defer l.closedMu.Unlock()
+	return l.closed
+}
+
+func (l *pipeListener) Addr() net.Addr {
+	return dummyAddr{}
+}
+
+type dummyAddr struct{}
+
+func (a dummyAddr) Network() string { return "passthrough" }
+func (a dummyAddr) String() string  { return "passthrough://localhost:0" }

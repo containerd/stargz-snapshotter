@@ -57,6 +57,24 @@ version = 2
 
 This repo contains [a Dockerfile as a KinD node image](/Dockerfile) which includes the above configuration.
 
+### kubelet configuration
+
+> NOTE: This configuration is supported since v0.19.0
+> NOTE: If you are using the CRI keychain of stargz-snapshotter with configuring --image-service-endpoint on kubelet, CRI proxy is already enabled so you don't need the configuration described in this section.
+
+When you use stargz-snapshotter on Kubernetes, you must specify `--image-service-endpoint=unix:///run/containerd-stargz-grpc/containerd-stargz-grpc.sock` option to kubelet.
+This flag allows stargz-snapshotter proxying the CRI calls to containerd, with additional image verification logic.
+When this CRI proxy is not enabled, stargz-snapshotter can't verify the DiffIDs advertised in the image configuration.
+This allows a maliciously crafted image with faked DiffIDs being mounted to other containers that has those DiffIDs.
+
+Stargz-snapshotter proxies the CRI calls to containerd by accessing the containerd socket at `/run/containerd/containerd.sock` with the namespace `k8s.io` which is the default namespace used by CRI.
+If containerd is configured to use non-default socket address (i.e. other than `/run/containerd/containerd.sock`) or non-default namespace for CRI (i.e. other than `k8s.io`), you need to tell those values stargz-snapshotter in the stargz-snapshotter's config.toml.
+
+```
+cri_containerd_address = "/run/custom.sock"
+cri_containerd_namespace = "custom-namespace"
+```
+
 ## State directory
 
 Stargz snapshotter mounts eStargz layers from registries to the node using FUSE.
@@ -117,6 +135,34 @@ enable = true
 address = "/run/containerd-stargz-grpc/fuse-manager.sock"
 # set a custom binary path if the executable is not in PATH
 path = "/usr/local/bin/stargz-fuse-manager"
+```
+
+### kubelet configuration
+
+> NOTE: This configuration is supported since v0.19.0
+> NOTE: If you are using the CRI keychain of stargz-snapshotter with configuring --image-service-endpoint on kubelet, CRI proxy is already enabled so you don't need the configuration described in this section.
+
+When you use stargz-snapshotter with the FUSE manager mode enabled on Kubernetes, you must give kubelet the flag `--image-service-endpoint` with specifying the CRI server socket listened by the FUSE manager.
+This flag allows the FUSE manager proxying the CRI calls to containerd, with additional image verification logic.
+When this CRI proxy is not enabled, stargz-snapshotter can't verify the DiffIDs advertised in the image configuration.
+This allows a maliciously crafted image with faked DiffIDs being mounted to other containers that has those DiffIDs.
+
+The path of the CRI server socket listened by the FUSE manager must be configured by the `cri_listen_path` field of stargz-snapshotter's config.toml.
+
+Assuming that config.toml is configured as the following:
+
+```
+cri_listen_path = "/run/containerd-stargz-grpc/fuse-manager-cri.sock"
+```
+
+Specify the `--image-service-endpoint=unix:///run/containerd-stargz-grpc/fuse-manager-cri.sock` flag to kubelet.
+
+The FUSE manager proxies the CRI calls to containerd by accessing the containerd socket at `/run/containerd/containerd.sock` with the namespace `k8s.io` which is the default namespace used by CRI.
+If containerd is configured to use non-default socket address (i.e. other than `/run/containerd/containerd.sock`) or non-default namespace for CRI (i.e. other than `k8s.io`), you need to tell those values stargz-snapshotter in the stargz-snapshotter's config.toml.
+
+```
+cri_containerd_address = "/run/custom.sock"
+cri_containerd_namespace = "custom-namespace"
 ```
 
 ## Killing and restarting Stargz Snapshotter

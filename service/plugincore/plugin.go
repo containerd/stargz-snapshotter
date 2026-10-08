@@ -22,24 +22,26 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"time"
+	"sync"
 
-	"github.com/containerd/containerd/v2/defaults"
-	"github.com/containerd/containerd/v2/pkg/dialer"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/snapshots"
 	ctdplugins "github.com/containerd/containerd/v2/plugins"
 	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 	"github.com/containerd/plugin"
 	"github.com/containerd/plugin/registry"
 	"github.com/containerd/stargz-snapshotter/service"
-	"github.com/containerd/stargz-snapshotter/service/keychain/cri"
-	"github.com/containerd/stargz-snapshotter/service/keychain/dockerconfig"
-	"github.com/containerd/stargz-snapshotter/service/keychain/kubeconfig"
+	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
+	"github.com/containerd/stargz-snapshotter/service/verifier"
+	"github.com/containerd/stargz-snapshotter/util/criconn"
 	grpc "google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/credentials/insecure"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
+)
+
+const (
+	defaultCRIContainerdNamespace string = "k8s.io"
 )
 
 // Config represents configuration for the stargz snapshotter plugin.
@@ -49,8 +51,11 @@ type Config struct {
 	// RootPath is the directory for the plugin
 	RootPath string `toml:"root_path"`
 
-	// CRIKeychainImageServicePath is the path to expose CRI service wrapped by CRI keychain
+	// CRIKeychainImageServicePath is the path to expose CRI service wrapped by stargz-snapshotter
 	CRIKeychainImageServicePath string `toml:"cri_keychain_image_service_path"`
+
+	// CRIContainerdNamespace is the containerd namespace configured for CRI. Default is "k8s.io"
+	CRIContainerdNamespace string `toml:"cri_containerd_namespace"`
 
 	// Registry is CRI-plugin-compatible registry configuration
 	Registry resolver.Registry `toml:"registry"`
@@ -76,35 +81,65 @@ func RegisterPlugin() {
 			}
 			ic.Meta.Exports["root"] = root
 
+			// Create a gRPC server
+			rpc := grpc.NewServer()
+
 			// Configure keychain
-			credsFuncs := []resolver.Credential{dockerconfig.NewDockerconfigKeychain(ctx)}
-			if config.KubeconfigKeychainConfig.EnableKeychain {
-				var opts []kubeconfig.Option
-				if kcp := config.KubeconfigPath; kcp != "" {
-					opts = append(opts, kubeconfig.WithKubeconfigPath(kcp))
-				}
-				credsFuncs = append(credsFuncs, kubeconfig.NewKubeconfigKeychain(ctx, opts...))
+			credsFuncs, criListener, err := keychainconfig.ConfigKeychain(ctx, rpc, &keychainconfig.Config{
+				EnableKubeKeychain: config.KubeconfigKeychainConfig.EnableKeychain,
+				EnableCRIKeychain:  config.CRIKeychainConfig.EnableKeychain,
+				KubeconfigPath:     config.KubeconfigPath,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to configure keychain")
 			}
-			if addr := config.CRIKeychainImageServicePath; config.CRIKeychainConfig.EnableKeychain && addr != "" {
-				// connects to the backend CRI service (defaults to containerd socket)
-				criAddr := ic.Properties[ctdplugins.PropertyGRPCAddress]
+
+			var snService snapshots.Snapshotter
+			var snServiceMu sync.Mutex
+			if addr := config.CRIKeychainImageServicePath; addr != "" {
+				ctdAddr := ic.Properties[ctdplugins.PropertyGRPCAddress]
 				if cp := config.ImageServicePath; cp != "" {
-					criAddr = cp
+					ctdAddr = cp
 				}
-				if criAddr == "" {
+				if ctdAddr == "" {
 					return nil, errors.New("backend CRI service address is not specified")
 				}
-				connectCRI := func() (runtime.ImageServiceClient, error) {
-					conn, err := newCRIConn(criAddr)
-					if err != nil {
-						return nil, err
-					}
-					return runtime.NewImageServiceClient(conn), nil
+
+				ns := defaultCRIContainerdNamespace
+				if config.CRIContainerdNamespace != "" {
+					ns = config.CRIContainerdNamespace
 				}
-				criCreds, criServer := cri.NewCRIKeychain(ctx, connectCRI)
-				// Create a gRPC server
-				rpc := grpc.NewServer()
-				runtime.RegisterImageServiceServer(rpc, criServer)
+				criVerifier := verifier.NewCRIVerifier(
+					ctx,
+					config.Config,
+					resolver.RegistryHostsFromCRIConfig(ctx, config.Registry, credsFuncs...),
+					filepath.Join(root, "verifier"),
+					ns,
+					func() (runtime.RuntimeServiceClient, runtime.ImageServiceClient, *containerd.Client, error) {
+						conn, err := criconn.NewCRIConn(ctdAddr)
+						if err != nil {
+							return nil, nil, nil, fmt.Errorf("failed to connect to CRI: %w", err)
+						}
+						ctdclient, err := containerd.New(ctdAddr)
+						if err != nil {
+							return nil, nil, nil, fmt.Errorf("failed to connect to containerd: %w", err)
+						}
+						return runtime.NewRuntimeServiceClient(conn), runtime.NewImageServiceClient(conn), ctdclient, nil
+					},
+					func() snapshots.Snapshotter {
+						snServiceMu.Lock()
+						defer snServiceMu.Unlock()
+						return snService
+					},
+				)
+				if criListener != nil {
+					localCRIRPC := grpc.NewServer()
+					runtime.RegisterImageServiceServer(localCRIRPC, criVerifier)
+					go localCRIRPC.Serve(criListener)
+				} else {
+					runtime.RegisterImageServiceServer(rpc, criVerifier)
+				}
+
 				// Prepare the directory for the socket
 				if err := os.MkdirAll(filepath.Dir(addr), 0700); err != nil {
 					return nil, fmt.Errorf("failed to create directory %q: %w", filepath.Dir(addr), err)
@@ -123,30 +158,15 @@ func RegisterPlugin() {
 						log.G(ctx).WithError(err).Warnf("error on serving via socket %q", addr)
 					}
 				}()
-				credsFuncs = append(credsFuncs, criCreds)
 			}
 
 			// TODO(ktock): print warn if old configuration is specified.
 			// TODO(ktock): should we respect old configuration?
-			return service.NewStargzSnapshotterService(ctx, root, &config.Config,
+			snServiceMu.Lock()
+			snService, err = service.NewStargzSnapshotterService(ctx, root, &config.Config,
 				service.WithCustomRegistryHosts(resolver.RegistryHostsFromCRIConfig(ctx, config.Registry, credsFuncs...)))
+			snServiceMu.Unlock()
+			return snService, err
 		},
 	})
-}
-
-func newCRIConn(criAddr string) (*grpc.ClientConn, error) {
-	// TODO: make gRPC options configurable from config.toml
-	backoffConfig := backoff.DefaultConfig
-	backoffConfig.MaxDelay = 3 * time.Second
-	connParams := grpc.ConnectParams{
-		Backoff: backoffConfig,
-	}
-	gopts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithConnectParams(connParams),
-		grpc.WithContextDialer(dialer.ContextDialer),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
-	}
-	return grpc.NewClient(dialer.DialAddress(criAddr), gopts...)
 }

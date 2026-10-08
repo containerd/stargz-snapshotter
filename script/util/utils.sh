@@ -65,3 +65,98 @@ function go_base_version {
     local DOCKERFILE="${1}"
     cat "${DOCKERFILE}" | grep -E 'FROM\s+golang:' | head -1 | sed -E 's/FROM +[^:]*:([^ ]+).*/\1/g' | tr -d '\n'
 }
+
+function test_image_verification {
+    KUBECONFIG_IN="${1}"
+    PREPARE_NODE_NAME="${2}"
+    REGISTRY="${3}"
+    TEST_POD_NS="${4}"
+
+    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images pull ghcr.io/stargz-containers/alpine:3.15.3-esgz'
+    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images tag ghcr.io/stargz-containers/alpine:3.15.3-esgz '"${REGISTRY}"'/alpine:esgz'
+    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '( cd /go/src/github.com/containerd/stargz-snapshotter/script/util/create-invalid-image/ ; go run main.go -estargz -- '"${REGISTRY}"'/alpine:esgz '"${REGISTRY}"'/alpine:esgz-invalid )'
+    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images push -u "${REGISTRY_CREDS}" '"${REGISTRY}"'/alpine:esgz'
+    docker exec -it "${PREPARE_NODE_NAME}" /bin/sh -c '/out/ctr-remote images push -u "${REGISTRY_CREDS}" '"${REGISTRY}"'/alpine:esgz-invalid'
+
+
+    cat <<EOF | KUBECONFIG="${KUBECONFIG_IN}" kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test1
+  namespace: ${TEST_POD_NS}
+spec:
+  containers:
+  - name: test1
+    image: ${REGISTRY}/alpine:esgz-invalid
+    command: ["sh"]
+    args: ["-c", "sleep infinity"]
+  imagePullSecrets:
+  - name: testsecret
+EOF
+
+    echo "Waiting for pod creation (first pod)"
+    IDX=0
+    DEADLINE=120
+    for (( ; ; )) ; do
+        STATUS=$(KUBECONFIG="${KUBECONFIG_IN}" kubectl get pods test1 --namespace="${TEST_POD_NS}" -o 'jsonpath={..status.containerStatuses[0].state.running.startedAt}${..status.containerStatuses[0].state.waiting.reason}')
+        echo "Status: ${STATUS}"
+        STARTEDAT=$(echo "${STATUS}" | cut -f 1 -d '$')
+        if [ "${STARTEDAT}" != "" ] ; then
+            echo "Pod created"
+            break
+        elif [ ${IDX} -gt ${DEADLINE} ] ; then
+            echo "Deadline exeeded to wait for pod creation"
+            exit 1
+        fi
+        ((IDX+=1))
+        sleep 1
+    done
+
+    cat <<EOF | KUBECONFIG="${KUBECONFIG_IN}" kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test2
+  namespace: ${TEST_POD_NS}
+spec:
+  containers:
+  - name: test2
+    image: ${REGISTRY}/alpine:esgz
+    command: ["sh"]
+    args: ["-c", "cat /modified.txt ; echo '' ; echo DONE ; sleep infinity"]
+  imagePullSecrets:
+  - name: testsecret
+EOF
+
+    echo "Waiting for pod creation (second pod)"
+    IDX=0
+    DEADLINE=120
+    for (( ; ; )) ; do
+        STATUS=$(KUBECONFIG="${KUBECONFIG_IN}" kubectl get pods test2 --namespace="${TEST_POD_NS}" -o 'jsonpath={..status.containerStatuses[0].state.running.startedAt}${..status.containerStatuses[0].state.waiting.reason}')
+        echo "Status: ${STATUS}"
+        STARTEDAT=$(echo "${STATUS}" | cut -f 1 -d '$')
+        if [ "${STARTEDAT}" != "" ] ;  then
+            echo "==========="
+            KUBECONFIG="${KUBECONFIG_IN}" kubectl -n ${TEST_POD_NS} logs pod/test2
+            echo "==========="
+            DONESTRING=$(KUBECONFIG="${KUBECONFIG_IN}" kubectl -n ${TEST_POD_NS} logs pod/test2 | grep DONE)
+            if [ "${DONESTRING}" = "DONE" ] ; then
+                echo "Pod created"
+                break
+            fi
+        elif [ ${IDX} -gt ${DEADLINE} ] ; then
+            echo "Deadline exeeded to wait for pod creation"
+            exit 1
+        fi
+        ((IDX+=1))
+        sleep 1
+    done
+
+    if KUBECONFIG="${KUBECONFIG_IN}" kubectl -n ${TEST_POD_NS} logs pod/test2 | grep MODIFIED ; then
+        echo "invalid contents detected"
+        return 1
+    fi
+
+    return 0
+}

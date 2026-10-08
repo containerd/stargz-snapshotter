@@ -29,6 +29,7 @@ KIND_REGISTRY_CA="${3}"
 REPO="${4}"
 REGISTRY_NETWORK="${5}"
 DOCKERCONFIGJSON_DATA="${6}"
+CRI_SOCKET_PATH="${7}"
 
 TMP_BUILTIN_CONF=$(mktemp)
 TMP_CONTEXT=$(mktemp -d)
@@ -60,10 +61,14 @@ enable_keychain = true
 kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
 EOF
 cat <<EOF > "${TMP_CONTEXT}/config.containerd.append.toml"
-[plugins."io.containerd.grpc.v1.cri".registry.configs."${REGISTRY_HOST}:5000".tls]
-ca_file = "${NODE_TEST_CERT_FILE}"
+[plugins."io.containerd.grpc.v1.cri".registry]
+config_path = "/etc/containerd/certs.d"
 EOF
-echo "KUBELET_EXTRA_ARGS=--fail-swap-on=false" > "${TMP_CONTEXT}/kubelet"
+cat <<EOF > "${TMP_CONTEXT}/registry-hosts.toml"
+server = "https://${REGISTRY_HOST}:5000"
+[host."${REGISTRY_HOST}:5000"]
+  ca = "${NODE_TEST_CERT_FILE}"
+EOF
 BUILTIN_HACK_INST=
 if [ "${BUILTIN_SNAPSHOTTER:-}" == "true" ] ; then
     # Special configuration for CRI containerd + builtin stargz snapshotter
@@ -83,6 +88,8 @@ version = 2
   runtime_type = "io.containerd.runc.v2"
 [plugins."io.containerd.grpc.v1.cri".registry.configs."${REGISTRY_HOST}:5000".tls]
 ca_file = "${NODE_TEST_CERT_FILE}"
+[plugins."io.containerd.snapshotter.v1.stargz"]
+cri_keychain_image_service_path = "${CRI_SOCKET_PATH#unix://}"
 [plugins."io.containerd.snapshotter.v1.stargz".kubeconfig_keychain]
 enable_keychain = true
 kubeconfig_path = "/etc/kubernetes/snapshotter/config.conf"
@@ -92,12 +99,32 @@ EOF
     BUILTIN_HACK_INST="COPY containerd.hack.toml /etc/containerd/config.toml"
 fi
 cp "${KIND_REGISTRY_CA}" "${TMP_CONTEXT}/registry.crt"
-cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
+if [ "${FUSE_MANAGER:-}" == "true" ] ; then
+    echo "Enabling fuse manager"
+    cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
 FROM ${NODE_BASE_IMAGE_NAME}
 
 COPY registry.crt "${NODE_TEST_CERT_FILE}"
 COPY ./config.stargz.overwrite.toml ./config.containerd.append.toml /tmp/
-COPY kubelet /etc/default/kubelet
+COPY ./registry-hosts.toml /etc/containerd/certs.d/${REGISTRY_HOST}:5000/hosts.toml
+RUN cat /tmp/config.stargz.overwrite.toml > /etc/containerd-stargz-grpc/config.toml && \
+    cat /tmp/config.containerd.append.toml >> /etc/containerd/config.toml && \
+    update-ca-certificates
+
+RUN sed -i '1icri_listen_path = "/run/containerd-stargz-grpc/fuse-manager-cri.sock"' /etc/containerd-stargz-grpc/config.toml
+RUN echo "[fuse_manager]" >> /etc/containerd-stargz-grpc/config.toml
+RUN echo "enable = true" >> /etc/containerd-stargz-grpc/config.toml
+RUN echo "KUBELET_EXTRA_ARGS=--fail-swap-on=false --image-service-endpoint=${CRI_SOCKET_PATH}" > /etc/default/kubelet
+
+EOF
+
+else
+    cat <<EOF > "${TMP_CONTEXT}/Dockerfile"
+FROM ${NODE_BASE_IMAGE_NAME}
+
+COPY registry.crt "${NODE_TEST_CERT_FILE}"
+COPY ./config.stargz.overwrite.toml ./config.containerd.append.toml /tmp/
+COPY ./registry-hosts.toml /etc/containerd/certs.d/${REGISTRY_HOST}:5000/hosts.toml
 RUN cat /tmp/config.stargz.overwrite.toml > /etc/containerd-stargz-grpc/config.toml && \
     cat /tmp/config.containerd.append.toml >> /etc/containerd/config.toml && \
     update-ca-certificates
@@ -105,7 +132,16 @@ RUN cat /tmp/config.stargz.overwrite.toml > /etc/containerd-stargz-grpc/config.t
 ${BUILTIN_HACK_INST}
 
 EOF
-docker build -t "${NODE_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
+fi
+
+if [ "${TRANSFER_SERVICE:-}" == "false" ] ; then
+    cat <<'EOF' >> "${TMP_CONTEXT}/Dockerfile"
+RUN sed -i '/\[plugins\."io\.containerd\.grpc\.v1\.cri"\.containerd\]/a\  disable_snapshot_annotations = false' /etc/containerd/config.toml
+RUN cat /etc/containerd/config.toml
+EOF
+fi
+
+docker build --progress=plain -t "${NODE_IMAGE_NAME}" ${DOCKER_BUILD_ARGS:-} "${TMP_CONTEXT}"
 
 # cluster must be single node
 echo "Cleating kind cluster and connecting to the registry network..."

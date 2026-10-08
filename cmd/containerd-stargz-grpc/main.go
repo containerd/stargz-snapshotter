@@ -28,9 +28,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"time"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
+	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/contrib/snapshotservice"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/sys"
@@ -39,7 +41,10 @@ import (
 	"github.com/containerd/stargz-snapshotter/fusemanager"
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
+	"github.com/containerd/stargz-snapshotter/service/resolver"
+	"github.com/containerd/stargz-snapshotter/service/verifier"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
+	"github.com/containerd/stargz-snapshotter/util/criconn"
 	"github.com/containerd/stargz-snapshotter/version"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	metrics "github.com/docker/go-metrics"
@@ -47,16 +52,19 @@ import (
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 const (
-	defaultAddress             = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
-	defaultConfigPath          = "/etc/containerd-stargz-grpc/config.toml"
-	defaultLogLevel            = log.InfoLevel
-	defaultRootDir             = "/var/lib/containerd-stargz-grpc"
-	defaultImageServiceAddress = "/run/containerd/containerd.sock"
-	defaultFuseManagerAddress  = "/run/containerd-stargz-grpc/fuse-manager.sock"
-	fuseManagerBin             = "stargz-fuse-manager"
+	defaultAddress                = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+	defaultConfigPath             = "/etc/containerd-stargz-grpc/config.toml"
+	defaultLogLevel               = log.InfoLevel
+	defaultRootDir                = "/var/lib/containerd-stargz-grpc"
+	defaultImageServiceAddress    = "/run/containerd/containerd.sock"
+	defaultFuseManagerAddress     = "/run/containerd-stargz-grpc/fuse-manager.sock"
+	fuseManagerBin                = "stargz-fuse-manager"
+	defaultCRIContainerdAddress   = "/run/containerd/containerd.sock"
+	defaultCRIContainerdNamespace = "k8s.io"
 )
 
 var (
@@ -87,6 +95,15 @@ type snapshotterConfig struct {
 
 	// FuseManagerConfig is configuration for fusemanager
 	FuseManagerConfig `toml:"fuse_manager" json:"fuse_manager"`
+
+	// Containerd address used as the CRI backend
+	CRIContainerdAddress string `toml:"cri_containerd_address" json:"cri_containerd_address"`
+
+	// Containerd namespace used by containerd's CRI plugin
+	CRIContainerdNamespace string `toml:"cri_containerd_namespace" json:"cri_containerd_namespace"`
+
+	// Path to serve CRI service by stargz snapshotter
+	CRIListenPath string `toml:"cri_listen_path" json:"cri_listen_path"`
 }
 
 type FuseManagerConfig struct {
@@ -148,16 +165,8 @@ func main() {
 		config.Direct = true
 	}
 
-	// Configure keychain
-	keyChainConfig := keychainconfig.Config{
-		EnableKubeKeychain:         config.KubeconfigKeychainConfig.EnableKeychain,
-		EnableCRIKeychain:          config.CRIKeychainConfig.EnableKeychain,
-		KubeconfigPath:             config.KubeconfigPath,
-		DefaultImageServiceAddress: defaultImageServiceAddress,
-		ImageServicePath:           config.ImageServicePath,
-	}
-
 	var rs snapshots.Snapshotter
+	var rsMu sync.Mutex
 	fuseManagerConfig := config.FuseManagerConfig
 	if fuseManagerConfig.Enable {
 		fmPath := fuseManagerConfig.Path
@@ -190,6 +199,10 @@ func main() {
 			IPFS:                       config.IPFS,
 			MetadataStore:              config.MetadataStore,
 			DefaultImageServiceAddress: defaultImageServiceAddress,
+			CRIContainerdAddress:       config.CRIContainerdAddress,
+			CRIContainerdNamespace:     config.CRIContainerdNamespace,
+			CRIListenPath:              config.CRIListenPath,
+			StargzSnapshotterAddress:   *address,
 		}
 
 		fs, err := fusemanager.NewManagerClient(ctx, *rootDir, fmAddr, &fuseManagerConfig)
@@ -210,18 +223,74 @@ func main() {
 		}
 		log.G(ctx).Infof("Start snapshotter with fusemanager mode")
 	} else {
+		criContainerdAddress := config.CRIContainerdAddress
+		if criContainerdAddress == "" {
+			criContainerdAddress = defaultCRIContainerdAddress
+		}
+		criContainerdNamespace := config.CRIContainerdNamespace
+		if criContainerdNamespace == "" {
+			criContainerdNamespace = defaultCRIContainerdNamespace
+		}
+
+		if config.CRIKeychainConfig.EnableKeychain && config.ImageServicePath != "" && config.ImageServicePath != criContainerdAddress {
+			log.G(ctx).WithError(err).Fatalf("inconsistent global CRI backend and CRI keychain' backend service %q != %q", criContainerdAddress, config.ImageServicePath)
+		}
+
 		crirpc := rpc
-		// For CRI keychain, if listening path is different from stargz-snapshotter's socket, prepare for the dedicated grpc server and the socket.
-		serveCRISocket := config.CRIKeychainConfig.EnableKeychain && config.ListenPath != "" && config.ListenPath != *address
-		if serveCRISocket {
+		criListenPath := config.CRIListenPath
+		if config.ListenPath != "" {
+			if criListenPath != "" && criListenPath != config.ListenPath {
+				log.G(ctx).WithError(err).Fatalf("inconsistent global CRI socket and CRI keychain socket address %q != %q", criListenPath, config.ListenPath)
+			}
+			criListenPath = config.ListenPath
+		}
+		if criListenPath != "" && criListenPath != *address {
 			crirpc = grpc.NewServer()
 		}
-		credsFuncs, err := keychainconfig.ConfigKeychain(ctx, crirpc, &keyChainConfig)
+
+		credsFuncs, criListener, err := keychainconfig.ConfigKeychain(ctx, crirpc, &keychainconfig.Config{
+			EnableKubeKeychain: config.KubeconfigKeychainConfig.EnableKeychain,
+			EnableCRIKeychain:  config.CRIKeychainConfig.EnableKeychain,
+			KubeconfigPath:     config.KubeconfigPath,
+		})
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure keychain")
 		}
-		if serveCRISocket {
-			addr := config.ListenPath
+
+		criVerifier := verifier.NewCRIVerifier(
+			ctx,
+			config.Config,
+			resolver.RegistryHostsFromConfig(resolver.Config(config.ResolverConfig), credsFuncs...),
+			filepath.Join(*rootDir, "manager"),
+			criContainerdNamespace,
+			func() (runtime.RuntimeServiceClient, runtime.ImageServiceClient, *containerd.Client, error) {
+				conn, err := criconn.NewCRIConn(criContainerdAddress)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("failed to connect to CRI: %w", err)
+				}
+				ctdclient, err := containerd.New(criContainerdAddress)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("failed to connect to containerd: %w", err)
+				}
+				return runtime.NewRuntimeServiceClient(conn), runtime.NewImageServiceClient(conn), ctdclient, nil
+			},
+			func() snapshots.Snapshotter {
+				rsMu.Lock()
+				defer rsMu.Unlock()
+				return rs
+			},
+		)
+		if criListener != nil {
+			// CRI keychain connects to this service
+			localCRIRPC := grpc.NewServer()
+			runtime.RegisterImageServiceServer(localCRIRPC, criVerifier)
+			go localCRIRPC.Serve(criListener)
+		} else {
+			runtime.RegisterImageServiceServer(crirpc, criVerifier)
+		}
+
+		if criListenPath != "" && criListenPath != *address {
+			addr := criListenPath
 			// Prepare the directory for the socket
 			if err := os.MkdirAll(filepath.Dir(addr), 0700); err != nil {
 				log.G(ctx).WithError(err).Fatalf("failed to create directory %q", filepath.Dir(addr))
@@ -267,7 +336,10 @@ func main() {
 		}
 	}
 
-	cleanup, err := serve(ctx, rpc, *address, rs, config)
+	rsMu.Lock()
+	rs2 := rs
+	rsMu.Unlock()
+	cleanup, err := serve(ctx, rpc, *address, rs2, config)
 	if err != nil {
 		log.G(ctx).WithError(err).Fatalf("failed to serve snapshotter")
 	}
