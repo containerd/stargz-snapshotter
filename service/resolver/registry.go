@@ -70,6 +70,7 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.Regist
 		}) {
 			client := rhttp.NewClient()
 			client.Logger = nil // disable logging every request
+			client.HTTPClient.CheckRedirect = source.CheckRedirect
 			if h.RequestTimeoutSec >= 0 {
 				if h.RequestTimeoutSec == 0 {
 					timeout := defaultRequestTimeoutSec
