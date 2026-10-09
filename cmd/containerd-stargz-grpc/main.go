@@ -217,6 +217,11 @@ func main() {
 		if !managerNewlyStarted {
 			flags = append(flags, snbase.NoRestore)
 		}
+		imageServicePath := config.ImageServicePath
+		if imageServicePath == "" {
+			imageServicePath = defaultImageServiceAddress
+		}
+		flags = append(flags, snbase.CleanupOrphanRemoteSnapshotsOnStartup(imageServicePath))
 		rs, err = snbase.NewSnapshotter(ctx, filepath.Join(*rootDir, "snapshotter"), fs, flags...)
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
@@ -329,7 +334,11 @@ func main() {
 			log.G(ctx).WithError(err).Fatalf("failed to configure fs config")
 		}
 
-		rs, err = service.NewStargzSnapshotterService(ctx, *rootDir, &config.Config,
+		serviceConfig := config.Config
+		if serviceConfig.ImageServicePath == "" {
+			serviceConfig.ImageServicePath = defaultImageServiceAddress
+		}
+		rs, err = service.NewStargzSnapshotterService(ctx, *rootDir, &serviceConfig,
 			service.WithCredsFuncs(credsFuncs...), service.WithFilesystemOptions(fsOpts...))
 		if err != nil {
 			log.G(ctx).WithError(err).Fatalf("failed to configure snapshotter")
