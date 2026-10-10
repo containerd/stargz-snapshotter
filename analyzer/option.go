@@ -27,6 +27,7 @@ type analyzerOpts struct {
 	period       time.Duration
 	waitOnSignal bool
 	snapshotter  string
+	runtime      string
 	specOpts     SpecOpts
 	terminal     bool
 	stdin        bool
@@ -79,6 +80,13 @@ func WithWaitOnSignal() Option {
 func WithSnapshotter(snapshotter string) Option {
 	return func(opts *analyzerOpts) {
 		opts.snapshotter = snapshotter
+	}
+}
+
+// WithRuntime is the runtime to use for the analyzer container.
+func WithRuntime(runtime string) Option {
+	return func(opts *analyzerOpts) {
+		opts.runtime = runtime
 	}
 }
 
