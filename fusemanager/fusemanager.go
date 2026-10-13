@@ -31,7 +31,6 @@ import (
 
 	"github.com/containerd/log"
 	metrics "github.com/docker/go-metrics"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
@@ -55,7 +54,7 @@ func parseFlags() {
 	flag.StringVar(&fuseStoreAddr, "fusestore-path", "/var/lib/containerd-stargz-grpc/fusestore.db", "address for the fusemanager's store")
 	flag.StringVar(&address, "address", "/run/containerd-stargz-grpc/fuse-manager.sock", "address for the fusemanager's gRPC socket")
 	flag.StringVar(&metricsAddress, "metrics-address", "", "address for the fusemanager's metrics API")
-	flag.StringVar(&logLevel, "log-level", logrus.InfoLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
+	flag.StringVar(&logLevel, "log-level", log.InfoLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
 	flag.StringVar(&logPath, "log-path", "", "path to fusemanager's logs, logs to stderr by default, pass --log-level=panic to disable logging")
 
 	flag.Parse()
@@ -170,17 +169,15 @@ func waitUntilReady(ctx context.Context) (bool, error) {
 }
 
 func runFuseManager(ctx context.Context) error {
-	lvl, err := logrus.ParseLevel(logLevel)
-	if err != nil {
+	if err := log.SetLevel(logLevel); err != nil {
 		return fmt.Errorf("failed to prepare logger: %w", err)
 	}
 
-	logrus.SetLevel(lvl)
-	logrus.SetFormatter(&logrus.JSONFormatter{
-		TimestampFormat: log.RFC3339NanoFixed,
-	})
+	if err := log.SetFormat(log.JSONFormat); err != nil {
+		return fmt.Errorf("failed to set log format: %w", err)
+	}
 
-	golog.SetOutput(log.G(ctx).WriterLevel(logrus.DebugLevel))
+	golog.SetOutput(log.G(ctx).WriterLevel(log.DebugLevel))
 
 	// Prepare the directory for the socket
 	if err := os.MkdirAll(filepath.Dir(address), 0700); err != nil {
