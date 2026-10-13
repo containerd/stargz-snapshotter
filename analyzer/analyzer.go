@@ -31,8 +31,6 @@ import (
 
 	"github.com/containerd/console"
 	containerd "github.com/containerd/containerd/v2/client"
-	"github.com/containerd/containerd/v2/cmd/ctr/commands"
-	"github.com/containerd/containerd/v2/cmd/ctr/commands/tasks"
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/pkg/cio"
@@ -265,12 +263,14 @@ func Analyze(ctx context.Context, client *containerd.Client, ref string, opts ..
 		return "", err
 	}
 	if aOpts.terminal {
-		if err := tasks.HandleConsoleResize(ctx, task, con); err != nil {
+		stop, err := handleConsoleResize(ctx, task, con)
+		if err != nil {
 			log.G(ctx).WithError(err).Error("failed to resize console")
+		} else {
+			defer stop()
 		}
 	} else {
-		sigc := commands.ForwardAllSignals(ctx, task)
-		defer commands.StopCatch(sigc)
+		defer forwardAllSignals(ctx, task)()
 	}
 
 	// Wait until the task exit
