@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/service"
+	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/analyzer/fanotify/service"
 	"github.com/urfave/cli/v3"
 )
 

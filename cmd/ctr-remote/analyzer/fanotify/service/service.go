@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/conn"
+	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/analyzer/fanotify/conn"
 	"golang.org/x/sys/unix"
 )
 
