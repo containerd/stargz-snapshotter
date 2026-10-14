@@ -181,14 +181,31 @@ func (v *Verifier) FetchImageManifest(ctx context.Context, refspec reference.Spe
 
 func (v *Verifier) verifyLayer(ctx context.Context, refspec reference.Spec, targetLayerDigest digest.Digest, expectedDiffID digest.Digest, tocDigest digest.Digest) (bool, error) {
 	resolver := v.resolver(refspec)
-	if _, _, err := resolver.Resolve(ctx, refspec.String()); err != nil {
+	_, img, err := resolver.Resolve(ctx, refspec.String())
+	if err != nil {
 		return false, err
 	}
 	fetcher, err := resolver.Fetcher(ctx, refspec.String())
 	if err != nil {
 		return false, err
 	}
-	fetchReader, err := fetcher.Fetch(ctx, ocispec.Descriptor{Digest: targetLayerDigest, Size: -1})
+	manifest, err := containerdutil.FetchManifestPlatform(ctx, fetcher, img, platforms.DefaultSpec())
+	if err != nil {
+		return false, err
+	}
+	var layerDesc ocispec.Descriptor
+	var found bool
+	for _, l := range manifest.Layers {
+		if l.Digest == targetLayerDigest {
+			layerDesc = l
+			found = true
+			break
+		}
+	}
+	if !found {
+		return false, fmt.Errorf("layer %s not found in manifest of %s", targetLayerDigest, refspec.String())
+	}
+	fetchReader, err := fetcher.Fetch(ctx, layerDesc)
 	if err != nil {
 		return false, err
 	}
