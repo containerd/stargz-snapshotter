@@ -346,9 +346,6 @@ func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// shouldAuthenticate recognizes ECR's non-standard response to expired Basic
-// credentials. Ordinary permission denials and expired object URLs must still
-// reach the caller, which can refresh a redirected blob URL as appropriate.
 func shouldAuthenticate(resp *http.Response) bool {
 	if resp.StatusCode == http.StatusUnauthorized {
 		return true
@@ -357,8 +354,6 @@ func shouldAuthenticate(resp *http.Response) bool {
 		return false
 	}
 
-	// Bound error inspection and preserve the entire body, including oversized or
-	// unrecognized errors, for callers. Keep the original body's Close behavior.
 	const maxErrorBodySize = 64 * 1024
 	body := resp.Body
 	prefix, err := io.ReadAll(io.LimitReader(body, maxErrorBodySize+1))
@@ -376,8 +371,6 @@ func shouldAuthenticate(resp *http.Response) bool {
 	for _, registryError := range registryErrors {
 		var detail docker.Error
 		if errors.As(registryError, &detail) && detail.Message == "Your authorization token has expired. Reauthenticate and try again." {
-			// ECR omits the challenge on expiry. A Basic challenge makes the
-			// authorizer consult its credential source and replace its old handler.
 			if resp.Header == nil {
 				resp.Header = make(http.Header)
 			}
