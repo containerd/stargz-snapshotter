@@ -23,9 +23,11 @@
 package remote
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -324,7 +326,7 @@ func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// TODO: support more status codes and retries
-	if resp.StatusCode == http.StatusUnauthorized {
+	if shouldAuthenticate(resp) {
 		log.G(ctx).Infof("Received status code: %v. Refreshing creds...", resp.Status)
 
 		// prepare authorization for the target host using docker.Authorizer
@@ -332,14 +334,60 @@ func (tr *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			if errdefs.IsNotImplemented(err) {
 				return resp, nil
 			}
+			resp.Body.Close()
 			return nil, err
 		}
 
 		// re-authorize and send the request
+		resp.Body.Close()
 		return roundTrip(req.Clone(ctx))
 	}
 
 	return resp, nil
+}
+
+// shouldAuthenticate recognizes ECR's non-standard response to expired Basic
+// credentials. Ordinary permission denials and expired object URLs must still
+// reach the caller, which can refresh a redirected blob URL as appropriate.
+func shouldAuthenticate(resp *http.Response) bool {
+	if resp.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	if resp.StatusCode != http.StatusForbidden || resp.Body == nil || resp.Request == nil || resp.Request.URL == nil {
+		return false
+	}
+
+	// Bound error inspection and preserve the entire body, including oversized or
+	// unrecognized errors, for callers. Keep the original body's Close behavior.
+	const maxErrorBodySize = 64 * 1024
+	body := resp.Body
+	prefix, err := io.ReadAll(io.LimitReader(body, maxErrorBodySize+1))
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(prefix), body), body}
+	if err != nil || len(prefix) > maxErrorBodySize {
+		return false
+	}
+	var registryErrors docker.Errors
+	if err := json.Unmarshal(prefix, &registryErrors); err != nil {
+		return false
+	}
+	for _, registryError := range registryErrors {
+		var detail docker.Error
+		if errors.As(registryError, &detail) && detail.Message == "Your authorization token has expired. Reauthenticate and try again." {
+			// ECR omits the challenge on expiry. A Basic challenge makes the
+			// authorizer consult its credential source and replace its old handler.
+			if resp.Header == nil {
+				resp.Header = make(http.Header)
+			}
+			if resp.Header.Get("Www-Authenticate") == "" {
+				resp.Header.Set("Www-Authenticate", fmt.Sprintf("Basic realm=%q", "https://"+resp.Request.URL.Host+"/"))
+			}
+			return true
+		}
+	}
+	return false
 }
 
 func redirect(ctx context.Context, blobURL string, tr http.RoundTripper, timeout time.Duration, header http.Header) (url string, withHeader http.Header, err error) {
