@@ -34,7 +34,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
-	"github.com/containerd/stargz-snapshotter/service/verifier"
+	verifier "github.com/containerd/stargz-snapshotter/service/verifier/cri"
 	"github.com/containerd/stargz-snapshotter/util/criconn"
 	grpc "google.golang.org/grpc"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
