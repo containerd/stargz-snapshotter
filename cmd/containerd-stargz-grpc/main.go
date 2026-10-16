@@ -42,7 +42,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
-	"github.com/containerd/stargz-snapshotter/service/verifier"
+	verifier "github.com/containerd/stargz-snapshotter/service/verifier/cri"
 	snbase "github.com/containerd/stargz-snapshotter/snapshot"
 	"github.com/containerd/stargz-snapshotter/util/criconn"
 	"github.com/containerd/stargz-snapshotter/version"
