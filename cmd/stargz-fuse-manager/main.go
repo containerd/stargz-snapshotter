@@ -37,7 +37,7 @@ import (
 	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/service/keychain/keychainconfig"
 	"github.com/containerd/stargz-snapshotter/service/resolver"
-	"github.com/containerd/stargz-snapshotter/service/verifier"
+	verifier "github.com/containerd/stargz-snapshotter/service/verifier/cri"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"

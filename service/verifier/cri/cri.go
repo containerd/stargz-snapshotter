@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package verifier
+package cri
 
 import (
 	"context"
@@ -33,6 +33,7 @@ import (
 	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	"github.com/containerd/stargz-snapshotter/service"
+	"github.com/containerd/stargz-snapshotter/service/verifier"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
 	distribution "github.com/distribution/reference"
 	"github.com/opencontainers/go-digest"
@@ -80,7 +81,7 @@ func NewCRIVerifier(
 			if rc != nil && sn != nil {
 				server.criMu.Lock()
 				server.cri = ic
-				server.verifier = NewVerifier(
+				server.verifier = verifier.NewVerifier(
 					rootDir,
 					cc,
 					ctdnamespace,
@@ -115,7 +116,7 @@ type instrumentedService struct {
 	cri   runtime.ImageServiceClient
 	criMu sync.Mutex
 
-	verifier   *Verifier
+	verifier   *verifier.Verifier
 	verifyLock *namedmutex.NamedMutex
 }
 
