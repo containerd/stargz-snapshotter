@@ -181,6 +181,13 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 		return nil, err
 	}
 
+	if cfg.HTTPCacheType != memoryCacheType && cfg.HTTPCacheChunkTTLSec > 0 {
+		cache.StartCleanupJanitor(
+			filepath.Join(root, "httpcache"),
+			time.Duration(cfg.HTTPCacheChunkTTLSec)*time.Second,
+		)
+	}
+
 	return &Resolver{
 		rootDir:                 root,
 		resolver:                remote.NewResolver(cfg.BlobConfig, resolveHandlers),
