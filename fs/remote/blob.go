@@ -34,6 +34,7 @@ import (
 
 	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/containerd/stargz-snapshotter/cache"
+	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	"github.com/containerd/stargz-snapshotter/fs/source"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sync/errgroup"
@@ -262,11 +263,13 @@ func (b *blob) ReadAt(p []byte, offset int64, opts ...Option) (int, error) {
 	fr := b.getFetcher()
 
 	if err := b.prepareChunksForRead(allRegion, offset, p, fr, allData, &readAtOpts); err != nil {
+		commonmetrics.IncBlobFetchError(err)
 		return 0, err
 	}
 
 	// Read required data
 	if err := b.fetchRange(allData, &readAtOpts); err != nil {
+		commonmetrics.IncBlobFetchError(err)
 		return 0, err
 	}
 
