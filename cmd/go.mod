@@ -5,7 +5,7 @@ go 1.26.6
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.2
 	github.com/containerd/containerd/api v1.12.0
-	github.com/containerd/containerd/v2 v2.4.1
+	github.com/containerd/containerd/v2 v2.4.2
 	github.com/containerd/go-cni v1.1.14
 	github.com/containerd/log v0.2.0
 	github.com/containerd/platforms v1.0.0-rc.5
