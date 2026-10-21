@@ -24,7 +24,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/containerd/stargz-snapshotter/analyzer/fanotify/conn"
+	"github.com/containerd/stargz-snapshotter/cmd/ctr-remote/analyzer/fanotify/conn"
 )
 
 // Fanotifier monitors "/" mountpoint of a new mount namespace and notifies all
