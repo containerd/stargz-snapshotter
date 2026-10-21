@@ -462,6 +462,10 @@ func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
 	return nil
 }
 
+func (fs *filesystem) Cleanup(ctx context.Context) error {
+	return fs.resolver.Cleanup(ctx)
+}
+
 func unmount(target string, flags int) error {
 	for {
 		if err := unix.Unmount(target, flags); err != unix.EINTR {
