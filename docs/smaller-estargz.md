@@ -4,9 +4,9 @@ The following flags of `ctr-remote i convert` and `ctr-remote i optimize` allow 
 
 - `--estargz-external-toc`: Separate TOC JSON into another image (called "TOC image"). The result eStargz doesn't contain TOC so we can expect a smaller size than normal eStargz.
 
-- `--estargz-min-chunk-size`: The minimal number of bytes of data must be written in one gzip stream. If it's > 0, multiple files and chunks can be written into one gzip stream. Smaller number of gzip header and smaller size of the result blob can be expected. `--estargz-min-chunk-size=0` produces normal eStargz.
+- `--estargz-min-chunk-size`: The minimal number of bytes of data must be written in one gzip stream. If it's > 0, multiple files and chunks can be written into one gzip stream. Smaller number of gzip header and smaller size of the result blob can be expected. `--estargz-min-chunk-size=0` produces normal eStargz. A trailing gzip stream that cannot reach the minimum is folded into the preceding stream instead, so a stream falls below `--estargz-min-chunk-size` only when the layer itself is smaller.
 
-- `--estargz-parallelism`: The number of workers used to build each layer. The tar is split into this many slices that are compressed in parallel, so the value also fixes the chunk boundaries: pinning it makes builds reproducible across machines regardless of their CPU count. `0` (the default) uses `GOMAXPROCS`; `1` forces a fully sequential build. This has no effect with `--estargz-min-chunk-size`, which is built with a single worker.
+- `--estargz-parallelism`: The number of workers used to build each layer. The tar is split into this many slices that are compressed in parallel, so the value also fixes the chunk boundaries: pinning it makes builds reproducible across machines regardless of their CPU count. `0` (the default) uses `GOMAXPROCS`; `1` forces a fully sequential build. With `--estargz-min-chunk-size`, fewer workers may be used when the layer is too small to give each one at least one full gzip stream.
 
 ## `--estargz-external-toc` usage
 

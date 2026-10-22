@@ -123,6 +123,10 @@ func WithContext(ctx context.Context) Option {
 // By increasing this number, one gzip stream can contain multiple files
 // and it hopefully leads to smaller result blob.
 // NOTE: This adds a TOC property that old reader doesn't understand.
+// Builds run in parallel across the configured workers (see WithParallelism);
+// a trailing stream that cannot reach minChunkSize is folded into its
+// predecessor, so a stream falls below minChunkSize only when the input itself
+// is smaller.
 func WithMinChunkSize(minChunkSize int) Option {
 	return func(o *options) error {
 		o.minChunkSize = minChunkSize
@@ -135,8 +139,8 @@ func WithMinChunkSize(minChunkSize int) Option {
 // concurrently, so the value also fixes the resulting chunk boundaries: pinning
 // it makes builds reproducible across machines regardless of their CPU count.
 // Zero (the default) selects runtime.GOMAXPROCS(0); a value of 1 forces a fully
-// sequential build. This has no effect together with WithMinChunkSize, which is
-// always built with a single worker.
+// sequential build. With WithMinChunkSize, fewer workers may be used when the
+// layer is too small to give each one at least one full gzip stream.
 func WithParallelism(workers int) Option {
 	return func(o *options) error {
 		o.parallelism = workers
@@ -246,11 +250,16 @@ func Build(tarBlob *io.SectionReader, opt ...Option) (_ *Blob, rErr error) {
 		workers = runtime.GOMAXPROCS(0)
 	}
 	var tarParts [][]*entry
-	if opts.minChunkSize > 0 {
-		// Each entry needs to know the size of the current gzip stream so they
-		// cannot be processed in parallel.
+	switch {
+	case workers <= 1:
 		tarParts = [][]*entry{entries}
-	} else {
+	case opts.minChunkSize > 0:
+		// Give each worker enough data to fill at least one full stream even at
+		// gzip's maximum compression ratio, so that folding a short trailing
+		// stream (see cutGz) never crosses worker boundaries. This coarsens
+		// parallelism, but layers small enough to stay sequential compress fast.
+		tarParts = divideEntriesByMinSize(entries, workers, int64(opts.minChunkSize)*maxGzipCompressionRatio)
+	default:
 		tarParts = divideEntries(entries, workers)
 	}
 	writers := make([]*Writer, len(tarParts))
@@ -391,6 +400,50 @@ func tocAndFooter(compressor Compressor, toc *JTOC, offset int64) (io.Reader, di
 		return nil, "", err
 	}
 	return buf, tocDigest, nil
+}
+
+// maxGzipCompressionRatio is the largest ratio DEFLATE can achieve: a 258-byte
+// match coded as a roughly two-bit symbol pair, i.e. 258*8/2 = 1032. A slice
+// of MinChunkSize*1032 bytes thus compresses to at least MinChunkSize.
+const maxGzipCompressionRatio = 1032
+
+// divideEntriesByMinSize packs entries into at most maxParts consecutive
+// groups of at least minPartSize uncompressed bytes each (total/maxParts when
+// that is larger). A trailing remainder below minPartSize is folded into the
+// last group; data that cannot fill even one group is returned as one.
+func divideEntriesByMinSize(entries []*entry, maxParts int, minPartSize int64) (set [][]*entry) {
+	var total int64
+	for _, e := range entries {
+		total += e.header.Size
+	}
+	target := total / int64(maxParts)
+	if target < minPartSize {
+		target = minPartSize
+	}
+	var (
+		cur     []*entry
+		curSize int64
+	)
+	for _, e := range entries {
+		cur = append(cur, e)
+		curSize += e.header.Size
+		// the last group takes the remainder, so the count never exceeds maxParts
+		if curSize >= target && len(set) < maxParts-1 {
+			set = append(set, cur)
+			cur, curSize = nil, 0
+		}
+	}
+	switch {
+	case len(cur) == 0:
+	case len(set) > 0 && curSize < minPartSize:
+		set[len(set)-1] = append(set[len(set)-1], cur...)
+	default:
+		set = append(set, cur)
+	}
+	if len(set) == 0 {
+		set = [][]*entry{entries}
+	}
+	return
 }
 
 // divideEntries divides passed entries to the parts at least the number specified by the
