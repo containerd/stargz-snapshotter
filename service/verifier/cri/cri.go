@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -164,17 +165,8 @@ func (in *instrumentedService) PullImage(ctx context.Context, r *runtime.PullIma
 	// If there are multiple parallel pullings of layers on a same ChainID before the snapshot
 	// is created, they'll pass the check even if their TOCDigests are different. Prevent this
 	// by introducing a lock per DiffID.
-	lockingDiffIDs := make([]digest.Digest, len(diffIDs))
-	copy(lockingDiffIDs, diffIDs)
-	sort.Slice(lockingDiffIDs, func(i, j int) bool { return lockingDiffIDs[i].String() < lockingDiffIDs[j].String() })
-	for _, d := range lockingDiffIDs {
-		in.verifyLock.Lock(d.String())
-	}
-	defer func() {
-		for _, d := range lockingDiffIDs {
-			in.verifyLock.Unlock(d.String())
-		}
-	}()
+	unlock := in.lockDiffIDs(diffIDs)
+	defer unlock()
 
 	ok, err := in.verifier.Verify(ctx, diffIDs, layers)
 	if err != nil {
@@ -185,6 +177,21 @@ func (in *instrumentedService) PullImage(ctx context.Context, r *runtime.PullIma
 	}
 
 	return cri.PullImage(ctx, r)
+}
+
+func (in *instrumentedService) lockDiffIDs(diffIDs []digest.Digest) (unlock func()) {
+	lockingDiffIDs := make([]digest.Digest, len(diffIDs))
+	copy(lockingDiffIDs, diffIDs)
+	sort.Slice(lockingDiffIDs, func(i, j int) bool { return lockingDiffIDs[i].String() < lockingDiffIDs[j].String() })
+	lockingDiffIDs = slices.Compact(lockingDiffIDs)
+	for _, d := range lockingDiffIDs {
+		in.verifyLock.Lock(d.String())
+	}
+	return func() {
+		for _, d := range lockingDiffIDs {
+			in.verifyLock.Unlock(d.String())
+		}
+	}
 }
 
 func (in *instrumentedService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequest) (_ *runtime.RemoveImageResponse, err error) {
