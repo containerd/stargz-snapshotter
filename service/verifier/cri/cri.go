@@ -53,15 +53,17 @@ func NewCRIVerifier(
 ) runtime.ImageServiceServer {
 	server := &instrumentedService{
 		verifyLock: new(namedmutex.NamedMutex),
+		ready:      make(chan struct{}),
 	}
 	go func() {
+		defer close(server.ready)
 		log.G(ctx).Debugf("Waiting for CRI service is started...")
 		var rc runtime.RuntimeServiceClient
 		var ic runtime.ImageServiceClient
 		var cc *containerd.Client
 		var sn snapshots.Snapshotter
 		var err error
-		for range 100 {
+		for range 1000 {
 			// wait for all backend services being ready to serve
 			if rc == nil {
 				rc, ic, cc, err = connectCRIContainerd()
@@ -104,7 +106,7 @@ func NewCRIVerifier(
 				server.criMu.Unlock()
 				return
 			}
-			time.Sleep(10 * time.Second)
+			time.Sleep(time.Second)
 		}
 		log.G(ctx).Warnf("no connection is available to the backend")
 	}()
@@ -119,9 +121,15 @@ type instrumentedService struct {
 
 	verifier   *verifier.Verifier
 	verifyLock *namedmutex.NamedMutex
+	ready      chan struct{}
 }
 
-func (in *instrumentedService) getCRI() (c runtime.ImageServiceClient) {
+func (in *instrumentedService) getCRI(ctx context.Context) (c runtime.ImageServiceClient) {
+	select {
+	case <-in.ready:
+	case <-ctx.Done():
+		return nil
+	}
 	in.criMu.Lock()
 	c = in.cri
 	in.criMu.Unlock()
@@ -129,7 +137,7 @@ func (in *instrumentedService) getCRI() (c runtime.ImageServiceClient) {
 }
 
 func (in *instrumentedService) ListImages(ctx context.Context, r *runtime.ListImagesRequest) (res *runtime.ListImagesResponse, err error) {
-	cri := in.getCRI()
+	cri := in.getCRI(ctx)
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
 	}
@@ -137,7 +145,7 @@ func (in *instrumentedService) ListImages(ctx context.Context, r *runtime.ListIm
 }
 
 func (in *instrumentedService) ImageStatus(ctx context.Context, r *runtime.ImageStatusRequest) (res *runtime.ImageStatusResponse, err error) {
-	cri := in.getCRI()
+	cri := in.getCRI(ctx)
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
 	}
@@ -145,7 +153,7 @@ func (in *instrumentedService) ImageStatus(ctx context.Context, r *runtime.Image
 }
 
 func (in *instrumentedService) PullImage(ctx context.Context, r *runtime.PullImageRequest) (res *runtime.PullImageResponse, err error) {
-	cri := in.getCRI()
+	cri := in.getCRI(ctx)
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
 	}
@@ -195,7 +203,7 @@ func (in *instrumentedService) lockDiffIDs(diffIDs []digest.Digest) (unlock func
 }
 
 func (in *instrumentedService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequest) (_ *runtime.RemoveImageResponse, err error) {
-	cri := in.getCRI()
+	cri := in.getCRI(ctx)
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
 	}
@@ -204,7 +212,7 @@ func (in *instrumentedService) RemoveImage(ctx context.Context, r *runtime.Remov
 }
 
 func (in *instrumentedService) ImageFsInfo(ctx context.Context, r *runtime.ImageFsInfoRequest) (res *runtime.ImageFsInfoResponse, err error) {
-	cri := in.getCRI()
+	cri := in.getCRI(ctx)
 	if cri == nil {
 		return nil, errors.New("server is not initialized yet")
 	}

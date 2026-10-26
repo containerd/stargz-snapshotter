@@ -17,11 +17,19 @@
 package cri
 
 import (
+	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/stargz-snapshotter/service"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
 	"github.com/opencontainers/go-digest"
+	"google.golang.org/grpc"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 func TestLockDiffIDs(t *testing.T) {
@@ -76,5 +84,62 @@ func mustReturn(t *testing.T, f func() func()) func() {
 	case <-time.After(5 * time.Second):
 		t.Fatal("deadlock detected")
 		return nil
+	}
+}
+
+type fakeRuntimeService struct {
+	runtime.RuntimeServiceClient
+}
+
+type fakeImageService struct {
+	runtime.ImageServiceClient
+}
+
+func (fakeImageService) ImageFsInfo(context.Context, *runtime.ImageFsInfoRequest, ...grpc.CallOption) (*runtime.ImageFsInfoResponse, error) {
+	return &runtime.ImageFsInfoResponse{}, nil
+}
+
+type fakeSnapshotter struct {
+	snapshots.Snapshotter
+}
+
+func TestRequestBeforeInitialized(t *testing.T) {
+	var snapshotterCalls atomic.Int32
+	server := NewCRIVerifier(
+		context.Background(),
+		service.Config{},
+		nil,
+		t.TempDir(),
+		"k8s.io",
+		func() (runtime.RuntimeServiceClient, runtime.ImageServiceClient, *containerd.Client, error) {
+			return fakeRuntimeService{}, fakeImageService{}, nil, nil
+		},
+		func() snapshots.Snapshotter {
+			if snapshotterCalls.Add(1) == 1 {
+				return nil
+			}
+			return fakeSnapshotter{}
+		},
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := server.ImageFsInfo(ctx, &runtime.ImageFsInfoRequest{}); err != nil {
+		t.Fatalf("request issued before initialization must succeed after initialization: %v", err)
+	}
+	if n := snapshotterCalls.Load(); n < 2 {
+		t.Fatalf("request must wait for initialization; snapshotter getter called %d times", n)
+	}
+}
+
+func TestRequestCanceledBeforeInitialized(t *testing.T) {
+	in := &instrumentedService{ready: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := in.ImageFsInfo(ctx, &runtime.ImageFsInfoRequest{}); err == nil {
+		t.Fatal("request must fail when the context is done before initialization")
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("request must return after the context is done: %v", ctx.Err())
 	}
 }
