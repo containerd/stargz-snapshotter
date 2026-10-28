@@ -28,7 +28,7 @@ require (
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 	google.golang.org/grpc v1.84.0
-	k8s.io/cri-api v0.37.1
+	k8s.io/cri-api v0.37.2
 	tags.cncf.io/container-device-interface v1.1.1
 )
 
