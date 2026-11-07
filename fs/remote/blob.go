@@ -33,8 +33,11 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/v2/pkg/reference"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cache"
+	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
@@ -71,6 +74,15 @@ type blob struct {
 	fetchedRegionCopyMu sync.Mutex
 
 	resolver *Resolver
+
+	// layer labels the skipped-caching counter; empty when not known.
+	layer digest.Digest
+
+	// Rate limits the warning logged when a chunk is served without being
+	// cached, which under a full cache would otherwise be logged per chunk.
+	skipLogMu      sync.Mutex
+	skipLogLast    time.Time
+	skipLogDropped int
 
 	closed   bool
 	closedMu sync.Mutex
@@ -378,6 +390,12 @@ func (b *blob) fetchRegions(allData map[region]io.Writer, fetched map[region]boo
 	return nil
 }
 
+// fetchRangeSharedRetries bounds how many times a caller that joined another
+// caller's fetch retries when the result is not in the cache to copy. A chunk
+// that could not be cached is served only to the caller that fetched it, so
+// retrying may never find it.
+const fetchRangeSharedRetries = 2
+
 // fetchRange fetches all specified chunks from local cache and remote blob.
 func (b *blob) fetchRange(allData map[region]io.Writer, opts *options) error {
 	if len(allData) == 0 {
@@ -385,20 +403,24 @@ func (b *blob) fetchRange(allData map[region]io.Writer, opts *options) error {
 	}
 
 	key := makeSyncKey(allData)
-	fetched := make(map[region]bool)
-	_, err, shared := b.fetchedRegionGroup.Do(key, func() (any, error) {
-		return nil, b.fetchRegions(allData, fetched, opts)
-	})
-
-	// When unblocked try to read from cache in case if there were no errors
-	// If we fail reading from cache, fetch from remote registry again
-	if err == nil && shared {
-		if err := b.handleSharedFetch(allData, fetched, opts); err != nil {
-			return b.fetchRange(allData, opts) // retry on error
+	for range fetchRangeSharedRetries {
+		fetched := make(map[region]bool)
+		_, err, shared := b.fetchedRegionGroup.Do(key, func() (any, error) {
+			return nil, b.fetchRegions(allData, fetched, opts)
+		})
+		if err != nil || !shared {
+			return err
+		}
+		// When unblocked try to read from cache in case if there were no errors
+		// If we fail reading from cache, fetch from remote registry again
+		if err := b.handleSharedFetch(allData, fetched, opts); err == nil {
+			return nil
 		}
 	}
 
-	return err
+	// The shared result keeps missing from the cache, so fetch this range
+	// without joining anyone, at the cost of a duplicate range request.
+	return b.fetchRegions(allData, make(map[region]bool), opts)
 }
 
 // handleSharedFetch handles the case when multiple goroutines share the same fetch result
@@ -527,27 +549,69 @@ func positive(n int64) int64 {
 	return n
 }
 
-// cacheChunkData handles caching of chunk data
+// tolerantWriter passes writes through to w, records the first error instead
+// of returning it, and always reports the full write. io.MultiWriter stops at
+// the first failing writer, so without this a failing cache write would keep
+// the fetched bytes from reaching the caller's buffer.
+type tolerantWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (t *tolerantWriter) Write(p []byte) (int, error) {
+	if t.err == nil {
+		if _, err := t.w.Write(p); err != nil {
+			t.err = err
+		}
+	}
+	return len(p), nil
+}
+
+// cacheChunkData caches a fetched chunk and, if the caller asked for it, copies
+// it to the caller's buffer. Failing to cache does not fail the read: the chunk
+// is served and not kept. Only a short response body is an error.
 func (b *blob) cacheChunkData(chunk region, r io.Reader, fr fetcher, allData map[region]io.Writer, fetched map[region]bool, opts *options) error {
+	var dest io.Writer
+	if _, ok := fetched[chunk]; ok {
+		dest = allData[chunk]
+	}
+
 	id := fr.genID(chunk)
 	cw, err := b.cache.Add(id, opts.cacheOpts...)
 	if err != nil {
-		return fmt.Errorf("failed to create cache writer: %w", err)
+		// The chunk's bytes must still be consumed, or every following
+		// chunk in the response body would be read at the wrong offset.
+		if dest == nil {
+			dest = io.Discard
+		}
+		if _, err := io.CopyN(dest, r, chunk.size()); err != nil {
+			return fmt.Errorf("failed to read chunk data: %w", err)
+		}
+		b.skippedCaching(chunk, fetched, opts, fmt.Errorf("failed to create cache writer: %w", err))
+		return nil
 	}
 	defer cw.Close()
 
-	w := io.Writer(cw)
-	if _, ok := fetched[chunk]; ok {
-		w = io.MultiWriter(w, allData[chunk])
+	tw := &tolerantWriter{w: cw}
+	w := io.Writer(tw)
+	if dest != nil {
+		w = io.MultiWriter(tw, dest)
 	}
 
 	if _, err := io.CopyN(w, r, chunk.size()); err != nil {
 		cw.Abort()
 		return fmt.Errorf("failed to write chunk data: %w", err)
 	}
+	if tw.err != nil {
+		cw.Abort()
+		b.skippedCaching(chunk, fetched, opts, fmt.Errorf("failed to write chunk data: %w", tw.err))
+		return nil
+	}
 
 	if err := cw.Commit(); err != nil {
-		return fmt.Errorf("failed to commit chunk: %w", err)
+		cw.Abort()
+		b.skippedCaching(chunk, fetched, opts, fmt.Errorf("failed to commit chunk: %w", err))
+		return nil
 	}
 
 	b.fetchedRegionSetMu.Lock()
@@ -556,4 +620,36 @@ func (b *blob) cacheChunkData(chunk region, r io.Reader, fr fetcher, allData map
 	fetched[chunk] = true
 
 	return nil
+}
+
+// skipLogInterval is the minimum interval between warnings about chunks served
+// without being cached, per blob.
+const skipLogInterval = time.Minute
+
+// skippedCaching records a chunk that was served to the caller but not cached.
+// It is marked fetched so that fetchRegions does not fail the read for it, but
+// is left out of fetchedRegionSet because it is not in the cache.
+func (b *blob) skippedCaching(chunk region, fetched map[region]bool, opts *options, cause error) {
+	fetched[chunk] = true
+	commonmetrics.IncCacheWriteSkipped(b.layer)
+
+	b.skipLogMu.Lock()
+	if time.Since(b.skipLogLast) < skipLogInterval {
+		b.skipLogDropped++
+		b.skipLogMu.Unlock()
+		return
+	}
+	dropped := b.skipLogDropped
+	b.skipLogLast, b.skipLogDropped = time.Now(), 0
+	b.skipLogMu.Unlock()
+
+	ctx := opts.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	log.G(ctx).WithError(cause).
+		WithField("layer", b.layer.String()).
+		WithField("chunk", fmt.Sprintf("%d-%d", chunk.b, chunk.e)).
+		WithField("suppressed", dropped).
+		Warn("serving chunk without caching it")
 }
