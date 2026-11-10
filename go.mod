@@ -23,8 +23,8 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/prometheus/client_golang v1.24.1
 	go.etcd.io/bbolt v1.5.0
-	golang.org/x/sync v0.24.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sync v0.25.0
+	golang.org/x/sys v0.50.0
 	google.golang.org/grpc v1.84.0
 	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1
