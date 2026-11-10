@@ -496,7 +496,7 @@ func copyAttr(dest, src *fuse.Attr) {
 	dest.Owner = src.Owner
 	dest.Rdev = src.Rdev
 	dest.Blksize = src.Blksize
-	dest.Padding = src.Padding
+	dest.Flags = src.Flags
 }
 
 func layerToAttr(l layer.Layer, out *fuse.Attr) fusefs.StableAttr {
@@ -513,7 +513,7 @@ func layerToAttr(l layer.Layer, out *fuse.Attr) fusefs.StableAttr {
 	// out.Mtime
 	// out.Mtimensec
 	// out.Rdev
-	// out.Padding
+	// out.Flags
 
 	return fusefs.StableAttr{
 		Mode: out.Mode,
@@ -534,7 +534,7 @@ func defaultFileAttr(size uint64, out *fuse.Attr) fusefs.StableAttr {
 	// out.Mtime
 	// out.Mtimensec
 	// out.Rdev
-	// out.Padding
+	// out.Flags
 	return fusefs.StableAttr{
 		Mode: out.Mode,
 	}
@@ -551,7 +551,7 @@ func defaultDirAttr(out *fuse.Attr) fusefs.StableAttr {
 	// out.Mtime
 	// out.Mtimensec
 	// out.Rdev
-	// out.Padding
+	// out.Flags
 
 	return fusefs.StableAttr{
 		Mode: out.Mode,
@@ -569,7 +569,7 @@ func defaultLinkAttr(out *fuse.Attr) fusefs.StableAttr {
 	// out.Mtime
 	// out.Mtimensec
 	// out.Rdev
-	// out.Padding
+	// out.Flags
 
 	return fusefs.StableAttr{
 		Mode: out.Mode,

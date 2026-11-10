@@ -15,7 +15,7 @@ require (
 	github.com/docker/go-metrics v0.1.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
-	github.com/hanwen/go-fuse/v2 v2.11.0
+	github.com/hanwen/go-fuse/v2 v2.12.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/klauspost/compress v1.20.1
 	github.com/moby/sys/mountinfo v0.7.2

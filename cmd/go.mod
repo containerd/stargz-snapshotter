@@ -81,7 +81,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/hanwen/go-fuse/v2 v2.11.0 // indirect
+	github.com/hanwen/go-fuse/v2 v2.12.1 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/intel/goresctrl v0.13.0 // indirect
