@@ -61,6 +61,26 @@ type MirrorConfig struct {
 
 type Credential func(string, reference.Spec) (string, string, error)
 
+// returnRedirectResponse is used as CheckRedirect of the http.Client that
+// go-retryablehttp uses internally. It makes that client return 3xx responses
+// as-is instead of following them.
+//
+// go-retryablehttp's RoundTripper calls into a full http.Client, which by
+// default follows redirects. fs/remote uses host.Client.Transport directly and
+// expects a single round trip: it inspects the 3xx returned by the registry and
+// caches the redirected location (e.g. ECR -> S3 pre-signed URL) for
+// subsequent range requests. If the redirect is followed internally,
+// fs/remote only sees the final 2xx, keeps the registry URL, and every
+// chunk fetch goes through the registry again (on ECR, one
+// GetDownloadUrlForLayer API call per range request).
+//
+// Users of host.Client (containerd's docker resolver, docker.Authorizer)
+// are not affected: the outer http.Client returned by StandardClient()
+// still follows redirects, one hop at a time through this transport.
+func returnRedirectResponse(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
 // RegistryHostsFromConfig creates RegistryHosts (a set of registry configuration) from Config.
 func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.RegistryHosts {
 	return func(ref reference.Spec) (hosts []docker.RegistryHost, _ error) {
@@ -70,6 +90,7 @@ func RegistryHostsFromConfig(cfg Config, credsFuncs ...Credential) source.Regist
 		}) {
 			client := rhttp.NewClient()
 			client.Logger = nil // disable logging every request
+			client.HTTPClient.CheckRedirect = returnRedirectResponse
 			if h.RequestTimeoutSec >= 0 {
 				if h.RequestTimeoutSec == 0 {
 					timeout := defaultRequestTimeoutSec

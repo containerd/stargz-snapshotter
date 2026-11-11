@@ -141,6 +141,7 @@ func RegistryHostsFromCRIConfig(ctx context.Context, config Registry, credsFuncs
 			)
 
 			rclient.Logger = nil // disable logging every request
+			rclient.HTTPClient.CheckRedirect = returnRedirectResponse
 
 			if config.TLS != nil {
 				if tr, ok := rclient.HTTPClient.Transport.(*http.Transport); ok {
