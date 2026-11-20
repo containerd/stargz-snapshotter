@@ -6,7 +6,7 @@ This doc describes example usages of `ctr-remote image optimize` command for con
 This command works on containerd so containerd needs to run on your environment.
 So this converts an image stored in containerd and stores the resulting image to containerd.
 
-Because the resulting image is stored to containerd, you can use `ctr-remote image pull` and `ctr-remote image push` commands for pulling/pushing images from/to regstries.
+Because the resulting image is stored to containerd, you can use `ctr-remote image pull` and `ctr-remote image push` commands for pulling/pushing images from/to registries.
 [nerdctl](https://github.com/containerd/nerdctl), Docker-compatible CLI for containerd, allows you to pull/push images using `~/.docker/config.json`.
 Various other containerd-based commands like `ctr-remote content get`, `ctr-remote images export` and other `ctr-remote` and `nerdctl` commands can also be used for debugging and inspecting the resulting eStargz image.
 
@@ -47,7 +47,7 @@ $ docker exec -it containerd_demo /bin/bash
 ## Optimizing an image
 
 The following command optimizes an (non-eStargz) image `ghcr.io/stargz-containers/golang:1.15.3-buster-org` (this is a copy of `golang:1.15.3-buster`) and pushes the result eStargz image into `registry2:5000/golang:1.15.3-esgz`.
-This doesn't append workload-related configuration options (e.g. `--entrypoint`) so this optimizes the image against the default configurations baked to the image e.g. through Dockefile instructions (`ENTRYPOINT`, etc) when building the original image.
+This doesn't append workload-related configuration options (e.g. `--entrypoint`) so this optimizes the image against the default configurations baked to the image e.g. through Dockerfile instructions (`ENTRYPOINT`, etc) when building the original image.
 
 ```
 ctr-remote image pull ghcr.io/stargz-containers/golang:1.15.3-buster-org
@@ -85,7 +85,7 @@ You can enable host networking for the container using the `net-host` flag.
 You can optimize GPU-based images using the `gpu` flag. The flag expects a comma separated list of integers or 'all'.
 
 - Prerequisites
-  - NVIDIA GPU Drivers and Contaienr Toolkit: For details, refer to the [docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+  - NVIDIA GPU Drivers and Container Toolkit: For details, refer to the [docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
   - CDI Specification: For details, refer to the [docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html)
 
 ```console
@@ -243,7 +243,7 @@ If you want to customize the configuration, the following options are useful.
 
 |Option|Description|
 ---|---
-|`--add-hosts`|Commma-separated list of hosts configuration (formatted as `hostname:IP`) for `/etc/hosts`|
+|`--add-hosts`|Comma-separated list of hosts configuration (formatted as `hostname:IP`) for `/etc/hosts`|
 |`--dns-nameservers`|Comma-separated `nameserver` configs added to the container's `/etc/resolv.conf`|
 |`--dns-search-domains`|Comma-separated `search` configs added to the container's `/etc/resolv.conf`|
 |`--dns-options`|Comma-separated `options` configs added to the container's `/etc/resolv.conf`|
@@ -306,7 +306,7 @@ Note that though the images specified by `--all-platform` and `--platform` are c
 
 ### Dump log of accessed files during optimization (`--record-out`)
 
-You can dump the information of which files are accesssed during optimization, using `--record-out` flag.
+You can dump the information of which files are accessed during optimization, using `--record-out` flag.
 
 For example, the following dumps logs of files accessed during running `ls` in `ubuntu:24.04`.
 

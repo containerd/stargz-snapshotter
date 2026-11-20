@@ -218,7 +218,7 @@ var OptimizeCommand = &cli.Command{
 				esgzOpts = append(esgzOpts, estargz.WithCompressionLevel(clicontext.Int("estargz-compression-level")))
 				f = estargzconvert.LayerConvertWithLayerAndCommonOptsFunc(esgzOptsPerLayer, esgzOpts...)
 			} else if clicontext.Bool("reuse") {
-				// We require that the layer conversion is triggerd for each layer
+				// We require that the layer conversion is triggered for each layer
 				// to make sure that "finalize" function has the information of all layers.
 				return fmt.Errorf("\"estargz-external-toc\" can't be used with \"reuse\" flag")
 			} else {

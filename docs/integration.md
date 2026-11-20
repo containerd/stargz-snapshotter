@@ -59,7 +59,7 @@ $ k3d cluster delete mycluster
 
 There is no node image includes stargz snapshotter by default as of now so you need to manually customize the nodes.
 
-A brief instrcution of enabling stargz snapshotter is the following:
+A brief instruction of enabling stargz snapshotter is the following:
 
 - Create a Kubernetes cluster using containerd-supported Linux node images like `ubuntu_containerd`. containerd must be >= v1.4.2.
 - SSH into each node and install stargz snapshotter following [`./INSTALL.md`](./INSTALL.md#install-stargz-snapshotter-for-containerd-with-systemd). You need this installation on all worker nodes.
@@ -69,7 +69,7 @@ A brief instrcution of enabling stargz snapshotter is the following:
 
 There is no AMI includes stargz snapshotter by default as of now so you need to manually customize the nodes.
 
-A brief instrcution of enabling stargz snapshotter is the following:
+A brief instruction of enabling stargz snapshotter is the following:
 
 - Create a Kubernetes cluster using containerd-supported Linux AMIs. containerd must be >= v1.4.2. e.g. Amazon EKS optimized Amazon Linux AMIs with [containerd runtime bootstrap flag](https://docs.aws.amazon.com/eks/latest/userguide/eks-optimized-ami.html).
 - SSH into each node and install stargz snapshotter following [`./INSTALL.md`](./INSTALL.md#install-stargz-snapshotter-for-containerd-with-systemd). You need this installation on all worker nodes.

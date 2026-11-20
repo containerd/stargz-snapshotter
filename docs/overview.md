@@ -85,7 +85,7 @@ This directory is hidden from `getdents(2)` so you can't see this with `ls -a /`
 Instead, you can directly access the directory by specifying the path (`/.stargz-snapshotter`).
 
 The state directory contains JSON-formatted metadata files for each layer.
-In the following example, metadata JSON files for overlayed 7 layers are visible.
+In the following example, metadata JSON files for overlaid 7 layers are visible.
 In each metadata JSON file, the following fields are contained:
 
 - `digest` contains the layer digest. This is the same value as that in the image's manifest.
@@ -250,7 +250,7 @@ The default path where containerd-stargz-grpc serves the CRI Image Service API i
 You can also change this path using `listen_path` field.
 
 > Note that if you enabled the FUSE manager and CRI-based authentication together, `listen_path` is a mandatory field with some caveats:
-> - This path must be different from the FUSE manager's socket path (`/run/containerd-stargz-grpc/fuse-manager.sock`) because they have different lifecycle. Specifically, the CRI socket is recreted on each reload of the configuration to the FUSE manager.
+> - This path must be different from the FUSE manager's socket path (`/run/containerd-stargz-grpc/fuse-manager.sock`) because they have different lifecycle. Specifically, the CRI socket is recreated on each reload of the configuration to the FUSE manager.
 > - containerd-stargz-grpc's socket path (`/run/containerd-stargz-grpc/containerd-stargz-grpc.sock`) can't be used as `listen_path` because the CRI socket is served by the FUSE manager process (not containerd-stargz-grpc process).
 
 #### kubeconfig-based authentication
@@ -322,9 +322,9 @@ The config file can be passed to stargz snapshotter using `containerd-stargz-grp
 Stargz Snapshotter supports 2 ways to store the filesystem's metadata (e.g. each file's type, size, mode, etc.).
 
 - `memory` (default): The metadata is stored in memory. The memory consumption increases as the number of images managed by Stargz Snapshotter increases. It has lower latency on container creation and metadata lookup.
-- `db`: The metadata is stored on disk. Lower memory consumption can be expected at the expence of disk overhead on storing and looking up of each file's metadata.
+- `db`: The metadata is stored on disk. Lower memory consumption can be expected at the expense of disk overhead on storing and looking up of each file's metadata.
 
-If stargz-snapshotter's memory consumption is too large because of the `memory` mode of the metadata store, consider enabling the `db` mode. For example, the following conifguration enables the `db` mode.
+If stargz-snapshotter's memory consumption is too large because of the `memory` mode of the metadata store, consider enabling the `db` mode. For example, the following configuration enables the `db` mode.
 
 ```toml
 metadata_store = "db"

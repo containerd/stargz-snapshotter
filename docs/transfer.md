@@ -20,7 +20,7 @@ And this is enabled in different settings depending on the containerd version.
 
 Before containerd v2.1, `disable_snapshot_annotations = false` in containerd's config TOML was a mandatory field to enable Stargz Snapshotter in CRI.
 In containerd v2.1, `disable_snapshot_annotations = false` field can still be used to enable Stargz Snapshotter and containerd disables Transfer Service when this field is detected.
-If you want to enable Transfer Service, you need to remove `disable_snapshot_annotations = false` field and apply the configuration explaind in this document.
+If you want to enable Transfer Service, you need to remove `disable_snapshot_annotations = false` field and apply the configuration explained in this document.
 
 ## How to enable Stargz Snapshotter when Transfer Service is enabled?
 
