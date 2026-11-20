@@ -28,14 +28,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/containerd/containerd/v2/pkg/reference"
 	"github.com/containerd/stargz-snapshotter/fs/source"
+	"github.com/containerd/stargz-snapshotter/service/resolver"
 	rhttp "github.com/hashicorp/go-retryablehttp"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -561,6 +565,238 @@ func (r *retryRoundTripper) RoundTrip(req *http.Request) (res *http.Response, er
 		}
 	}
 	return
+}
+
+// registryHostsFuncs are the RegistryHosts used by the snapshotter. Unlike
+// sampleRoundTripper, they send requests through the real retryablehttp client,
+// which follows redirects unless told otherwise.
+var registryHostsFuncs = map[string]func() source.RegistryHosts{
+	"config": func() source.RegistryHosts {
+		return resolver.RegistryHostsFromConfig(resolver.Config{})
+	},
+	"cri": func() source.RegistryHosts {
+		return resolver.RegistryHostsFromCRIConfig(context.Background(), resolver.Registry{})
+	},
+}
+
+// testBlobServer is a registry that serves a single blob, either directly or
+// by redirecting (307) to a separate blob store (e.g. Amazon ECR redirecting
+// to S3).
+type testBlobServer struct {
+	blob     []byte
+	blobPath string
+	redirect bool
+
+	// expired makes the blob store reject the first redirected URL with 403.
+	expired atomic.Bool
+
+	registryReqs atomic.Int64
+	storeReqs    atomic.Int64
+
+	registry *httptest.Server
+	store    *httptest.Server
+}
+
+func newTestBlobServer(t *testing.T, redirect bool) (*testBlobServer, reference.Spec) {
+	s := &testBlobServer{
+		blob:     bytes.Repeat([]byte("0123456789"), 100),
+		redirect: redirect,
+	}
+	s.blobPath = "/v2/library/test/blobs/" + digest.FromBytes(s.blob).String()
+	s.store = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.storeReqs.Add(1)
+		if s.expired.Load() && r.URL.Path == "/blobs/1" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(s.blob))
+	}))
+	t.Cleanup(s.store.Close)
+	s.registry = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != s.blobPath {
+			http.NotFound(w, r)
+			return
+		}
+		n := s.registryReqs.Add(1)
+		if !s.redirect {
+			http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(s.blob))
+			return
+		}
+		http.Redirect(w, r, fmt.Sprintf("%s/blobs/%d", s.store.URL, n), http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(s.registry.Close)
+
+	refspec, err := reference.Parse(strings.TrimPrefix(s.registry.URL, "http://") + "/library/test")
+	if err != nil {
+		t.Fatalf("failed to parse reference: %v", err)
+	}
+	return s, refspec
+}
+
+var testRanges = []region{{0, 99}, {100, 299}, {500, 999}}
+
+func readRanges(t *testing.T, f *httpFetcher, blob []byte) {
+	for _, reg := range testRanges {
+		mr, err := f.fetch(context.Background(), []region{reg}, true)
+		if err != nil {
+			t.Fatalf("failed to fetch %+v: %v", reg, err)
+		}
+		gotReg, r, err := mr.Next()
+		if err != nil {
+			t.Fatalf("failed to read %+v: %v", reg, err)
+		}
+		got, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatalf("failed to read %+v: %v", reg, err)
+		}
+		mr.Close()
+		if gotReg != reg || !bytes.Equal(got, blob[reg.b:reg.e+1]) {
+			t.Fatalf("unexpected data for %+v: got region %+v, %q", reg, gotReg, got)
+		}
+	}
+}
+
+// TestRedirectedBlob checks that the blob store URL a registry redirects to is
+// cached, so range requests don't go back to the registry each time.
+func TestRedirectedBlob(t *testing.T) {
+	for name, hosts := range registryHostsFuncs {
+		t.Run(name, func(t *testing.T) {
+			s, refspec := newTestBlobServer(t, true)
+			f, size, err := newHTTPFetcher(context.Background(), &fetcherConfig{
+				hosts:   hosts(),
+				refspec: refspec,
+				desc:    ocispec.Descriptor{Digest: digest.FromBytes(s.blob)},
+			})
+			if err != nil {
+				t.Fatalf("failed to resolve blob: %v", err)
+			}
+			if size != int64(len(s.blob)) {
+				t.Errorf("unexpected size %d; want %d", size, len(s.blob))
+			}
+			if want := s.store.URL + "/blobs/1"; f.url != want {
+				t.Errorf("unexpected fetcher URL %q; want %q", f.url, want)
+			}
+			readRanges(t, f, s.blob)
+			if err := f.check(); err != nil {
+				t.Fatalf("failed to check fetcher: %v", err)
+			}
+			if got := s.registryReqs.Load(); got != 1 {
+				t.Errorf("registry got %d blob requests; want 1", got)
+			}
+			// HEAD from getSize, one per range, one from check
+			if got, want := s.storeReqs.Load(), int64(len(testRanges)+2); got != want {
+				t.Errorf("blob store got %d requests; want %d", got, want)
+			}
+		})
+	}
+}
+
+// TestRedirectedBlobRefresh checks that an expired blob store URL (403) is
+// refreshed through the registry once and the read then succeeds.
+func TestRedirectedBlobRefresh(t *testing.T) {
+	for name, hosts := range registryHostsFuncs {
+		t.Run(name, func(t *testing.T) {
+			s, refspec := newTestBlobServer(t, true)
+			f, _, err := newHTTPFetcher(context.Background(), &fetcherConfig{
+				hosts:   hosts(),
+				refspec: refspec,
+				desc:    ocispec.Descriptor{Digest: digest.FromBytes(s.blob)},
+			})
+			if err != nil {
+				t.Fatalf("failed to resolve blob: %v", err)
+			}
+			s.expired.Store(true)
+			readRanges(t, f, s.blob)
+			if want := s.store.URL + "/blobs/2"; f.url != want {
+				t.Errorf("unexpected fetcher URL %q; want %q", f.url, want)
+			}
+			if got := s.registryReqs.Load(); got != 2 {
+				t.Errorf("registry got %d blob requests; want 2", got)
+			}
+		})
+	}
+}
+
+// TestDirectBlob checks that registries serving blobs directly (2xx) are
+// still used for every request.
+func TestDirectBlob(t *testing.T) {
+	for name, hosts := range registryHostsFuncs {
+		t.Run(name, func(t *testing.T) {
+			s, refspec := newTestBlobServer(t, false)
+			f, _, err := newHTTPFetcher(context.Background(), &fetcherConfig{
+				hosts:   hosts(),
+				refspec: refspec,
+				desc:    ocispec.Descriptor{Digest: digest.FromBytes(s.blob)},
+			})
+			if err != nil {
+				t.Fatalf("failed to resolve blob: %v", err)
+			}
+			if want := s.registry.URL + s.blobPath; f.url != want {
+				t.Errorf("unexpected fetcher URL %q; want %q", f.url, want)
+			}
+			readRanges(t, f, s.blob)
+			if err := f.check(); err != nil {
+				t.Fatalf("failed to check fetcher: %v", err)
+			}
+			// redirect, HEAD from getSize, one per range, one from check
+			if got, want := s.registryReqs.Load(), int64(len(testRanges)+3); got != want {
+				t.Errorf("registry got %d blob requests; want %d", got, want)
+			}
+			if got := s.storeReqs.Load(); got != 0 {
+				t.Errorf("blob store got %d requests; want 0", got)
+			}
+		})
+	}
+}
+
+// TestRegistryClientFollowsRedirect checks that other users of the registry
+// host client (e.g. containerd's fetcher and token auth) still follow
+// redirects, and only requests marked with WithNoFollowRedirect stop at the 3xx.
+func TestRegistryClientFollowsRedirect(t *testing.T) {
+	for name, hosts := range registryHostsFuncs {
+		t.Run(name, func(t *testing.T) {
+			s, refspec := newTestBlobServer(t, true)
+			reghosts, err := hosts()(refspec)
+			if err != nil || len(reghosts) == 0 {
+				t.Fatalf("failed to get registry hosts: %v", err)
+			}
+			client := reghosts[0].Client
+
+			get := func(ctx context.Context, do func(*http.Request) (*http.Response, error)) *http.Response {
+				req, err := http.NewRequestWithContext(ctx, "GET", s.registry.URL+s.blobPath, nil)
+				if err != nil {
+					t.Fatalf("failed to make request: %v", err)
+				}
+				req.Header.Set("Range", "bytes=0-1")
+				res, err := do(req)
+				if err != nil {
+					t.Fatalf("failed to request: %v", err)
+				}
+				io.Copy(io.Discard, res.Body)
+				res.Body.Close()
+				return res
+			}
+
+			if res := get(context.Background(), client.Do); res.StatusCode != http.StatusPartialContent {
+				t.Errorf("unexpected status %d; want %d", res.StatusCode, http.StatusPartialContent)
+			}
+			if got := s.storeReqs.Load(); got != 1 {
+				t.Errorf("blob store got %d requests; want 1", got)
+			}
+
+			// redirect() sends requests through the client's transport, as here.
+			res := get(source.WithNoFollowRedirect(context.Background()), client.Transport.RoundTrip)
+			if res.StatusCode != http.StatusTemporaryRedirect {
+				t.Errorf("unexpected status %d; want %d", res.StatusCode, http.StatusTemporaryRedirect)
+			}
+			if loc := res.Header.Get("Location"); !strings.HasPrefix(loc, s.store.URL) {
+				t.Errorf("unexpected Location %q; want prefix %q", loc, s.store.URL)
+			}
+			if got := s.storeReqs.Load(); got != 1 {
+				t.Errorf("blob store got %d requests; want 1", got)
+			}
+		})
+	}
 }
 
 type hostFactory func(tr http.RoundTripper) docker.RegistryHost

@@ -351,6 +351,12 @@ func redirect(ctx context.Context, blobURL string, tr http.RoundTripper, timeout
 	// We use GET request for redirect.
 	// gcr.io returns 200 on HEAD without Location header (2020).
 	// ghcr.io returns 200 on HEAD without Location header (2020).
+	// Don't let the HTTP client follow the redirect: we need the 3xx and its
+	// Location so later range requests go straight to the blob store instead
+	// of going through the registry (and its redirect) every time. For
+	// example, Amazon ECR redirects blob requests to S3 and each request to
+	// the registry is a GetDownloadUrlForLayer API call.
+	ctx = source.WithNoFollowRedirect(ctx)
 	req, err := http.NewRequestWithContext(ctx, "GET", blobURL, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to make request to the registry: %w", err)
