@@ -87,7 +87,7 @@ type snapshotterConfig struct {
 	// DebugAddress is a Unix domain socket address where the snapshotter exposes /debug/ endpoints.
 	DebugAddress string `toml:"debug_address" json:"debug_address"`
 
-	// IPFS is a flag to enbale lazy pulling from IPFS.
+	// IPFS is a flag to enable lazy pulling from IPFS.
 	IPFS bool `toml:"ipfs" json:"ipfs"`
 
 	// MetadataStore is the type of the metadata store to use.
@@ -138,7 +138,7 @@ func main() {
 		config snapshotterConfig
 	)
 	// Streams log of standard lib (go-fuse uses this) into debug log
-	// Snapshotter should use "github.com/containerd/log" otherwize
+	// Snapshotter should use "github.com/containerd/log" otherwise
 	// logs are always printed as "debug" mode.
 	golog.SetOutput(log.G(ctx).WriterLevel(log.DebugLevel))
 

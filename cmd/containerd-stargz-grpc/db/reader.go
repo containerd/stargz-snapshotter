@@ -136,7 +136,7 @@ func NewReader(db *bolt.DB, sr *io.SectionReader, opts ...metadata.Option) (meta
 	defer tocR.Close()
 	r := &reader{sr: sr, db: db, initG: new(errgroup.Group), decompressor: decompressor}
 	if err := r.init(tocR, rOpts); err != nil {
-		return nil, fmt.Errorf("failed to initialize matadata: %w", err)
+		return nil, fmt.Errorf("failed to initialize metadata: %w", err)
 	}
 	return r, nil
 }
@@ -917,14 +917,14 @@ func (fr *fileReader) ReadAt(p []byte, off int64) (n int, err error) {
 	case 1:
 		ent = fr.ents[0]
 		if ent.chunkOffset > off {
-			return 0, fmt.Errorf("no chunk coveres offset %d", off)
+			return 0, fmt.Errorf("no chunk covers offset %d", off)
 		}
 	default:
 		i := sort.Search(len(fr.ents), func(i int) bool {
 			return fr.ents[i].chunkOffset > off
 		})
 		if i == 0 {
-			return 0, fmt.Errorf("no chunk coveres offset %d", off)
+			return 0, fmt.Errorf("no chunk covers offset %d", off)
 		}
 		ent = fr.ents[i-1]
 	}

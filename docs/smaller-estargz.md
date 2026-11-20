@@ -78,4 +78,4 @@ fetching sha256:c07a44b9... application/vnd.oci.image.config.v1+json
 stargz on /var/lib/containerd-stargz-grpc/snapshotter/snapshots/1/fs type fuse.rawBridge (rw,nodev,relatime,user_id=0,group_id=0,allow_other)
 ```
 
-> NOTE: This flag creates an eStargz image with newly-added `innerOffset` funtionality of eStargz. Stargz Snapshotter < v0.13.0 cannot perform lazy pulling for the images created with this flag.
+> NOTE: This flag creates an eStargz image with newly-added `innerOffset` functionality of eStargz. Stargz Snapshotter < v0.13.0 cannot perform lazy pulling for the images created with this flag.

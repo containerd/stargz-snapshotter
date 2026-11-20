@@ -1,6 +1,6 @@
 # Running containers on IPFS (experimental)
 
-:information_source: This document isn't for Kubernetes environemnt. For information about node-to-node image sharing on Kubernetes, please refer to [the docs in nerdctl project](https://github.com/containerd/nerdctl/tree/main/examples/nerdctl-ipfs-registry-kubernetes).
+:information_source: This document isn't for Kubernetes environment. For information about node-to-node image sharing on Kubernetes, please refer to [the docs in nerdctl project](https://github.com/containerd/nerdctl/tree/main/examples/nerdctl-ipfs-registry-kubernetes).
 
 You can run OCI-compatible container images on IPFS with lazy pulling.
 

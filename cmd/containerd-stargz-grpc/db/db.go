@@ -31,7 +31,7 @@ import (
 // - filesystems
 //   - *filesystem id*                    : bucket for each filesystem keyed by a unique string.
 //     - nodes
-//       - *node id*                      : bucket for each node keyed by a uniqe uint64.
+//       - *node id*                      : bucket for each node keyed by a unique uint64.
 //         - size : <varint>              : size of the regular node.
 //         - modtime : <varint>           : modification time of the node.
 //         - linkName : <string>          : link target of symlink
@@ -46,7 +46,7 @@ import (
 //           - *key* : <string>           : map of key to value string
 //         - numLink : <varint>           : the number of links pointing to this node.
 //     - metadata
-//       - *node id*                      : bucket for each node keyed by a uniqe uint64.
+//       - *node id*                      : bucket for each node keyed by a unique uint64.
 //         - childName : <string>         : base name of the first child
 //         - childID   : <node id>        : id of the first child
 //         - childrenExtra                : 2nd and following child nodes of directory.
