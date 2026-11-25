@@ -11,13 +11,13 @@ require (
 	github.com/containerd/plugin v1.1.0
 	github.com/containerd/stargz-snapshotter/estargz v0.19.1
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v29.9.3+incompatible
+	github.com/docker/cli v29.10.0+incompatible
 	github.com/docker/go-metrics v0.1.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
 	github.com/hanwen/go-fuse/v2 v2.12.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
-	github.com/klauspost/compress v1.20.3
+	github.com/klauspost/compress v1.20.5
 	github.com/moby/sys/mountinfo v0.7.3
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
